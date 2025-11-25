@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -8,6 +10,7 @@ from database import init_db, get_db, Host, PingRecord, Alert, SystemConfig
 from ping_service import PingService
 from scheduler import scheduler
 import uvicorn
+import os
 
 app = FastAPI(title="Ping监控系统", version="1.0.0")
 
@@ -228,6 +231,23 @@ async def ping_now(host_id: int, background: bool = False, background_tasks: Bac
         **result
     }
 
+@app.post("/api/ping-all")
+async def ping_all(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """立即ping所有启用的主机（后台异步执行）"""
+    hosts = db.query(Host).filter(Host.enabled == True).all()
+    if not hosts:
+        raise HTTPException(status_code=404, detail="没有启用的主机")
+    
+    # 为每个主机添加后台任务
+    for host in hosts:
+        background_tasks.add_task(_do_ping, host.id, host.address, host.name)
+    
+    return {
+        "message": f"已启动 {len(hosts)} 个主机的Ping任务",
+        "count": len(hosts),
+        "hosts": [host.name for host in hosts]
+    }
+
 @app.get("/api/ping/logs")
 async def get_ping_logs(
     host_id: Optional[int] = None,
@@ -360,10 +380,21 @@ async def get_dashboard(db: Session = Depends(get_db)):
         "host_status": host_status
     }
 
-@app.get("/")
-async def root():
-    """根路径"""
-    return {"message": "Ping监控系统API", "version": "1.0.0"}
+# 静态文件服务（生产环境）
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "../frontend/dist")
+if os.path.exists(FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+    
+    @app.get("/")
+    async def serve_frontend():
+        """服务前端页面"""
+        index_file = os.path.join(FRONTEND_DIST, "index.html")
+        return FileResponse(index_file)
+else:
+    @app.get("/")
+    async def root():
+        """根路径"""
+        return {"message": "Ping监控系统API", "version": "1.0.0"}
 
 # ==================== 系统配置API ====================
 

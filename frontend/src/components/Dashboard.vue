@@ -61,9 +61,14 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span style="font-weight: bold">主机状态</span>
-          <el-button type="primary" size="small" @click="loadData" :loading="loading">
-            <el-icon><Refresh /></el-icon> 刷新
-          </el-button>
+          <div>
+            <el-button type="success" size="small" @click="pingAllHosts" :loading="pingAllLoading" style="margin-right: 10px">
+              <el-icon><Promotion /></el-icon> 立即Ping全部
+            </el-button>
+            <el-button type="primary" size="small" @click="loadData" :loading="loading">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+          </div>
         </div>
       </template>
       <el-table :data="dashboard.host_status" style="width: 100%">
@@ -134,6 +139,7 @@ import api from '../api'
 import * as echarts from 'echarts'
 
 const loading = ref(false)
+const pingAllLoading = ref(false)
 const dashboard = reactive({
   total_hosts: 0,
   enabled_hosts: 0,
@@ -347,6 +353,22 @@ const pingHost = async (host) => {
     }, 3000)
   } catch (error) {
     ElMessage.error(`Ping失败: ${error.response?.data?.detail || '网络错误'}`)
+  }
+}
+
+const pingAllHosts = async () => {
+  pingAllLoading.value = true
+  try {
+    const result = await api.pingAll()
+    ElMessage.success(`已启动 ${result.count} 个主机的Ping任务`)
+    // 5秒后刷新数据（给所有主机足够的ping时间）
+    setTimeout(() => {
+      loadData()
+      pingAllLoading.value = false
+    }, 5000)
+  } catch (error) {
+    pingAllLoading.value = false
+    ElMessage.error(`批量Ping失败: ${error.response?.data?.detail || '网络错误'}`)
   }
 }
 

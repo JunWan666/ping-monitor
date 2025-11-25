@@ -41,6 +41,7 @@ export default {
     const params = background ? { background: true } : {}
     return api.post(`/ping/${id}`, null, { params })
   },
+  pingAll: () => api.post('/ping-all'),
   getPingLogs: (hostId, page = 1, pageSize = 20) => {
     const params = { page, page_size: pageSize }
     if (hostId) params.host_id = hostId

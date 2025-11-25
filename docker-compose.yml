@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  ping-monitor:
+    build: .
+    container_name: ping-monitor
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - ping-network
+
+networks:
+  ping-network:
+    driver: bridge
