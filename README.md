@@ -73,17 +73,17 @@ ping-monitor/
 
 **Windows (PowerShell):**
 ```powershell
-docker run -d --name ping-monitor -p 8000:8000 -v "$PWD/data:/app/data" --restart unless-stopped tannic666/ping-monitor:latest
+docker run -d --name ping-monitor -p 8000:8000 -v "$PWD/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped tannic666/ping-monitor:latest
 ```
 
 **Windows (CMD):**
 ```cmd
-docker run -d --name ping-monitor -p 8000:8000 -v "%cd%/data:/app/data" --restart unless-stopped tannic666/ping-monitor:latest
+docker run -d --name ping-monitor -p 8000:8000 -v "%cd%/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped tannic666/ping-monitor:latest
 ```
 
 **Linux / macOS:**
 ```bash
-docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" --restart unless-stopped tannic666/ping-monitor:latest
+docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped tannic666/ping-monitor:latest
 ```
 
 #### 4.1.2 本地构建镜像
@@ -94,7 +94,7 @@ docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" --rest
 docker build -t ping-monitor .
 
 # 运行容器
-docker run -d --name ping-monitor -p 8000:8000 -v "$PWD/data:/app/data" --restart unless-stopped ping-monitor
+docker run -d --name ping-monitor -p 8000:8000 -v "$PWD/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped ping-monitor
 ```
 
 **Windows (CMD):**
@@ -103,7 +103,7 @@ docker run -d --name ping-monitor -p 8000:8000 -v "$PWD/data:/app/data" --restar
 docker build -t ping-monitor .
 
 # 运行容器
-docker run -d --name ping-monitor -p 8000:8000 -v "%cd%/data:/app/data" --restart unless-stopped ping-monitor
+docker run -d --name ping-monitor -p 8000:8000 -v "%cd%/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped ping-monitor
 ```
 
 **Linux / macOS:**
@@ -112,7 +112,7 @@ docker run -d --name ping-monitor -p 8000:8000 -v "%cd%/data:/app/data" --restar
 docker build -t ping-monitor .
 
 # 运行容器
-docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" --restart unless-stopped ping-monitor
+docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped ping-monitor
 ```
 
 #### 4.1.3 使用 docker-compose（推荐）

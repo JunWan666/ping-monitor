@@ -9,6 +9,13 @@ export default defineConfig({
     // 禁用 Service Worker
     headers: {
       'Service-Worker-Allowed': '/'
+    },
+    // 开发环境代理配置
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      }
     }
   },
   // 开发模式下禁用 PWA
