@@ -91,9 +91,14 @@
         </div>
       </template>
       
-      <el-table :data="filteredHostStatus" style="width: 100%">
-        <el-table-column prop="name" label="主机名称" width="150" />
-        <el-table-column label="地址" width="200">
+      <el-table :data="filteredHostStatus" style="width: 100%" :row-class-name="getRowClassName">
+        <el-table-column label="序号" width="80" align="center" header-align="center">
+          <template #default="{ $index }">
+            {{ (currentPage - 1) * pageSize + $index + 1 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="主机名称" width="150" align="center" header-align="center" />
+        <el-table-column label="地址" width="200" align="center" header-align="center">
           <template #default="{ row }">
             <span 
               @click="copyAddress(row.address)" 
@@ -111,32 +116,59 @@
             </el-icon>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="100" align="center" header-align="center">
+          <template #header>
+            <div @click="handleSort('status')" style="cursor: pointer; user-select: none; position: relative; display: inline-block;">
+              <span>状态</span>
+              <el-icon style="position: absolute; right: -18px; top: 50%; transform: translateY(-50%);">
+                <ArrowUp v-if="sortColumn === 'status' && sortOrder === 'asc'" />
+                <ArrowDown v-else />
+              </el-icon>
+            </div>
+          </template>
           <template #default="{ row }">
             <el-tag v-if="row.status === '正常'" type="success">{{ row.status }}</el-tag>
             <el-tag v-else-if="row.status === '异常'" type="danger">{{ row.status }}</el-tag>
             <el-tag v-else type="info">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="丢包率" width="120">
+        <el-table-column label="丢包率" width="120" align="center" header-align="center">
+          <template #header>
+            <div @click="handleSort('packet_loss')" style="cursor: pointer; user-select: none; position: relative; display: inline-block;">
+              <span>丢包率</span>
+              <el-icon style="position: absolute; right: -18px; top: 50%; transform: translateY(-50%);">
+                <ArrowUp v-if="sortColumn === 'packet_loss' && sortOrder === 'asc'" />
+                <ArrowDown v-else />
+              </el-icon>
+            </div>
+          </template>
           <template #default="{ row }">
             <span v-if="row.packet_loss !== null">{{ row.packet_loss }}%</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="平均延迟" width="120">
+        <el-table-column label="平均延迟" width="120" align="center" header-align="center">
+          <template #header>
+            <div @click="handleSort('avg_rtt')" style="cursor: pointer; user-select: none; position: relative; display: inline-block;">
+              <span>平均延迟</span>
+              <el-icon style="position: absolute; right: -18px; top: 50%; transform: translateY(-50%);">
+                <ArrowUp v-if="sortColumn === 'avg_rtt' && sortOrder === 'asc'" />
+                <ArrowDown v-else />
+              </el-icon>
+            </div>
+          </template>
           <template #default="{ row }">
             <span v-if="row.avg_rtt !== null">{{ row.avg_rtt }}ms</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="最后检查" min-width="180">
+        <el-table-column label="最后检查" min-width="180" align="center" header-align="center">
           <template #default="{ row }">
             <span v-if="row.last_check">{{ formatTime(row.last_check) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="200" align="center" header-align="center">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="viewChart(row)">查看图表</el-button>
             <el-button type="success" size="small" @click="pingHost(row)">立即Ping</el-button>
@@ -178,6 +210,8 @@ const searchKeyword = ref('')
 const statusFilter = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
+const sortColumn = ref('status') // 默认按状态排序
+const sortOrder = ref('desc') // 默认降序(异常在前)
 const dashboard = reactive({
   total_hosts: 0,
   enabled_hosts: 0,
@@ -198,6 +232,40 @@ const onlineRate = computed(() => {
   return Math.round((online / dashboard.total_hosts) * 100)
 })
 
+// 排序函数
+const sortHosts = (hosts) => {
+  if (!sortColumn.value) return hosts
+  
+  return [...hosts].sort((a, b) => {
+    let aVal, bVal
+    
+    switch (sortColumn.value) {
+      case 'status':
+        // 异常 > 正常 > 未知
+        const statusOrder = { '异常': 3, '正常': 2, '未知': 1 }
+        aVal = statusOrder[a.status] || 0
+        bVal = statusOrder[b.status] || 0
+        break
+      case 'packet_loss':
+        aVal = a.packet_loss ?? -1
+        bVal = b.packet_loss ?? -1
+        break
+      case 'avg_rtt':
+        aVal = a.avg_rtt ?? -1
+        bVal = b.avg_rtt ?? -1
+        break
+      default:
+        return 0
+    }
+    
+    if (sortOrder.value === 'asc') {
+      return aVal - bVal
+    } else {
+      return bVal - aVal
+    }
+  })
+}
+
 // 搜索和筛选后的所有主机
 const filteredAllHosts = computed(() => {
   let result = [...dashboard.host_status]
@@ -216,6 +284,9 @@ const filteredAllHosts = computed(() => {
     result = result.filter(host => host.status === statusFilter.value)
   }
   
+  // 排序
+  result = sortHosts(result)
+  
   return result
 })
 
@@ -233,6 +304,23 @@ const handleSizeChange = (val) => {
 
 const handleCurrentChange = (val) => {
   currentPage.value = val
+}
+
+// 排序处理
+const handleSort = (column) => {
+  if (sortColumn.value === column) {
+    // 切换排序顺序
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    // 新列，默认降序
+    sortColumn.value = column
+    sortOrder.value = 'desc'
+  }
+}
+
+// 行样式处理
+const getRowClassName = ({ row }) => {
+  return row.status === '异常' ? 'error-row' : ''
 }
 
 const loadData = async () => {
@@ -593,3 +681,13 @@ onBeforeUnmount(() => {
   }
 })
 </script>
+
+<style scoped>
+:deep(.error-row) {
+  background-color: #fef0f0 !important;
+}
+
+:deep(.error-row:hover > td) {
+  background-color: #fde2e2 !important;
+}
+</style>

@@ -39,9 +39,9 @@
 
       <el-table :data="filteredHosts" style="width: 100%" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" />
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="主机名称" width="150" />
-        <el-table-column label="地址" width="200">
+        <el-table-column prop="id" label="ID" width="80" align="center" header-align="center" />
+        <el-table-column prop="name" label="主机名称" width="150" align="center" header-align="center" />
+        <el-table-column label="地址" width="200" align="center" header-align="center">
           <template #default="{ row }">
             <span 
               @click="copyAddress(row.address)" 
@@ -59,30 +59,30 @@
             </el-icon>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="100" align="center" header-align="center">
           <template #default="{ row }">
             <el-tag v-if="row.status === '正常'" type="success">{{ row.status }}</el-tag>
             <el-tag v-else-if="row.status === '异常'" type="danger">{{ row.status }}</el-tag>
             <el-tag v-else type="info">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="150" />
-        <el-table-column label="告警阈值" width="120">
+        <el-table-column prop="description" label="描述" min-width="150" align="center" header-align="center" />
+        <el-table-column label="告警阈值" width="120" align="center" header-align="center">
           <template #default="{ row }">
             {{ row.alert_threshold }}%
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="100">
+        <el-table-column label="启用" width="100" align="center" header-align="center">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="updateHostStatus(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="180">
+        <el-table-column label="创建时间" width="180" align="center" header-align="center">
           <template #default="{ row }">
             {{ new Date(row.created_at).toLocaleString() }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right" align="center" header-align="center">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="pingHost(row)">Ping</el-button>
             <el-button type="warning" size="small" @click="showEditDialog(row)">编辑</el-button>

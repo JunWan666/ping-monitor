@@ -139,13 +139,13 @@
         </template>
 
         <el-table :data="pingLogs" style="width: 100%" max-height="600">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column label="主机" width="150">
+          <el-table-column prop="id" label="ID" width="80" align="center" header-align="center" />
+          <el-table-column label="主机" width="150" align="center" header-align="center">
             <template #default="{ row }">
               {{ row.host_name }}
             </template>
           </el-table-column>
-          <el-table-column label="地址" width="200">
+          <el-table-column label="地址" width="200" align="center" header-align="center">
             <template #default="{ row }">
               <span 
                 @click="copyAddress(row.host_address)" 
@@ -163,30 +163,30 @@
               </el-icon>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="100">
+          <el-table-column label="状态" width="100" align="center" header-align="center">
             <template #default="{ row }">
               <el-tag :type="row.status === '正常' ? 'success' : 'danger'">
                 {{ row.status }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="packet_sent" label="发送" width="80" />
-          <el-table-column prop="packet_received" label="接收" width="80" />
-          <el-table-column label="丢包率" width="100">
+          <el-table-column prop="packet_sent" label="发送" width="80" align="center" header-align="center" />
+          <el-table-column prop="packet_received" label="接收" width="80" align="center" header-align="center" />
+          <el-table-column label="丢包率" width="100" align="center" header-align="center">
             <template #default="{ row }">
               <el-tag :type="row.packet_loss > 20 ? 'danger' : row.packet_loss > 0 ? 'warning' : 'success'">
                 {{ row.packet_loss }}%
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="延迟(ms)" width="180">
+          <el-table-column label="延迟(ms)" width="180" align="center" header-align="center">
             <template #default="{ row }">
               最小: {{ row.min_rtt || '-' }} / 
               平均: {{ row.avg_rtt || '-' }} / 
               最大: {{ row.max_rtt || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="检测时间" width="180">
+          <el-table-column label="检测时间" width="180" align="center" header-align="center">
             <template #default="{ row }">
               {{ new Date(row.check_time).toLocaleString() }}
             </template>

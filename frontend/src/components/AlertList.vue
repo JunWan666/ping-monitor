@@ -14,23 +14,23 @@
       </template>
 
       <el-table :data="alerts" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="host_name" label="主机名称" width="150" />
-        <el-table-column label="告警类型" width="120">
+        <el-table-column prop="id" label="ID" width="60" align="center" header-align="center" />
+        <el-table-column prop="host_name" label="主机名称" width="150" align="center" header-align="center" />
+        <el-table-column label="告警类型" width="120" align="center" header-align="center">
           <template #default="{ row }">
             <el-tag v-if="row.alert_type === 'packet_loss'" type="warning">丢包告警</el-tag>
             <el-tag v-else-if="row.alert_type === 'unreachable'" type="danger">主机不可达</el-tag>
             <el-tag v-else type="info">{{ row.alert_type }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="message" label="告警信息" min-width="300" />
-        <el-table-column label="发送状态" width="100">
+        <el-table-column prop="message" label="告警信息" min-width="300" align="center" header-align="center" />
+        <el-table-column label="发送状态" width="100" align="center" header-align="center">
           <template #default="{ row }">
             <el-tag v-if="row.is_sent" type="success">已发送</el-tag>
             <el-tag v-else type="info">未发送</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="告警时间" width="180">
+        <el-table-column label="告警时间" width="180" align="center" header-align="center">
           <template #default="{ row }">
             {{ new Date(row.created_at).toLocaleString() }}
           </template>
