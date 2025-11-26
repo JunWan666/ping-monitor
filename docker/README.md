@@ -8,6 +8,8 @@
 - `docker-compose.yml` - Docker Compose配置文件
 - `.dockerignore` - Docker构建时忽略的文件
 - `docker-start.bat` - Windows一键启动脚本
+- `build_and_push.py` - 多架构镜像构建和推送脚本
+- `build-and-push.bat` - Windows下运行构建脚本的批处理文件
 
 ## 快速启动
 
@@ -48,6 +50,35 @@ docker run -d --name ping-monitor \
   --restart unless-stopped \
   ping-monitor:local
 ```
+
+## 构建和推送多架构镜像
+
+本项目提供了自动化脚本来构建和推送支持多架构（AMD64和ARM64）的Docker镜像。
+
+### 使用方法
+
+1. 确保已安装Docker Desktop并启用了Buildx功能
+2. 在Windows环境下，双击运行 `build-and-push.bat` 或在命令行中执行：
+   ```
+   cd docker
+   build-and-push.bat
+   ```
+3. 在Linux/Mac环境下，直接运行Python脚本：
+   ```
+   cd docker
+   python3 build_and_push.py
+   ```
+4. 按照提示输入Docker Hub用户名、仓库名和要构建的版本号
+5. 脚本将自动构建AMD64和ARM64架构的镜像并推送到Docker Hub
+
+### 特性
+
+- 自动查询Docker Hub上的现有版本
+- 支持交互式输入构建参数
+- 自动处理版本号前缀（自动添加'v'前缀）
+- 构建并推送多架构镜像（AMD64和ARM64）
+- 自动创建多架构Manifest清单
+- 可用于覆盖现有标签（如latest或特定版本）
 
 ## 环境变量
 
