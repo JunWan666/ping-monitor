@@ -68,6 +68,16 @@ class SystemConfig(Base):
     webhook_secret = Column(String, nullable=True)  # Webhook加签密钥(钉钉)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
+class User(Base):
+    """用户表"""
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)  # 用户名
+    password_hash = Column(String)  # 密码哈希
+    is_admin = Column(Boolean, default=True)  # 是否管理员
+    created_at = Column(DateTime, default=datetime.now)
+
 def init_db():
     """初始化数据库"""
     Base.metadata.create_all(bind=engine)

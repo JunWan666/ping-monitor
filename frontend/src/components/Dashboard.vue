@@ -61,8 +61,27 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span style="font-weight: bold">主机状态</span>
-          <div>
-            <el-button type="success" size="small" @click="pingAllHosts" :loading="pingAllLoading" style="margin-right: 10px">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <el-input 
+              v-model="searchKeyword" 
+              placeholder="搜索主机名称或地址" 
+              clearable
+              style="width: 280px"
+            >
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <el-select 
+              v-model="statusFilter" 
+              placeholder="状态筛选" 
+              clearable
+              style="width: 130px"
+            >
+              <el-option label="正常" value="正常" />
+              <el-option label="异常" value="异常" />
+            </el-select>
+            <el-button type="success" size="small" @click="pingAllHosts" :loading="pingAllLoading">
               <el-icon><Promotion /></el-icon> 立即Ping全部
             </el-button>
             <el-button type="primary" size="small" @click="loadData" :loading="loading">
@@ -71,7 +90,8 @@
           </div>
         </div>
       </template>
-      <el-table :data="dashboard.host_status" style="width: 100%">
+      
+      <el-table :data="filteredHostStatus" style="width: 100%">
         <el-table-column prop="name" label="主机名称" width="150" />
         <el-table-column label="地址" width="200">
           <template #default="{ row }">
@@ -123,6 +143,20 @@
           </template>
         </el-table-column>
       </el-table>
+      
+      <!-- 分页 -->
+      <div style="margin-top: 15px; display: flex; justify-content: center">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="filteredAllHosts.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          :small="true"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
     </el-card>
 
     <!-- 监控图表对话框 -->
@@ -133,13 +167,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import * as echarts from 'echarts'
 
 const loading = ref(false)
 const pingAllLoading = ref(false)
+const searchKeyword = ref('')
+const statusFilter = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
 const dashboard = reactive({
   total_hosts: 0,
   enabled_hosts: 0,
@@ -159,6 +197,43 @@ const onlineRate = computed(() => {
   const online = dashboard.host_status.filter(h => h.status === '正常').length
   return Math.round((online / dashboard.total_hosts) * 100)
 })
+
+// 搜索和筛选后的所有主机
+const filteredAllHosts = computed(() => {
+  let result = [...dashboard.host_status]
+  
+  // 关键字搜索
+  if (searchKeyword.value) {
+    const keyword = searchKeyword.value.toLowerCase()
+    result = result.filter(host => 
+      host.name.toLowerCase().includes(keyword) || 
+      host.address.toLowerCase().includes(keyword)
+    )
+  }
+  
+  // 状态筛选
+  if (statusFilter.value) {
+    result = result.filter(host => host.status === statusFilter.value)
+  }
+  
+  return result
+})
+
+// 当前页显示的主机
+const filteredHostStatus = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return filteredAllHosts.value.slice(start, end)
+})
+
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1
+}
+
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+}
 
 const loadData = async () => {
   loading.value = true
@@ -486,10 +561,12 @@ watch(chartVisible, (val) => {
   }
 })
 
+let refreshTimer = null
+
 onMounted(() => {
   loadData()
   // 每30秒自动刷新
-  setInterval(loadData, 30000)
+  refreshTimer = setInterval(loadData, 30000)
   
   // 监听窗口大小变化，重绘图表
   window.addEventListener('resize', () => {
@@ -497,5 +574,22 @@ onMounted(() => {
       overallChartInstance.resize()
     }
   })
+})
+
+onBeforeUnmount(() => {
+  // 清除定时器
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+  // 清除图表实例
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+  if (overallChartInstance) {
+    overallChartInstance.dispose()
+    overallChartInstance = null
+  }
 })
 </script>

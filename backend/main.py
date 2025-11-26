@@ -6,11 +6,27 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
-from database import init_db, get_db, Host, PingRecord, Alert, SystemConfig
+from database import init_db, get_db, Host, PingRecord, Alert, SystemConfig, User
 from ping_service import PingService
 from scheduler import scheduler
+from auth import (
+    get_password_hash, 
+    verify_password, 
+    create_access_token, 
+    get_current_user,
+    get_optional_current_user
+)
 import uvicorn
 import os
+import logging
+
+# 配置日志格式
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Ping监控系统", version="1.0.0")
 
@@ -96,30 +112,101 @@ class SystemConfigResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
 # 启动事件
 @app.on_event("startup")
 async def startup_event():
     """应用启动时执行"""
     init_db()
     scheduler.start()
-    print("✅ 数据库初始化完成")
-    print("✅ 监控调度器已启动")
+    logger.info("✅ 数据库初始化完成")
+    logger.info("✅ 监控调度器已启动")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时执行"""
     scheduler.stop()
-    print("⏹️ 监控调度器已停止")
+    logger.info("⏹️ 监控调度器已停止")
+
+# ==================== 认证API ====================
+
+@app.get("/api/auth/check")
+async def check_admin_exists(db: Session = Depends(get_db)):
+    """检查是否存在管理员"""
+    user = db.query(User).first()
+    return {"has_admin": user is not None}
+
+@app.post("/api/auth/init", response_model=TokenResponse)
+async def init_admin(user_data: UserCreate, db: Session = Depends(get_db)):
+    """初始化管理员账户"""
+    # 检查是否已经存在管理员
+    existing_user = db.query(User).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="管理员已存在")
+    
+    # 验证用户名和密码
+    if not user_data.username or len(user_data.username) < 3:
+        raise HTTPException(status_code=400, detail="用户名至少需要3个字符")
+    if not user_data.password or len(user_data.password) < 5:
+        raise HTTPException(status_code=400, detail="密码至少需要5个字符")
+    
+    # 创建管理员
+    hashed_password = get_password_hash(user_data.password)
+    admin_user = User(
+        username=user_data.username,
+        password_hash=hashed_password,
+        is_admin=True
+    )
+    db.add(admin_user)
+    db.commit()
+    db.refresh(admin_user)
+    
+    # 生成token
+    access_token = create_access_token(data={"sub": admin_user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+async def login(user_data: UserLogin, db: Session = Depends(get_db)):
+    """用户登录"""
+    user = db.query(User).filter(User.username == user_data.username).first()
+    if not user or not verify_password(user_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误"
+        )
+    
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/auth/me")
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """获取当前用户信息"""
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "is_admin": current_user.is_admin
+    }
 
 # ==================== 主机管理API ====================
 
 @app.get("/api/hosts", response_model=List[HostResponse])
-async def get_hosts(db: Session = Depends(get_db)):
+async def get_hosts(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取所有主机"""
     return db.query(Host).all()
 
 @app.post("/api/hosts", response_model=HostResponse)
-async def create_host(host: HostCreate, db: Session = Depends(get_db)):
+async def create_host(host: HostCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """添加主机"""
     # 检查名称是否已存在
     existing = db.query(Host).filter(Host.name == host.name).first()
@@ -133,7 +220,7 @@ async def create_host(host: HostCreate, db: Session = Depends(get_db)):
     return db_host
 
 @app.get("/api/hosts/{host_id}", response_model=HostResponse)
-async def get_host(host_id: int, db: Session = Depends(get_db)):
+async def get_host(host_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取单个主机"""
     host = db.query(Host).filter(Host.id == host_id).first()
     if not host:
@@ -141,7 +228,7 @@ async def get_host(host_id: int, db: Session = Depends(get_db)):
     return host
 
 @app.put("/api/hosts/{host_id}", response_model=HostResponse)
-async def update_host(host_id: int, host_update: HostUpdate, db: Session = Depends(get_db)):
+async def update_host(host_id: int, host_update: HostUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """更新主机"""
     host = db.query(Host).filter(Host.id == host_id).first()
     if not host:
@@ -156,7 +243,7 @@ async def update_host(host_id: int, host_update: HostUpdate, db: Session = Depen
     return host
 
 @app.delete("/api/hosts/{host_id}")
-async def delete_host(host_id: int, db: Session = Depends(get_db)):
+async def delete_host(host_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """删除主机"""
     host = db.query(Host).filter(Host.id == host_id).first()
     if not host:
@@ -194,7 +281,7 @@ def _do_ping(host_id: int, host_address: str, host_name: str):
         db.close()
 
 @app.post("/api/ping/{host_id}")
-async def ping_now(host_id: int, background: bool = False, background_tasks: BackgroundTasks = None, db: Session = Depends(get_db)):
+async def ping_now(host_id: int, background: bool = False, background_tasks: BackgroundTasks = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """立即执行ping（支持同步和异步模式）"""
     host = db.query(Host).filter(Host.id == host_id).first()
     if not host:
@@ -232,7 +319,7 @@ async def ping_now(host_id: int, background: bool = False, background_tasks: Bac
     }
 
 @app.post("/api/ping-all")
-async def ping_all(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def ping_all(background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """立即ping所有启用的主机（后台异步执行）"""
     hosts = db.query(Host).filter(Host.enabled == True).all()
     if not hosts:
@@ -253,6 +340,7 @@ async def get_ping_logs(
     host_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 20,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取Ping日志记录（分页）"""
@@ -316,6 +404,7 @@ async def get_ping_logs(
 async def get_records(
     host_id: int,
     hours: int = 24,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取主机监控记录"""
@@ -329,6 +418,7 @@ async def get_records(
 @app.get("/api/alerts", response_model=List[AlertResponse])
 async def get_alerts(
     hours: int = 24,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取告警记录"""
@@ -339,7 +429,7 @@ async def get_alerts(
     return alerts
 
 @app.get("/api/dashboard")
-async def get_dashboard(db: Session = Depends(get_db)):
+async def get_dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取仪表盘数据"""
     total_hosts = db.query(Host).count()
     enabled_hosts = db.query(Host).filter(Host.enabled == True).count()
@@ -399,7 +489,7 @@ else:
 # ==================== 系统配置API ====================
 
 @app.get("/api/config", response_model=SystemConfigResponse)
-async def get_config(db: Session = Depends(get_db)):
+async def get_config(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取系统配置"""
     config = db.query(SystemConfig).first()
     if not config:
@@ -410,7 +500,7 @@ async def get_config(db: Session = Depends(get_db)):
     return config
 
 @app.put("/api/config", response_model=SystemConfigResponse)
-async def update_config(config_update: SystemConfigUpdate, db: Session = Depends(get_db)):
+async def update_config(config_update: SystemConfigUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """更新系统配置"""
     config = db.query(SystemConfig).first()
     if not config:
@@ -439,7 +529,7 @@ async def update_config(config_update: SystemConfigUpdate, db: Session = Depends
     return config
 
 @app.post("/api/test-notification/{notification_type}")
-async def test_notification(notification_type: str, db: Session = Depends(get_db)):
+async def test_notification(notification_type: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """测试通知功能"""
     from notification import notifier
     

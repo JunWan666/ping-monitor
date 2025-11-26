@@ -4,21 +4,40 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span style="font-weight: bold">主机列表</span>
-          <div>
+          <div style="display: flex; align-items: center; gap: 10px">
+            <el-input 
+              v-model="searchKeyword" 
+              placeholder="搜索主机名称或地址" 
+              clearable
+              style="width: 280px"
+            >
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <el-select 
+              v-model="statusFilter" 
+              placeholder="状态筛选" 
+              clearable
+              style="width: 130px"
+            >
+              <el-option label="正常" value="正常" />
+              <el-option label="异常" value="异常" />
+            </el-select>
             <el-button type="danger" @click="batchDelete" :disabled="selectedHosts.length === 0" v-if="selectedHosts.length > 0">
               <el-icon><Delete /></el-icon> 批量删除 ({{ selectedHosts.length }})
             </el-button>
-            <el-button type="success" @click="showBatchImportDialog" :style="selectedHosts.length > 0 ? 'margin-left: 10px' : ''">
+            <el-button type="success" @click="showBatchImportDialog">
               <el-icon><Upload /></el-icon> 批量导入
             </el-button>
-            <el-button type="primary" @click="showAddDialog" style="margin-left: 10px">
+            <el-button type="primary" @click="showAddDialog">
               <el-icon><Plus /></el-icon> 添加主机
             </el-button>
           </div>
         </div>
       </template>
 
-      <el-table :data="hosts" style="width: 100%" @selection-change="handleSelectionChange">
+      <el-table :data="filteredHosts" style="width: 100%" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="55" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="主机名称" width="150" />
@@ -40,13 +59,20 @@
             </el-icon>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="200" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === '正常'" type="success">{{ row.status }}</el-tag>
+            <el-tag v-else-if="row.status === '异常'" type="danger">{{ row.status }}</el-tag>
+            <el-tag v-else type="info">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="描述" min-width="150" />
         <el-table-column label="告警阈值" width="120">
           <template #default="{ row }">
             {{ row.alert_threshold }}%
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="启用" width="100">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="updateHostStatus(row)" />
           </template>
@@ -64,6 +90,20 @@
           </template>
         </el-table-column>
       </el-table>
+      
+      <!-- 分页 -->
+      <div style="margin-top: 15px; display: flex; justify-content: center">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="filteredAllHosts.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          :small="true"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
     </el-card>
 
     <!-- 添加/编辑主机对话框 -->
@@ -224,13 +264,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled, Download, Upload } from '@element-plus/icons-vue'
 import * as XLSX from 'xlsx'
 import api from '../api'
 
 const hosts = ref([])
+const hostsWithStatus = ref([])
 const selectedHosts = ref([])
 const dialogVisible = ref(false)
 const batchDialogVisible = ref(false)
@@ -244,6 +285,10 @@ const uploadRef = ref(null)
 const excelData = ref([])
 const fileList = ref([])
 const pingResult = ref(null)
+const searchKeyword = ref('')
+const statusFilter = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
 const form = reactive({
   id: null,
   name: '',
@@ -252,9 +297,58 @@ const form = reactive({
   alert_threshold: 20.0
 })
 
+// 搜索和筛选后的所有主机
+const filteredAllHosts = computed(() => {
+  let result = [...hostsWithStatus.value]
+  
+  // 关键字搜索
+  if (searchKeyword.value) {
+    const keyword = searchKeyword.value.toLowerCase()
+    result = result.filter(host => 
+      host.name.toLowerCase().includes(keyword) || 
+      host.address.toLowerCase().includes(keyword)
+    )
+  }
+  
+  // 状态筛选
+  if (statusFilter.value) {
+    result = result.filter(host => host.status === statusFilter.value)
+  }
+  
+  return result
+})
+
+// 当前页显示的主机
+const filteredHosts = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return filteredAllHosts.value.slice(start, end)
+})
+
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1
+}
+
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+}
+
 const loadHosts = async () => {
   try {
     hosts.value = await api.getHosts()
+    // 获取每个主机的最新状态
+    const dashboardData = await api.getDashboard()
+    const statusMap = new Map()
+    dashboardData.host_status.forEach(hs => {
+      statusMap.set(hs.id, hs.status)
+    })
+    
+    // 合并主机信息和状态
+    hostsWithStatus.value = hosts.value.map(host => ({
+      ...host,
+      status: statusMap.get(host.id) || '未知'
+    }))
   } catch (error) {
     ElMessage.error('加载主机列表失败')
   }

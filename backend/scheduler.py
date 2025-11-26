@@ -6,7 +6,12 @@ from datetime import datetime
 import logging
 import threading
 
-logging.basicConfig(level=logging.INFO)
+# 配置日志格式，添加时间戳
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 class MonitorScheduler:
@@ -15,11 +20,24 @@ class MonitorScheduler:
     def __init__(self):
         self.scheduler = BackgroundScheduler()
         self.ping_service = PingService()
-        self.current_interval = 5  # 当前间隔(分钟)
+        self.current_interval = None  # 将从数据库读取
+        self.alert_queue = []  # 告警队列
+        self.alert_lock = threading.Lock()  # 线程锁
         
     def start(self):
         """启动定时任务"""
-        # 每5分钟执行一次监控
+        # 从数据库读取配置
+        db = SessionLocal()
+        try:
+            config = db.query(SystemConfig).first()
+            if config:
+                self.current_interval = config.check_interval
+            else:
+                self.current_interval = 5  # 默认值
+        finally:
+            db.close()
+        
+        # 每 N 分钟执行一次监控
         self.scheduler.add_job(
             self.monitor_all_hosts,
             'interval',
@@ -52,10 +70,17 @@ class MonitorScheduler:
     
     def monitor_all_hosts(self):
         """监控所有启用的主机（并发执行）"""
+        start_time = datetime.now()
+        logger.info("="*20 + " 定时监控任务开始 " + "="*20)
+        
+        # 清空告警队列
+        with self.alert_lock:
+            self.alert_queue = []
+        
         db = SessionLocal()
         try:
             hosts = db.query(Host).filter(Host.enabled == True).all()
-            logger.info(f"开始监控 {len(hosts)} 台主机")
+            logger.info(f"本次需要监控 {len(hosts)} 台主机")
             
             # 为每个主机启动独立线程，并发执行
             threads = []
@@ -71,9 +96,23 @@ class MonitorScheduler:
             # 等待所有线程完成（最多等待 60 秒）
             for thread in threads:
                 thread.join(timeout=60)
+            
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            logger.info(f"定时监控任务完成，耗时: {duration:.2f}秒")
+            
+            # 输出告警信息
+            if self.alert_queue:
+                logger.warning("="*20 + " 告警信息汇总 " + "="*20)
+                for alert_info in self.alert_queue:
+                    logger.warning(f"🚨 [{alert_info['type']}] {alert_info['host']} ({alert_info['address']}) - 丢包率: {alert_info['packet_loss']}%, 阈值: {alert_info['threshold']}%, 延迟: {alert_info['rtt']}")
+                logger.warning("="*20 + f" 共 {len(self.alert_queue)} 条告警 " + "="*20)
+            
+            logger.info("="*20 + " 定时监控任务结束 " + "="*20)
                 
         except Exception as e:
             logger.error(f"监控任务执行失败: {str(e)}")
+            logger.info("="*20 + " 定时监控任务结束 " + "="*20)
         finally:
             db.close()
     
@@ -117,7 +156,7 @@ class MonitorScheduler:
             
             if result['packet_loss'] >= host.alert_threshold:
                 should_alert = True
-                alert_type = 'packet_loss'
+                alert_type = '丢包告警'
                 # 优化后的告警消息格式
                 alert_message = (
                     f"主机：{host.name}\n"
@@ -127,10 +166,21 @@ class MonitorScheduler:
                     f"平均延迟：{result['avg_rtt']:.2f}ms" if result['avg_rtt'] else f"平均延迟：无数据"
                 )
                 
+                # 添加到告警队列
+                with self.alert_lock:
+                    self.alert_queue.append({
+                        'type': alert_type,
+                        'host': host.name,
+                        'address': host.address,
+                        'packet_loss': f"{result['packet_loss']:.1f}",
+                        'threshold': f"{host.alert_threshold:.0f}",
+                        'rtt': f"{result['avg_rtt']:.2f}ms" if result['avg_rtt'] else '无数据'
+                    })
+                
                 alert = Alert(
                     host_id=host.id,
                     host_name=host.name,
-                    alert_type=alert_type,
+                    alert_type='packet_loss',
                     message=alert_message,
                     is_sent=False,
                     created_at=datetime.now()
@@ -138,11 +188,10 @@ class MonitorScheduler:
                 db.add(alert)
                 db.commit()
                 db.refresh(alert)
-                logger.warning(alert_message)
             
             elif result['status'] == 'unreachable':
                 should_alert = True
-                alert_type = 'unreachable'
+                alert_type = '主机不可达'
                 # 优化后的告警消息格式
                 alert_message = (
                     f"主机：{host.name}\n"
@@ -151,10 +200,21 @@ class MonitorScheduler:
                     f"丢包率：100%"
                 )
                 
+                # 添加到告警队列
+                with self.alert_lock:
+                    self.alert_queue.append({
+                        'type': alert_type,
+                        'host': host.name,
+                        'address': host.address,
+                        'packet_loss': '100.0',
+                        'threshold': f"{host.alert_threshold:.0f}",
+                        'rtt': '无响应'
+                    })
+                
                 alert = Alert(
                     host_id=host.id,
                     host_name=host.name,
-                    alert_type=alert_type,
+                    alert_type='unreachable',
                     message=alert_message,
                     is_sent=False,
                     created_at=datetime.now()
@@ -162,13 +222,12 @@ class MonitorScheduler:
                 db.add(alert)
                 db.commit()
                 db.refresh(alert)
-                logger.warning(alert_message)
             
             # 发送通知
             if should_alert:
                 self._send_alert_notification(db, alert, alert_message)
                 
-            logger.info(f"主机 {host.name} 监控完成: 丢包率 {result['packet_loss']}%, 平均延迟 {result['avg_rtt']}ms")
+                logger.info(f"✅ {host.name} - 监控完成: 丢包率 {result['packet_loss']}%, 平均延迟 {result['avg_rtt']:.2f}ms")
             
         except Exception as e:
             logger.error(f"监控主机 {host.name} 失败: {str(e)}")
@@ -216,12 +275,12 @@ class MonitorScheduler:
                 if alert:
                     alert.is_sent = True
                     db.commit()
-                logger.info(f"告警通知已发送: {message}")
+                logger.info(f"✅ 告警通知已发送 (Alert ID: {alert_id})")
             else:
-                logger.error(f"告警通知发送失败: {message}")
+                logger.error(f"❌ 告警通知发送失败 (Alert ID: {alert_id}, Type: {alert_type})")
                 
         except Exception as e:
-            logger.error(f"发送告警通知失败: {str(e)}")
+            logger.error(f"❌ 发送告警通知异常 (Alert ID: {alert_id}): {str(e)}")
         finally:
             db.close()
 
