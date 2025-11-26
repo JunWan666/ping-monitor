@@ -19,9 +19,10 @@
 - **登录页面** - 管理员账户登录，首次使用需初始化管理员
 - **仪表盘** - 查看所有主机的实时状态和统计信息，支持搜索和状态筛选
 - **主机管理** - 添加、编辑、删除监控主机，支持手动 Ping 和 Excel 导入/导出，支持搜索筛选和分页
-- **告警记录** - 查看历史告警信息
-- **系统设置** - 配置检测参数和通知方式
-- **Ping日志** - 查看详细的 Ping 检测记录，支持分页和筛选
+- **告警记录** - 查看历史告警信息，支持分页查询和时间范围筛选
+- **系统设置** - 配置检测参数和通知方式，支持通知模式设置
+- **Ping日志** - 查看详细的 Ping 检测记录，支持分页和状态筛选
+- **修改密码** - 支持修改用户名和密码，需验证原密码
 
 ## 2. 技术栈
 
@@ -51,6 +52,7 @@ ping-monitor/
 │   ├── ping_service.py      # Ping 检测服务
 │   ├── scheduler.py         # 定时任务调度器
 │   ├── notification.py      # 通知服务（Server酱/Webhook）
+│   ├── notification_template.py  # 通知消息模板（Markdown格式）
 │   ├── auth.py              # JWT认证和密码加密
 │   └── requirements.txt     # Python 依赖
 │
@@ -63,6 +65,7 @@ ping-monitor/
 │   │   │   ├── Settings.vue       # 系统设置
 │   │   │   ├── Login.vue          # 登录页面
 │   │   │   ├── InitAdmin.vue      # 管理员初始化
+│   │   │   ├── UserProfile.vue    # 用户信息修改
 │   │   │   └── Main.vue           # 主框架
 │   │   ├── App.vue          # 主应用组件
 │   │   ├── api.js           # API 接口封装
@@ -84,6 +87,8 @@ ping-monitor/
 ├── data/                    # 数据目录（运行后生成）
 │   └── ping_monitor.db      # SQLite 数据库文件
 │
+├── migrate_db_docker.py     # Docker环境数据库迁移脚本
+├── migrate_db_docker.sh     # Docker数据库迁移执行脚本
 ├── .gitignore               # Git 忽略文件
 ├── LICENSE                  # MIT 开源协议
 ├── start.bat                # Windows 一键启动脚本
@@ -306,6 +311,7 @@ npm run dev
 - `description` - 描述信息
 - `enabled` - 是否启用监控
 - `alert_threshold` - 告警阈值（丢包率 %）
+- `last_status` - 上次状态（normal/abnormal/unknown）
 - `created_at` - 创建时间
 
 ### 7.2 ping_records（Ping 记录表）
@@ -336,12 +342,14 @@ npm run dev
 - `serverchan_key` - Server酱密钥
 - `webhook_url` - Webhook 地址
 - `webhook_secret` - Webhook 加签密钥
+- `notification_mode` - 通知模式（status_change/every_time）
 - `updated_at` - 更新时间
 
 ### 7.5 users（用户表）
 - `id` - 用户 ID
 - `username` - 用户名（唯一）
-- `hashed_password` - 加密后的密码
+- `password_hash` - 加密后的密码
+- `is_admin` - 是否管理员
 - `created_at` - 创建时间
 
 ## 8. 通知配置
@@ -360,7 +368,18 @@ npm run dev
 
 ## 9. 常见问题
 
-### Q: 后端启动失败，提示 "需要管理员权限"
+### Q: 从 v1.1.0 升级到 v1.2.0 需要数据库迁移吗？
+A: 是的，v1.2.0 新增了数据库字段。如果你使用 Docker 部署：
+```bash
+# 方法1：直接执行迁移脚本
+docker exec <容器名称> python /app/migrate_db_docker.py
+
+# 方法2：使用Shell脚本
+./migrate_db_docker.sh <容器名称>
+```
+如果是本地开发环境，直接重启后端服务即可自动创建新字段。
+
+### Q: 后端启动失败，提示 “需要管理员权限”
 A: 这是因为使用 `ping3` 库需要 ICMP 权限。解决方案：
 - Windows：以管理员身份运行
 - Linux/Mac：使用 `sudo` 运行或配置 `ping3` 权限
@@ -408,7 +427,38 @@ npm run build
 
 ## 11. 更新日志
 
-### 11.2 v1.1.0 (2025-11-26)
+### v1.2.0 (2025-11-26)
+#### 🆕 通知系统优化
+- 🎨 重构通知模板系统，独立 `notification_template.py` 模块
+- 📝 钉钉通知支持 Markdown 格式，提升可读性
+- 🎨 服务器地址显示为蓝色可点击链接
+- 🔴 “无响应”改为红色加粗显示“主机不可达”
+- 🎨 延迟显示增加颜色分级（<50ms绿色、50-150ms黄色、>150ms红色）
+- 🕒 钉钉通知添加通知时间字段（精确到秒）
+- 🔔 支持通知模式配置：状态转换通知 / 每次异常通知
+- ✅ 状态转换模式支持首次异常必须通知，恢复正常发送恢复通知
+
+#### 📊 页面功能增强
+- 📄 告警记录页面增加分页查询（中文显示）
+- 🎨 告警信息自动清理 Markdown 标记，只保留emoji圆点和关键信息
+- 🔍 Ping日志增加状态筛选功能（正常/异常）
+- 💾 主机管理增加导出功能，Excel文件自动列宽
+- 📅 导出文件名时间格式优化（例：20251126_100401）
+- 🔧 监控配置UI优化，避免提示和参数调节部分重叠
+
+#### 👤 用户管理
+- 🔐 新增修改密码功能，支持修改用户名和密码
+- ✅ 修改需验证原密码，修改成功后自动跳转登录页
+- 🎨 表单验证优化，支持实时密码一致性检查
+
+#### 🛠️ 技术改进
+- 🗄️ 数据库添加 `last_status` 字段用于状态转换检测
+- 🗄️ 数据库添加 `notification_mode` 字段用于通知模式配置
+- 📦 提供 Docker 环境数据库迁移工具（`migrate_db_docker.py` 和 `migrate_db_docker.sh`）
+- 🔧 后端 API 新增用户密码修改接口
+- 🎨 前端代码优化，提升用户体验
+
+### v1.1.0 (2025-11-26)
 - 🔐 新增完整的登录认证系统（JWT + bcrypt）
 - 👤 支持管理员账户管理，首次访问需初始化
 - 🔍 仪表盘和主机管理添加搜索功能（支持主机名/地址模糊搜索）
@@ -425,7 +475,7 @@ npm run build
 - 🐛 修复退出登录后的遗留请求问题
 - 🐛 修复路由守卫逻辑，避免不必要的API调用
 
-### 11.1 v1.0.0 (2025-11-26)
+### v1.0.0 (2025-11-26)
 - ✨ 初始版本发布
 - 🎯 支持主机监控和自动Ping检测
 - 📊 数据可视化图表展示

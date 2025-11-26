@@ -27,6 +27,9 @@
             <el-button type="danger" @click="batchDelete" :disabled="selectedHosts.length === 0" v-if="selectedHosts.length > 0">
               <el-icon><Delete /></el-icon> 批量删除 ({{ selectedHosts.length }})
             </el-button>
+            <el-button type="warning" @click="exportHosts">
+              <el-icon><Download /></el-icon> 导出
+            </el-button>
             <el-button type="success" @click="showBatchImportDialog">
               <el-icon><Upload /></el-icon> 批量导入
             </el-button>
@@ -623,6 +626,70 @@ const downloadTemplate = () => {
   // 下载文件
   XLSX.writeFile(wb, '主机导入模板.xlsx')
   ElMessage.success('模板下载成功')
+}
+
+const exportHosts = () => {
+  if (hostsWithStatus.value.length === 0) {
+    ElMessage.warning('没有可导出的主机数据')
+    return
+  }
+  
+  // 准备导出数据，格式与导入模板一致
+  const data = [
+    ['主机名称', '地址', '描述', '告警阈值(%)']
+  ]
+  
+  // 添加主机数据
+  hostsWithStatus.value.forEach(host => {
+    data.push([
+      host.name,
+      host.address,
+      host.description || '',
+      host.alert_threshold
+    ])
+  })
+  
+  // 创建工作簿
+  const ws = XLSX.utils.aoa_to_sheet(data)
+  
+  // 自动设置列宽
+  const colWidths = []
+  // 遍历每一列
+  for (let col = 0; col < 4; col++) {
+    let maxWidth = 0
+    // 遍历该列的所有行，找出最大宽度
+    for (let row = 0; row < data.length; row++) {
+      const cellValue = data[row][col]
+      if (cellValue != null) {
+        const cellLength = String(cellValue).length
+        // 中文字符按2个字符宽度计算
+        const chineseCount = (String(cellValue).match(/[\u4e00-\u9fa5]/g) || []).length
+        const actualWidth = cellLength + chineseCount
+        maxWidth = Math.max(maxWidth, actualWidth)
+      }
+    }
+    // 设置列宽，最小10，最大50
+    colWidths.push({ wch: Math.min(Math.max(maxWidth + 2, 10), 50) })
+  }
+  ws['!cols'] = colWidths
+  
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '主机列表')
+  
+  // 生成文件名（带时间戳）
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hours = String(now.getHours()).padStart(2, '0')
+  const minutes = String(now.getMinutes()).padStart(2, '0')
+  const seconds = String(now.getSeconds()).padStart(2, '0')
+  const timestamp = `${year}${month}${day}_${hours}${minutes}${seconds}`
+  const filename = `主机列表_${timestamp}.xlsx`
+  
+  // 下载文件
+  XLSX.writeFile(wb, filename)
+  ElMessage.success(`导出成功，共 ${hostsWithStatus.value.length} 条数据`)
 }
 
 // 监听标签切换，当切换到 Excel 标签时确保 input 可用

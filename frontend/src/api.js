@@ -52,6 +52,7 @@ export default {
   initAdmin: (data) => api.post('/auth/init', data),
   login: (data) => api.post('/auth/login', data),
   getCurrentUser: () => api.get('/auth/me'),
+  updatePassword: (data) => api.put('/auth/update-password', data),
   
   // 主机管理
   getHosts: () => api.get('/hosts'),
@@ -65,15 +66,19 @@ export default {
     return api.post(`/ping/${id}`, null, { params })
   },
   pingAll: () => api.post('/ping-all'),
-  getPingLogs: (hostId, page = 1, pageSize = 20) => {
+  getPingLogs: (hostId, page = 1, pageSize = 20, status = null) => {
     const params = { page, page_size: pageSize }
     if (hostId) params.host_id = hostId
+    if (status) params.status = status
     return api.get('/ping/logs', { params })
   },
   
   // 监控数据
   getRecords: (id, hours = 24) => api.get(`/records/${id}?hours=${hours}`),
-  getAlerts: (hours = 24) => api.get(`/alerts?hours=${hours}`),
+  getAlerts: (hours = 24, page = 1, pageSize = 20) => {
+    const params = { hours, page, page_size: pageSize }
+    return api.get('/alerts', { params })
+  },
   getDashboard: () => api.get('/dashboard'),
   
   // 系统配置

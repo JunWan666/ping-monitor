@@ -39,6 +39,7 @@ class Host(Base):
     description = Column(String, nullable=True)  # 描述
     enabled = Column(Boolean, default=True)  # 是否启用
     alert_threshold = Column(Float, default=20.0)  # 丢包率告警阈值(%)
+    last_status = Column(String, nullable=True)  # 上次状态: normal, abnormal, unknown
     created_at = Column(DateTime, default=datetime.now)
 
 class PingRecord(Base):
@@ -78,6 +79,7 @@ class SystemConfig(Base):
     serverchan_key = Column(String, nullable=True)  # Server酱密钥
     webhook_url = Column(String, nullable=True)  # Webhook地址
     webhook_secret = Column(String, nullable=True)  # Webhook加签密钥(钉钉)
+    notification_mode = Column(String, default='status_change')  # 通知模式: status_change(状态转换时), every_time(每次异常)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 class User(Base):

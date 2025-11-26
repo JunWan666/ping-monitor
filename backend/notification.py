@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import base64
 from urllib.parse import quote_plus
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class NotificationService:
             logger.error(f"Server酱通知发送异常: {str(e)}")
             return False
     
-    def send_webhook(self, message: str, alert_type: str = "info"):
+    def send_webhook(self, message: str, alert_type: str = "info", title: str = None):
         """发送Webhook通知(企业微信/钉钉)"""
         if not self.webhook_url:
             return False
@@ -75,10 +76,12 @@ class NotificationService:
                     sign = quote_plus(base64.b64encode(hmac_code))
                     webhook_url = f"{self.webhook_url}&timestamp={timestamp}&sign={sign}"
                 
+                # 使用Markdown格式
                 payload = {
-                    "msgtype": "text",
-                    "text": {
-                        "content": f"Ping监控通知\n{message}"
+                    "msgtype": "markdown",
+                    "markdown": {
+                        "title": title or "Ping监控通知",
+                        "text": message
                     }
                 }
             # 企业微信格式

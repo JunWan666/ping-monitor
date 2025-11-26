@@ -2,6 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session
 from database import SessionLocal, Host, PingRecord, Alert, SystemConfig
 from ping_service import PingService
+from notification_template import NotificationTemplate
 from datetime import datetime
 import logging
 import threading
@@ -149,100 +150,166 @@ class MonitorScheduler:
             db.add(record)
             db.commit()
             
-            # 检查是否需要告警
+            # 获取系统配置
+            config = db.query(SystemConfig).first()
+            notification_mode = config.notification_mode if config else 'status_change'
+            
+            # 判断当前状态
+            current_status = 'normal'
+            if result['status'] == 'unreachable' or result['packet_loss'] >= host.alert_threshold:
+                current_status = 'abnormal'
+            
+            # 获取上次状态
+            last_status = host.last_status
+            
+            # 判断是否需要发送通知
             should_alert = False
             alert_message = ""
             alert_type = ""
             
-            if result['packet_loss'] >= host.alert_threshold:
-                should_alert = True
-                alert_type = '丢包告警'
-                # 优化后的告警消息格式
-                alert_message = (
-                    f"主机：{host.name}\n"
-                    f"服务器地址：{host.address}\n"
-                    f"丢包率：{result['packet_loss']:.0f}%\n"
-                    f"告警阈值：{host.alert_threshold:.0f}%\n"
-                    f"平均延迟：{result['avg_rtt']:.2f}ms" if result['avg_rtt'] else f"平均延迟：无数据"
-                )
-                
-                # 添加到告警队列
-                with self.alert_lock:
-                    self.alert_queue.append({
-                        'type': alert_type,
-                        'host': host.name,
-                        'address': host.address,
-                        'packet_loss': f"{result['packet_loss']:.1f}",
-                        'threshold': f"{host.alert_threshold:.0f}",
-                        'rtt': f"{result['avg_rtt']:.2f}ms" if result['avg_rtt'] else '无数据'
-                    })
-                
-                alert = Alert(
-                    host_id=host.id,
-                    host_name=host.name,
-                    alert_type='packet_loss',
-                    message=alert_message,
-                    is_sent=False,
-                    created_at=datetime.now()
-                )
-                db.add(alert)
-                db.commit()
-                db.refresh(alert)
+            # 状态转换模式：只在状态变化时通知
+            if notification_mode == 'status_change':
+                # 首次检测（无上次状态）且当前异常，需要通知
+                if last_status is None and current_status == 'abnormal':
+                    should_alert = True
+                # 从正常转为异常，或从异常转为正常
+                elif last_status != current_status and last_status is not None:
+                    should_alert = True
+            # 每次异常模式：每次检测到异常都通知
+            elif notification_mode == 'every_time':
+                if current_status == 'abnormal':
+                    should_alert = True
             
-            elif result['status'] == 'unreachable':
-                should_alert = True
-                alert_type = '主机不可达'
-                # 优化后的告警消息格式
-                alert_message = (
-                    f"主机：{host.name}\n"
-                    f"服务器地址：{host.address}\n"
-                    f"告警类型：主机无法访问\n"
-                    f"丢包率：100%"
-                )
-                
-                # 添加到告警队列
-                with self.alert_lock:
-                    self.alert_queue.append({
-                        'type': alert_type,
-                        'host': host.name,
-                        'address': host.address,
-                        'packet_loss': '100.0',
-                        'threshold': f"{host.alert_threshold:.0f}",
-                        'rtt': '无响应'
-                    })
-                
-                alert = Alert(
-                    host_id=host.id,
-                    host_name=host.name,
-                    alert_type='unreachable',
-                    message=alert_message,
-                    is_sent=False,
-                    created_at=datetime.now()
-                )
-                db.add(alert)
-                db.commit()
-                db.refresh(alert)
+            # 更新主机状态
+            host.last_status = current_status
+            db.commit()
             
-            # 发送通知
+            # 如果需要通知，生成通知消息
             if should_alert:
-                self._send_alert_notification(db, alert, alert_message)
+                if current_status == 'abnormal':
+                    # 异常通知
+                    if result['packet_loss'] >= host.alert_threshold:
+                        alert_type = '丢包告警'
+                        
+                        # 使用模板生成通知消息
+                        msg_data = NotificationTemplate.get_abnormal_alert(
+                            host_name=host.name,
+                            host_address=host.address,
+                            packet_loss=result['packet_loss'],
+                            alert_threshold=host.alert_threshold,
+                            avg_rtt=result['avg_rtt'],
+                            use_markdown=True
+                        )
+                        alert_message = msg_data['content']
+                        alert_title = msg_data['title']
+                        
+                        # 添加到告警队列
+                        with self.alert_lock:
+                            self.alert_queue.append({
+                                'type': alert_type,
+                                'host': host.name,
+                                'address': host.address,
+                                'packet_loss': f"{result['packet_loss']:.1f}",
+                                'threshold': f"{host.alert_threshold:.0f}",
+                                'rtt': f"{result['avg_rtt']:.2f}ms" if result['avg_rtt'] else '无数据'
+                            })
+                        
+                        alert = Alert(
+                            host_id=host.id,
+                            host_name=host.name,
+                            alert_type='packet_loss',
+                            message=alert_message,
+                            is_sent=False,
+                            created_at=datetime.now()
+                        )
+                        db.add(alert)
+                        db.commit()
+                        db.refresh(alert)
+                        
+                    elif result['status'] == 'unreachable':
+                        alert_type = '主机不可达'
+                        
+                        # 使用模板生成通知消息
+                        msg_data = NotificationTemplate.get_unreachable_alert(
+                            host_name=host.name,
+                            host_address=host.address,
+                            use_markdown=True
+                        )
+                        alert_message = msg_data['content']
+                        alert_title = msg_data['title']
+                        
+                        # 添加到告警队列
+                        with self.alert_lock:
+                            self.alert_queue.append({
+                                'type': alert_type,
+                                'host': host.name,
+                                'address': host.address,
+                                'packet_loss': '100.0',
+                                'threshold': f"{host.alert_threshold:.0f}",
+                                'rtt': '无响应'
+                            })
+                        
+                        alert = Alert(
+                            host_id=host.id,
+                            host_name=host.name,
+                            alert_type='unreachable',
+                            message=alert_message,
+                            is_sent=False,
+                            created_at=datetime.now()
+                        )
+                        db.add(alert)
+                        db.commit()
+                        db.refresh(alert)
+                    
+                    # 发送异常通知
+                    self._send_alert_notification(db, alert, alert_message, alert_title)
+                    
+                elif current_status == 'normal' and last_status == 'abnormal':
+                    # 恢复正常通知
+                    alert_type = '恢复正常'
+                    
+                    # 使用模板生成通知消息
+                    msg_data = NotificationTemplate.get_recovery_alert(
+                        host_name=host.name,
+                        host_address=host.address,
+                        packet_loss=result['packet_loss'],
+                        avg_rtt=result['avg_rtt'],
+                        use_markdown=True
+                    )
+                    alert_message = msg_data['content']
+                    alert_title = msg_data['title']
+                    
+                    alert = Alert(
+                        host_id=host.id,
+                        host_name=host.name,
+                        alert_type='recovery',
+                        message=alert_message,
+                        is_sent=False,
+                        created_at=datetime.now()
+                    )
+                    db.add(alert)
+                    db.commit()
+                    db.refresh(alert)
+                    
+                    # 发送恢复通知
+                    self._send_alert_notification(db, alert, alert_message, alert_title)
                 
                 logger.info(f"✅ {host.name} - 监控完成: 丢包率 {result['packet_loss']}%, 平均延迟 {result['avg_rtt']:.2f}ms")
             
         except Exception as e:
             logger.error(f"监控主机 {host.name} 失败: {str(e)}")
     
-    def _send_alert_notification(self, db: Session, alert: Alert, message: str):
+    def _send_alert_notification(self, db: Session, alert: Alert, message: str, title: str = None):
         """发送告警通知（异步）"""
         # 在新线程中发送通知，不阻塞主监控线程
         thread = threading.Thread(
             target=self._do_send_notification,
-            args=(alert.id, message, alert.alert_type),
+            args=(alert.id, message, alert.alert_type, title),
             daemon=True
         )
         thread.start()
     
-    def _do_send_notification(self, alert_id: int, message: str, alert_type: str):
+    def _do_send_notification(self, alert_id: int, message: str, alert_type: str, title: str = None):
         """实际执行通知发送（后台线程）"""
         db = SessionLocal()
         try:
@@ -265,9 +332,9 @@ class MonitorScheduler:
             # 发送通知
             success = False
             if config.serverchan_key:
-                success = notifier.send_serverchan("告警通知", message)
+                success = notifier.send_serverchan(title or "告警通知", message)
             elif config.webhook_url:
-                success = notifier.send_webhook(message, alert_type=alert_type)
+                success = notifier.send_webhook(message, alert_type=alert_type, title=title)
             
             # 更新发送状态
             if success:

@@ -36,6 +36,9 @@
             <el-menu-item index="settings-logs">
               <span>Ping日志</span>
             </el-menu-item>
+            <el-menu-item index="settings-profile">
+              <span>修改密码</span>
+            </el-menu-item>
           </el-sub-menu>
         </el-menu>
       </el-aside>
@@ -50,6 +53,7 @@
           <Dashboard v-if="activeMenu === 'dashboard'" />
           <HostManage v-else-if="activeMenu === 'hosts'" />
           <AlertList v-else-if="activeMenu === 'alerts'" />
+          <UserProfile v-else-if="activeMenu === 'settings-profile'" />
           <Settings v-else-if="activeMenu.startsWith('settings')" :active-tab="activeMenu" />
         </el-main>
       </el-container>
@@ -64,6 +68,7 @@ import Dashboard from './Dashboard.vue'
 import HostManage from './HostManage.vue'
 import AlertList from './AlertList.vue'
 import Settings from './Settings.vue'
+import UserProfile from './UserProfile.vue'
 
 const router = useRouter()
 const activeMenu = ref('dashboard')
@@ -73,7 +78,8 @@ const menuTitles = {
   hosts: '主机管理',
   alerts: '告警记录',
   'settings-basic': '系统设置 - 基本设置',
-  'settings-logs': '系统设置 - Ping日志'
+  'settings-logs': '系统设置 - Ping日志',
+  'settings-profile': '系统设置 - 修改密码'
 }
 
 const menuTitle = ref(menuTitles.dashboard)

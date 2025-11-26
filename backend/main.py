@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -98,6 +98,7 @@ class SystemConfigUpdate(BaseModel):
     serverchan_key: Optional[str] = None
     webhook_url: Optional[str] = None
     webhook_secret: Optional[str] = None
+    notification_mode: Optional[str] = None
 
 class SystemConfigResponse(BaseModel):
     id: int
@@ -107,6 +108,7 @@ class SystemConfigResponse(BaseModel):
     serverchan_key: Optional[str]
     webhook_url: Optional[str]
     webhook_secret: Optional[str]
+    notification_mode: str
     updated_at: datetime
     
     class Config:
@@ -119,6 +121,11 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     username: str
     password: str
+
+class UserPasswordUpdate(BaseModel):
+    old_password: str
+    new_username: Optional[str] = None
+    new_password: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -197,6 +204,35 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "is_admin": current_user.is_admin
     }
+
+@app.put("/api/auth/update-password")
+async def update_password(user_data: UserPasswordUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """修改用户名和密码"""
+    # 验证旧密码
+    if not verify_password(user_data.old_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="原密码错误"
+        )
+    
+    # 更新用户名
+    if user_data.new_username:
+        if len(user_data.new_username) < 3:
+            raise HTTPException(status_code=400, detail="用户名至少需要3个字符")
+        # 检查用户名是否已存在（排除当前用户）
+        existing_user = db.query(User).filter(User.username == user_data.new_username, User.id != current_user.id).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="用户名已存在")
+        current_user.username = user_data.new_username
+    
+    # 更新密码
+    if user_data.new_password:
+        if len(user_data.new_password) < 5:
+            raise HTTPException(status_code=400, detail="密码至少需要5个字符")
+        current_user.password_hash = get_password_hash(user_data.new_password)
+    
+    db.commit()
+    return {"message": "修改成功"}
 
 # ==================== 主机管理API ====================
 
@@ -338,17 +374,19 @@ async def ping_all(background_tasks: BackgroundTasks, current_user: User = Depen
 @app.get("/api/ping/logs")
 async def get_ping_logs(
     host_id: Optional[int] = None,
+    status: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取Ping日志记录（分页）"""
+    """获取Ping日志记录（分页、支持状态筛选）"""
     query = db.query(
         PingRecord.id,
         PingRecord.host_id,
         Host.name.label('host_name'),
         Host.address.label('host_address'),
+        Host.alert_threshold,
         PingRecord.packet_sent,
         PingRecord.packet_received,
         PingRecord.packet_loss,
@@ -362,19 +400,33 @@ async def get_ping_logs(
     if host_id:
         query = query.filter(PingRecord.host_id == host_id)
     
+    # 获取所有符合条件的记录（用于状态筛选）
+    all_items = query.order_by(PingRecord.created_at.desc()).all()
+    
+    # 根据状态筛选
+    filtered_items = []
+    for item in all_items:
+        # 判断状态
+        is_normal = item.packet_loss < item.alert_threshold
+        
+        if status == 'normal' and not is_normal:
+            continue
+        if status == 'abnormal' and is_normal:
+            continue
+        
+        filtered_items.append(item)
+    
     # 计算总数
-    total = query.count()
+    total = len(filtered_items)
     
     # 分页
     offset = (page - 1) * page_size
-    items = query.order_by(PingRecord.created_at.desc()).offset(offset).limit(page_size).all()
+    paginated_items = filtered_items[offset:offset + page_size]
     
     # 转换为字典列表
     logs = []
-    for item in items:
-        # 判断状态
-        host = db.query(Host).filter(Host.id == item.host_id).first()
-        status = "正常" if item.packet_loss < (host.alert_threshold if host else 20) else "异常"
+    for item in paginated_items:
+        status_text = "正常" if item.packet_loss < item.alert_threshold else "异常"
         
         logs.append({
             'id': item.id,
@@ -388,7 +440,7 @@ async def get_ping_logs(
             'max_rtt': item.max_rtt,
             'avg_rtt': item.avg_rtt,
             'check_time': item.check_time,
-            'status': status
+            'status': status_text
         })
     
     return {
@@ -415,18 +467,33 @@ async def get_records(
     ).order_by(PingRecord.created_at.desc()).all()
     return records
 
-@app.get("/api/alerts", response_model=List[AlertResponse])
+@app.get("/api/alerts")
 async def get_alerts(
     hours: int = 24,
+    page: int = 1,
+    page_size: int = 20,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取告警记录"""
+    """获取告警记录（分页）"""
     since = datetime.now() - timedelta(hours=hours)
-    alerts = db.query(Alert).filter(
+    query = db.query(Alert).filter(
         Alert.created_at >= since
-    ).order_by(Alert.created_at.desc()).all()
-    return alerts
+    )
+    
+    # 计算总数
+    total = query.count()
+    
+    # 分页
+    offset = (page - 1) * page_size
+    alerts = query.order_by(Alert.created_at.desc()).offset(offset).limit(page_size).all()
+    
+    return {
+        'items': alerts,
+        'total': total,
+        'page': page,
+        'page_size': page_size
+    }
 
 @app.get("/api/dashboard")
 async def get_dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -532,6 +599,7 @@ async def update_config(config_update: SystemConfigUpdate, current_user: User = 
 async def test_notification(notification_type: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """测试通知功能"""
     from notification import notifier
+    from notification_template import NotificationTemplate
     
     # 获取配置
     config = db.query(SystemConfig).first()
@@ -545,20 +613,23 @@ async def test_notification(notification_type: str, current_user: User = Depends
         webhook_secret=config.webhook_secret
     )
     
-    # 发送测试通知
-    test_message = "Ping监控系统 - 通知测试\n\n如果您收到这条消息，说明通知功能配置正确！"
+    # 使用模板生成测试通知
+    use_markdown = notification_type == 'webhook'  # webhook(钉钉)使用markdown
+    msg_data = NotificationTemplate.get_test_notification(use_markdown=use_markdown)
+    test_message = msg_data['content']
+    test_title = msg_data['title']
     
     try:
         if notification_type == 'serverchan':
             if not config.serverchan_key:
                 raise HTTPException(status_code=400, detail="Server酱密钥未配置")
-            success = notifier.send_serverchan("通知测试", test_message)
+            success = notifier.send_serverchan(test_title, test_message)
             if not success:
                 raise HTTPException(status_code=500, detail="Server酱通知发送失败")
         elif notification_type == 'webhook':
             if not config.webhook_url:
                 raise HTTPException(status_code=400, detail="Webhook地址未配置")
-            success = notifier.send_webhook(test_message)
+            success = notifier.send_webhook(test_message, title=test_title)
             if not success:
                 raise HTTPException(status_code=500, detail="Webhook通知发送失败")
         else:

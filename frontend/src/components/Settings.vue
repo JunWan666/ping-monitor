@@ -6,26 +6,38 @@
         <template #header>
           <span style="font-weight: bold">监控配置</span>
         </template>
-        <el-form :model="config" label-width="150px" style="max-width: 600px">
+        <el-form :model="config" label-width="150px" style="max-width: 700px">
           <el-form-item label="检测间隔">
-            <el-input-number v-model="config.check_interval" :min="1" :max="1440" />
-            <span style="margin-left: 10px">分钟</span>
-            <div style="color: #909399; font-size: 12px; margin-top: 5px">
-              建议：1-60分钟，过小会增加系统负担
+            <div style="display: flex; flex-direction: column; width: 100%">
+              <div style="display: flex; align-items: center">
+                <el-input-number v-model="config.check_interval" :min="1" :max="1440" style="width: 150px" />
+                <span style="margin-left: 10px">分钟</span>
+              </div>
+              <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                建议：1-60分钟，过小会增加系统负担
+              </div>
             </div>
           </el-form-item>
           <el-form-item label="每次发送包数">
-            <el-input-number v-model="config.packet_count" :min="1" :max="100" />
-            <span style="margin-left: 10px">个</span>
-            <div style="color: #909399; font-size: 12px; margin-top: 5px">
-              建议：10-20个，包数越多结果越准确但耗时越长
+            <div style="display: flex; flex-direction: column; width: 100%">
+              <div style="display: flex; align-items: center">
+                <el-input-number v-model="config.packet_count" :min="1" :max="100" style="width: 150px" />
+                <span style="margin-left: 10px">个</span>
+              </div>
+              <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                建议：10-20个，包数越多结果越准确但耗时越长
+              </div>
             </div>
           </el-form-item>
           <el-form-item label="超时时间">
-            <el-input-number v-model="config.packet_timeout" :min="1" :max="10" />
-            <span style="margin-left: 10px">秒</span>
-            <div style="color: #909399; font-size: 12px; margin-top: 5px">
-              建议：2-5秒
+            <div style="display: flex; flex-direction: column; width: 100%">
+              <div style="display: flex; align-items: center">
+                <el-input-number v-model="config.packet_timeout" :min="1" :max="10" style="width: 150px" />
+                <span style="margin-left: 10px">秒</span>
+              </div>
+              <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                建议：2-5秒
+              </div>
             </div>
           </el-form-item>
         </el-form>
@@ -43,6 +55,16 @@
               <el-option label="钉钉机器人" value="dingtalk" />
               <el-option label="企业微信机器人" value="weixin" />
             </el-select>
+          </el-form-item>
+          
+          <el-form-item label="通知模式">
+            <el-radio-group v-model="config.notification_mode">
+              <el-radio label="status_change">状态转换时通知</el-radio>
+              <el-radio label="every_time">每次异常都通知</el-radio>
+            </el-radio-group>
+            <div style="color: #909399; font-size: 12px; margin-top: 5px">
+              状态转换：仅在正常↔异常转换时通知；每次异常：每次检测到异常都发送通知
+            </div>
           </el-form-item>
 
           <!-- Server酱配置 -->
@@ -130,6 +152,11 @@
                   :label="host.name" 
                   :value="host.id" 
                 />
+              </el-select>
+              <el-select v-model="selectedStatus" placeholder="选择状态" style="width: 120px; margin-right: 10px" @change="loadPingLogs">
+                <el-option label="全部状态" value="" />
+                <el-option label="正常" value="normal" />
+                <el-option label="异常" value="abnormal" />
               </el-select>
               <el-button type="primary" @click="loadPingLogs">
                 <el-icon><Refresh /></el-icon> 刷新
@@ -228,6 +255,7 @@ const notificationPlatform = ref('none')
 const hosts = ref([])
 const pingLogs = ref([])
 const selectedHostId = ref('')
+const selectedStatus = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalLogs = ref(0)
@@ -238,7 +266,8 @@ const config = reactive({
   packet_timeout: 2,
   serverchan_key: '',
   webhook_url: '',
-  webhook_secret: ''
+  webhook_secret: '',
+  notification_mode: 'status_change'
 })
 
 // 计算属性：是否可以测试通知
@@ -285,7 +314,8 @@ const saveConfig = async () => {
       packet_timeout: config.packet_timeout,
       serverchan_key: config.serverchan_key || null,
       webhook_url: config.webhook_url || null,
-      webhook_secret: config.webhook_secret || null
+      webhook_secret: config.webhook_secret || null,
+      notification_mode: config.notification_mode
     })
     ElMessage.success('配置保存成功，监控间隔将在下次检测时生效')
     loadConfig()
@@ -307,7 +337,8 @@ const loadHosts = async () => {
 const loadPingLogs = async () => {
   try {
     const hostId = selectedHostId.value || null
-    const data = await api.getPingLogs(hostId, currentPage.value, pageSize.value)
+    const status = selectedStatus.value || null
+    const data = await api.getPingLogs(hostId, currentPage.value, pageSize.value, status)
     pingLogs.value = data.items || []
     totalLogs.value = data.total || 0
   } catch (error) {
