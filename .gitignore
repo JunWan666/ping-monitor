@@ -77,3 +77,6 @@ test_*.py
 *.tmp
 *.bak
 *.cache
+
+# 本地测试目录
+其他/

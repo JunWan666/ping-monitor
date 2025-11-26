@@ -1,4 +1,0 @@
-cd d:\AA-Tan\Work\ping-monitor\backend; python main.py
-
-
-cd d:\AA-Tan\Work\ping-monitor\frontend; npm run dev
