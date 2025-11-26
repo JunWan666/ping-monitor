@@ -110,8 +110,11 @@ const handleInit = async () => {
       })
       
       localStorage.setItem('token', result.access_token)
-      ElMessage.success('管理员创建成功')
-      router.push('/')
+      ElMessage.success('管理员创建成功，正在跳转...')
+      // 初始化后直接跳转到主页，因为token已经存在
+      setTimeout(() => {
+        window.location.href = '/'
+      }, 500)
     } catch (error) {
       ElMessage.error(error.response?.data?.detail || '创建失败')
     } finally {
