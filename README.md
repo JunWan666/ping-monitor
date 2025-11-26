@@ -71,8 +71,22 @@ ping-monitor/
 │   ├── package.json         # Node 依赖
 │   └── vite.config.js       # Vite 配置
 │
+├── docker/                  # Docker 相关文件
+│   ├── Dockerfile           # Docker 镜像构建文件
+│   ├── docker-compose.yml   # Docker Compose 配置
+│   ├── .dockerignore        # Docker 构建忽略文件
+│   ├── docker-start.bat     # Windows 一键启动脚本
+│   └── README.md            # Docker 部署说明
+│
+├── docs/                    # 文档目录
+│   └── LOGIN_README.md      # 登录认证系统说明
+│
+├── data/                    # 数据目录（运行后生成）
+│   └── ping_monitor.db      # SQLite 数据库文件
+│
+├── .gitignore               # Git 忽略文件
+├── LICENSE                  # MIT 开源协议
 ├── start.bat                # Windows 一键启动脚本
-├── ping_monitor.db          # SQLite 数据库（运行后生成）
 └── README.md                # 项目说明文档
 ```
 
@@ -102,7 +116,7 @@ docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" -e TZ=
 **Windows (PowerShell):**
 ```powershell
 # 构建镜像
-docker build -t ping-monitor .
+docker build -f docker/Dockerfile -t ping-monitor .
 
 # 运行容器
 docker run -d --name ping-monitor -p 8000:8000 -v "$PWD/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped ping-monitor
@@ -111,7 +125,7 @@ docker run -d --name ping-monitor -p 8000:8000 -v "$PWD/data:/app/data" -e TZ=As
 **Windows (CMD):**
 ```cmd
 # 构建镜像
-docker build -t ping-monitor .
+docker build -f docker/Dockerfile -t ping-monitor .
 
 # 运行容器
 docker run -d --name ping-monitor -p 8000:8000 -v "%cd%/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped ping-monitor
@@ -120,7 +134,7 @@ docker run -d --name ping-monitor -p 8000:8000 -v "%cd%/data:/app/data" -e TZ=As
 **Linux / macOS:**
 ```bash
 # 构建镜像
-docker build -t ping-monitor .
+docker build -f docker/Dockerfile -t ping-monitor .
 
 # 运行容器
 docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" -e TZ=Asia/Shanghai --restart unless-stopped ping-monitor
@@ -129,6 +143,9 @@ docker run -d --name ping-monitor -p 8000:8000 -v "$(pwd)/data:/app/data" -e TZ=
 #### 4.1.3 使用 docker-compose（推荐）
 
 ```bash
+# 进入docker目录
+cd docker
+
 # 启动服务
 docker-compose up -d
 
