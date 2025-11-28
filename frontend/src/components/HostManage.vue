@@ -217,45 +217,85 @@
     <!-- Ping结果对话框 -->
     <el-dialog
       v-model="pingDialogVisible"
-      title="Ping结果"
-      width="500px"
+      title="Ping测试"
+      width="900px"
       :close-on-click-modal="false"
     >
-      <div v-loading="pinging" element-loading-text="正在Ping，请稍候..." style="min-height: 200px">
-        <div v-if="pingResult" style="padding: 20px">
-          <el-descriptions :column="1" border>
-            <el-descriptions-item label="主机">
-              {{ pingResult.host }}
-            </el-descriptions-item>
-            <el-descriptions-item label="地址">
-              {{ pingResult.address }}
-            </el-descriptions-item>
-            <el-descriptions-item label="状态">
-              <el-tag :type="pingResult.packet_loss >= 20 ? 'danger' : 'success'">
-                {{ pingResult.status === 'success' ? '正常' : pingResult.status === 'unreachable' ? '无法访问' : '超时' }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="发送包数">
-              {{ pingResult.packet_sent }}
-            </el-descriptions-item>
-            <el-descriptions-item label="接收包数">
-              {{ pingResult.packet_received }}
-            </el-descriptions-item>
-            <el-descriptions-item label="丢包率">
-              <span :style="{ color: pingResult.packet_loss >= 20 ? '#f56c6c' : '#67c23a', fontWeight: 'bold' }">
-                {{ pingResult.packet_loss }}%
+      <div style="display: flex; gap: 20px;">
+        <!-- 左侧: Ping日志区域 -->
+        <div style="flex: 1; minWidth: 0;">
+          <div style="marginBottom: 10px; fontWeight: bold; color: #409eff;">实时日志</div>
+          <div 
+            ref="pingLogContainer" 
+            class="ping-log-container"
+            :style="{ height: '400px', overflowY: 'auto', backgroundColor: '#1e1e1e', color: '#d4d4d4', padding: '15px', borderRadius: '4px', fontFamily: 'Consolas, Monaco, monospace', fontSize: '13px', lineHeight: '1.6' }"
+          >
+            <div v-if="pingLogs.length === 0" style="color: #888; text-align: center; padding: 20px;">
+              准备开始 Ping 测试...
+            </div>
+            <div 
+              v-for="(log, index) in pingLogs" 
+              :key="index" 
+              :style="{ 
+                marginBottom: '8px',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all'
+              }"
+            >
+              <span v-if="log.type === 'start'" style="color: #4ec9b0; fontWeight: bold">▶ {{ log.message }}</span>
+              <span v-else-if="log.type === 'ping'">
+                <span style="color: #d4d4d4">[{{ log.sequence }}/{{ log.total }}]</span>
+                <span :style="{ color: log.status === 'success' ? '#6a9955' : '#f48771' }">●</span>
+                <span :style="{ color: getDelayColor(log.delay) }">{{ log.message }}</span>
               </span>
-            </el-descriptions-item>
-            <el-descriptions-item label="最小延迟">
-              {{ pingResult.min_rtt ? pingResult.min_rtt + 'ms' : '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="最大延迟">
-              {{ pingResult.max_rtt ? pingResult.max_rtt + 'ms' : '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="平均延迟">
-              {{ pingResult.avg_rtt ? pingResult.avg_rtt + 'ms' : '-' }}
-            </el-descriptions-item>
-          </el-descriptions>
+              <span v-else-if="log.type === 'complete'" style="color: #4ec9b0; fontWeight: bold">✓ {{ log.message }}</span>
+              <span v-else-if="log.type === 'error'" style="color: #f48771; fontWeight: bold">✗ {{ log.message }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧: 汇总结果区域 -->
+        <div style="flex: 1; minWidth: 280px;">
+          <div style="marginBottom: 10px; fontWeight: bold; color: #409eff;">测试结果汇总</div>
+          <div v-if="pingSummary" style="backgroundColor: #f5f7fa; padding: 20px; borderRadius: 4px; height: 400px; display: flex; flexDirection: column; justifyContent: center;">
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="状态" label-align="center" align="center">
+                <el-tag :type="pingSummary.packet_loss >= 20 ? 'danger' : 'success'">
+                  {{ pingSummary.status === 'success' ? '正常' : pingSummary.status === 'unreachable' ? '无法访问' : '超时' }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="丢包率" label-align="center" align="center">
+                <span :style="{ color: pingSummary.packet_loss >= 20 ? '#f56c6c' : '#67c23a', fontWeight: 'bold', fontSize: '16px' }">
+                  {{ pingSummary.packet_loss }}%
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="发送包数" label-align="center" align="center">
+                <span style="fontSize: 14px">{{ pingSummary.packet_sent }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="接收包数" label-align="center" align="center">
+                <span style="fontSize: 14px">{{ pingSummary.packet_received }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="最小延迟" label-align="center" align="center">
+                <span :style="{ color: getDelayColor(pingSummary.min_rtt), fontSize: '14px', fontWeight: 'bold' }">
+                  {{ pingSummary.min_rtt ? pingSummary.min_rtt + 'ms' : '-' }}
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="最大延迟" label-align="center" align="center">
+                <span :style="{ color: getDelayColor(pingSummary.max_rtt), fontSize: '14px', fontWeight: 'bold' }">
+                  {{ pingSummary.max_rtt ? pingSummary.max_rtt + 'ms' : '-' }}
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="平均延迟" label-align="center" align="center">
+                <span :style="{ color: getDelayColor(pingSummary.avg_rtt), fontSize: '18px', fontWeight: 'bold' }">
+                  {{ pingSummary.avg_rtt ? pingSummary.avg_rtt + 'ms' : '-' }}
+                </span>
+              </el-descriptions-item>
+            </el-descriptions>
+          </div>
+          <div v-else style="color: #909399; textAlign: center; padding: 60px 20px; backgroundColor: #f5f7fa; borderRadius: 4px; height: 400px; display: flex; flexDirection: column; alignItems: center; justifyContent: center;">
+            <i class="el-icon-loading" style="fontSize: 32px; marginBottom: 15px;"></i>
+            <div style="fontSize: 16px;">等待测试结果...</div>
+          </div>
         </div>
       </div>
       
@@ -288,6 +328,10 @@ const uploadRef = ref(null)
 const excelData = ref([])
 const fileList = ref([])
 const pingResult = ref(null)
+const pingLogs = ref([])
+const pingSummary = ref(null)
+const pingLogContainer = ref(null)
+const pingEventSource = ref(null)
 const searchKeyword = ref('')
 const statusFilter = ref('')
 const currentPage = ref(1)
@@ -427,27 +471,76 @@ const updateHostStatus = async (host) => {
 }
 
 const pingHost = async (host) => {
+  // 重置状态
   pingResult.value = null
+  pingLogs.value = []
+  pingSummary.value = null
   pinging.value = true
   pingDialogVisible.value = true
   
   try {
-    const result = await api.pingNow(host.id)
-    pingResult.value = result
-    pinging.value = false
+    // 关闭之前的连接
+    if (pingEventSource.value) {
+      pingEventSource.value.close()
+    }
     
-    // 刷新主机列表
-    loadHosts()
+    // 启动SSE流
+    pingEventSource.value = api.pingStream(
+      host.id,
+      // onMessage: 处理每条消息
+      (data) => {
+        pingLogs.value.push(data)
+        
+        // 如果是汇总数据,保存到summary
+        if (data.type === 'summary') {
+          pingSummary.value = data
+        }
+        
+        // 自动滚动到底部
+        nextTick(() => {
+          if (pingLogContainer.value) {
+            pingLogContainer.value.scrollTop = pingLogContainer.value.scrollHeight
+          }
+        })
+      },
+      // onError: 错误处理
+      (error) => {
+        pinging.value = false
+        ElMessage.error(`Ping失败: 连接错误`)
+      },
+      // onComplete: 完成回调
+      () => {
+        pinging.value = false
+        // 刷新主机列表
+        loadHosts()
+      }
+    )
   } catch (error) {
     pinging.value = false
     pingDialogVisible.value = false
-    ElMessage.error(`Ping失败: ${error.response?.data?.detail || error.message || '网络错误'}`)
+    ElMessage.error(`Ping失败: ${error.message || '网络错误'}`)
   }
 }
 
 const closePingDialog = () => {
+  // 关闭SSE连接
+  if (pingEventSource.value) {
+    pingEventSource.value.close()
+    pingEventSource.value = null
+  }
+  
   pingDialogVisible.value = false
+  pingLogs.value = []
+  pingSummary.value = null
   pingResult.value = null
+}
+
+// 根据延迟时间返回颜色
+const getDelayColor = (delay) => {
+  if (!delay) return '#d4d4d4'
+  if (delay < 50) return '#6a9955'  // 绿色: 优秀
+  if (delay < 100) return '#dcdcaa' // 黄色: 一般
+  return '#f48771'                   // 红色: 较慢
 }
 
 const deleteHost = async (host) => {

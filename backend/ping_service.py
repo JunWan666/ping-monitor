@@ -1,9 +1,11 @@
 import platform
 import subprocess
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Generator
 from ping3 import ping
 import statistics
+import time
+import asyncio
 
 
 class PingService:
@@ -67,6 +69,102 @@ class PingService:
             'max_rtt': round(max_rtt, 2) if max_rtt else None,
             'avg_rtt': round(avg_rtt, 2) if avg_rtt else None,
             'status': status
+        }
+    
+    @staticmethod
+    def ping_host_stream(address: str, count: int = 10, timeout: int = 2) -> Generator[Dict, None, None]:
+        """
+        流式Ping主机，逐次返回每个ping的结果（用于实时显示）
+        
+        Args:
+            address: 主机地址(IP或域名)
+            count: 发送包数量
+            timeout: 超时时间(秒)
+            
+        Yields:
+            每次ping的结果字典
+        """
+        results = []
+        packet_sent = 0
+        packet_received = 0
+        
+        # 发送开始消息
+        yield {
+            'type': 'start',
+            'message': f'开始Ping {address}，共{count}次',
+            'address': address,
+            'count': count
+        }
+        
+        for i in range(count):
+            packet_sent += 1
+            try:
+                start_time = time.time()
+                delay = ping(address, timeout=timeout, unit='ms')
+                
+                if delay is not None:
+                    packet_received += 1
+                    results.append(delay)
+                    yield {
+                        'type': 'ping',
+                        'sequence': i + 1,
+                        'total': count,
+                        'status': 'success',
+                        'delay': round(delay, 2),
+                        'message': f'来自 {address} 的回复: 时间={round(delay, 2)}ms',
+                        'address': address
+                    }
+                else:
+                    yield {
+                        'type': 'ping',
+                        'sequence': i + 1,
+                        'total': count,
+                        'status': 'timeout',
+                        'message': f'请求超时',
+                        'address': address
+                    }
+            except Exception as e:
+                yield {
+                    'type': 'ping',
+                    'sequence': i + 1,
+                    'total': count,
+                    'status': 'error',
+                    'message': f'Ping失败: {str(e)}',
+                    'address': address
+                }
+        
+        # 计算统计信息
+        packet_loss = ((packet_sent - packet_received) / packet_sent * 100) if packet_sent > 0 else 100.0
+        
+        if results:
+            min_rtt = min(results)
+            max_rtt = max(results)
+            avg_rtt = statistics.mean(results)
+            status = 'success'
+        else:
+            min_rtt = None
+            max_rtt = None
+            avg_rtt = None
+            status = 'unreachable' if packet_received == 0 else 'timeout'
+        
+        # 发送汇总消息(不包含文本,只有数据)
+        summary = {
+            'type': 'summary',
+            'packet_sent': packet_sent,
+            'packet_received': packet_received,
+            'packet_loss': round(packet_loss, 2),
+            'min_rtt': round(min_rtt, 2) if min_rtt else None,
+            'max_rtt': round(max_rtt, 2) if max_rtt else None,
+            'avg_rtt': round(avg_rtt, 2) if avg_rtt else None,
+            'status': status
+        }
+        
+        yield summary
+        
+        # 发送完成消息
+        yield {
+            'type': 'complete',
+            'message': 'Ping测试完成!'
         }
     
     @staticmethod

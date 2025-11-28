@@ -65,6 +65,37 @@ export default {
     const params = background ? { background: true } : {}
     return api.post(`/ping/${id}`, null, { params })
   },
+  pingStream: (id, onMessage, onError, onComplete) => {
+    // SSE实时Ping流
+    const token = localStorage.getItem('token')
+    const eventSource = new EventSource(`/api/ping-stream/${id}?token=${token}`)
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (onMessage) onMessage(data)
+        
+        // 如果收到完成消息,关闭连接
+        if (data.type === 'complete' || data.type === 'error') {
+          eventSource.close()
+          if (data.type === 'complete' && onComplete) {
+            onComplete()
+          }
+        }
+      } catch (err) {
+        console.error('解析SSE数据失败:', err)
+      }
+    }
+    
+    eventSource.onerror = (error) => {
+      console.error('SSE连接错误:', error)
+      eventSource.close()
+      if (onError) onError(error)
+    }
+    
+    // 返回EventSource对象,允许外部控制
+    return eventSource
+  },
   pingAll: () => api.post('/ping-all'),
   getPingLogs: (hostId, page = 1, pageSize = 20, status = null) => {
     const params = { page, page_size: pageSize }

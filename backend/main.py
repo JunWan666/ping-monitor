@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -19,6 +19,8 @@ from auth import (
 import uvicorn
 import os
 import logging
+import json
+import asyncio
 
 # 配置日志格式
 logging.basicConfig(
@@ -353,6 +355,66 @@ async def ping_now(host_id: int, background: bool = False, background_tasks: Bac
         "address": host.address,
         **result
     }
+
+@app.get("/api/ping-stream/{host_id}")
+async def ping_stream(host_id: int, token: str = None, db: Session = Depends(get_db)):
+    """实时流式Ping（SSE）"""
+    # 验证token
+    from jose import JWTError, jwt
+    from auth import SECRET_KEY, ALGORITHM
+    
+    if not token:
+        raise HTTPException(status_code=401, detail="未提供Token")
+    
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="无效的Token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token验证失败")
+    
+    host = db.query(Host).filter(Host.id == host_id).first()
+    if not host:
+        raise HTTPException(status_code=404, detail="主机不存在")
+    
+    async def event_generator():
+        """SSE事件生成器"""
+        try:
+            # 使用生成器模式获取ping结果
+            for event in PingService.ping_host_stream(host.address, count=10):
+                # 转换为SSE格式
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                # 给客户端一点时间处理
+                await asyncio.sleep(0.1)
+            
+            # Ping完成后保存记录
+            result = PingService.ping_host(host.address, count=10)
+            record = PingRecord(
+                host_id=host.id,
+                packet_sent=result['packet_sent'],
+                packet_received=result['packet_received'],
+                packet_loss=result['packet_loss'],
+                min_rtt=result['min_rtt'],
+                max_rtt=result['max_rtt'],
+                avg_rtt=result['avg_rtt'],
+            )
+            db.add(record)
+            db.commit()
+            
+        except Exception as e:
+            logger.error(f"Stream ping error: {e}")
+            yield f"data: {{\"type\": \"error\", \"message\": \"Ping失败: {str(e)}\"}}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @app.post("/api/ping-all")
 async def ping_all(background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
