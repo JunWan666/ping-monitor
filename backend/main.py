@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
-from database import init_db, get_db, Host, PingRecord, Alert, SystemConfig, User
+from database import init_db, get_db, Host, PingRecord, Alert, SystemConfig, User, SystemLog
 from ping_service import PingService
 from scheduler import scheduler
 from auth import (
@@ -599,6 +600,230 @@ async def get_dashboard(current_user: User = Depends(get_current_user), db: Sess
         "host_status": host_status
     }
 
+# ==================== 数据看板API ====================
+
+def _get_hours_from_range(time_range: str) -> int:
+    """将时间范围字符串转换为小时数"""
+    range_map = {
+        '1h': 1,
+        '1d': 24,
+        '3d': 72,
+        '7d': 168,
+        '15d': 360,
+        '30d': 720
+    }
+    return range_map.get(time_range, 24)
+
+def _format_time_for_range(dt: datetime, time_range: str) -> str:
+    """根据时间范围格式化时间显示"""
+    if time_range == '1h':
+        return dt.strftime('%H:%M')
+    elif time_range in ['1d', '3d']:
+        return dt.strftime('%m/%d %H:%M')
+    else:
+        return dt.strftime('%m/%d')
+
+@app.get("/api/databoard/stats/{time_range}")
+async def get_databoard_stats(
+    time_range: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取数据看板统计数据"""
+    hours = _get_hours_from_range(time_range)
+    since = datetime.now() - timedelta(hours=hours)
+    
+    # 获取所有启用的主机
+    hosts = db.query(Host).filter(Host.enabled == True).all()
+    total_hosts = len(hosts)
+    
+    if total_hosts == 0:
+        return {
+            "total_hosts": 0,
+            "avg_online_rate": 0,
+            "avg_rtt": 0,
+            "avg_packet_loss": 0,
+            "host_stats": [],
+            "trend_data": []
+        }
+    
+    # 计算每个主机的统计数据
+    host_stats = []
+    total_online_rate = 0
+    total_avg_rtt = 0
+    total_avg_packet_loss = 0
+    
+    for host in hosts:
+        records = db.query(PingRecord).filter(
+            PingRecord.host_id == host.id,
+            PingRecord.created_at >= since
+        ).all()
+        
+        if not records:
+            continue
+        
+        # 计算统计指标
+        check_count = len(records)
+        online_count = sum(1 for r in records if r.packet_loss < host.alert_threshold)
+        online_rate = round((online_count / check_count) * 100, 2) if check_count > 0 else 0
+        
+        avg_packet_loss = round(sum(r.packet_loss for r in records) / check_count, 2)
+        avg_rtt = round(sum(r.avg_rtt or 0 for r in records) / check_count, 2)
+        min_rtt = round(min(r.min_rtt or 999999 for r in records), 2)
+        max_rtt = round(max(r.max_rtt or 0 for r in records), 2)
+        
+        total_online_rate += online_rate
+        total_avg_rtt += avg_rtt
+        total_avg_packet_loss += avg_packet_loss
+        
+        host_stats.append({
+            "id": host.id,
+            "name": host.name,
+            "address": host.address,
+            "check_count": check_count,
+            "online_rate": online_rate,
+            "avg_packet_loss": avg_packet_loss,
+            "avg_rtt": avg_rtt,
+            "min_rtt": min_rtt,
+            "max_rtt": max_rtt
+        })
+    
+    # 计算整体平均值
+    host_count = len(host_stats)
+    avg_online_rate = round(total_online_rate / host_count, 2) if host_count > 0 else 0
+    avg_rtt = round(total_avg_rtt / host_count, 2) if host_count > 0 else 0
+    avg_packet_loss = round(total_avg_packet_loss / host_count, 2) if host_count > 0 else 0
+    
+    # 生成趋势数据(按时间分组)
+    all_records = db.query(PingRecord).join(
+        Host, PingRecord.host_id == Host.id
+    ).filter(
+        Host.enabled == True,
+        PingRecord.created_at >= since
+    ).order_by(PingRecord.created_at).all()
+    
+    # 根据时间范围确定分组间隔
+    if time_range == '1h':
+        interval_minutes = 5  # 5分钟一组
+    elif time_range == '1d':
+        interval_minutes = 60  # 1小时一组
+    elif time_range == '3d':
+        interval_minutes = 180  # 3小时一组
+    elif time_range == '7d':
+        interval_minutes = 360  # 6小时一组
+    else:
+        interval_minutes = 1440  # 1天一组
+    
+    # 按时间分组统计
+    time_groups = {}
+    for record in all_records:
+        # 计算时间组的key
+        timestamp = record.created_at.timestamp()
+        group_key = int(timestamp // (interval_minutes * 60)) * (interval_minutes * 60)
+        
+        if group_key not in time_groups:
+            time_groups[group_key] = {
+                'records': [],
+                'hosts': set()
+            }
+        
+        time_groups[group_key]['records'].append(record)
+        time_groups[group_key]['hosts'].add(record.host_id)
+    
+    # 生成趋势数据
+    trend_data = []
+    for timestamp in sorted(time_groups.keys()):
+        group = time_groups[timestamp]
+        records = group['records']
+        hosts_in_group = len(group['hosts'])
+        
+        if not records:
+            continue
+        
+        dt = datetime.fromtimestamp(timestamp)
+        time_str = _format_time_for_range(dt, time_range)
+        
+        # 计算该时间段的平均值
+        avg_packet_loss = round(sum(r.packet_loss for r in records) / len(records), 2)
+        avg_rtt = round(sum(r.avg_rtt or 0 for r in records) / len(records), 2)
+        
+        # 计算在线率（基于告警阈值）
+        online_count = 0
+        for r in records:
+            host = db.query(Host).filter(Host.id == r.host_id).first()
+            if host and r.packet_loss < host.alert_threshold:
+                online_count += 1
+        
+        online_rate = round((online_count / len(records)) * 100, 2) if len(records) > 0 else 0
+        
+        trend_data.append({
+            "time": time_str,
+            "avg_packet_loss": avg_packet_loss,
+            "avg_rtt": avg_rtt,
+            "online_rate": online_rate
+        })
+    
+    return {
+        "total_hosts": total_hosts,
+        "avg_online_rate": avg_online_rate,
+        "avg_rtt": avg_rtt,
+        "avg_packet_loss": avg_packet_loss,
+        "host_stats": host_stats,
+        "trend_data": trend_data
+    }
+
+@app.get("/api/databoard/host/{host_id}/{time_range}")
+async def get_host_detail_stats(
+    host_id: int,
+    time_range: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取单个主机的详细统计数据"""
+    host = db.query(Host).filter(Host.id == host_id).first()
+    if not host:
+        raise HTTPException(status_code=404, detail="主机不存在")
+    
+    hours = _get_hours_from_range(time_range)
+    since = datetime.now() - timedelta(hours=hours)
+    
+    records = db.query(PingRecord).filter(
+        PingRecord.host_id == host_id,
+        PingRecord.created_at >= since
+    ).order_by(PingRecord.created_at).all()
+    
+    if not records:
+        return []
+    
+    # 根据时间范围确定采样间隔
+    if time_range == '1h':
+        sample_interval = 1  # 显示所有数据点
+    elif time_range == '1d':
+        sample_interval = 2  # 每2个数据点取1个
+    elif time_range == '3d':
+        sample_interval = 5
+    elif time_range == '7d':
+        sample_interval = 10
+    else:
+        sample_interval = 20
+    
+    # 采样数据
+    sampled_records = records[::sample_interval] if sample_interval > 1 else records
+    
+    # 格式化输出
+    result = []
+    for record in sampled_records:
+        time_str = _format_time_for_range(record.created_at, time_range)
+        result.append({
+            "time": time_str,
+            "packet_loss": record.packet_loss,
+            "avg_rtt": record.avg_rtt or 0,
+            "min_rtt": record.min_rtt or 0,
+            "max_rtt": record.max_rtt or 0
+        })
+    
+    return result
+
 # 静态文件服务（生产环境）
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "../frontend/dist")
 if os.path.exists(FRONTEND_DIST):
@@ -702,6 +927,134 @@ async def test_notification(notification_type: str, current_user: User = Depends
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"发送测试通知失败: {str(e)}")
+
+# ==================== 系统日志API ====================
+
+@app.get("/api/system-logs")
+async def get_system_logs(
+    log_type: Optional[str] = None,
+    module: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取系统日志（分页、支持筛选）"""
+    query = db.query(SystemLog)
+    
+    # 类型筛选
+    if log_type:
+        query = query.filter(SystemLog.log_type == log_type)
+    
+    # 模块筛选
+    if module:
+        query = query.filter(SystemLog.module == module)
+    
+    # 计算总数
+    total = query.count()
+    
+    # 分页
+    offset = (page - 1) * page_size
+    logs = query.order_by(SystemLog.created_at.desc()).offset(offset).limit(page_size).all()
+    
+    # 转换为字典列表
+    items = []
+    for log in logs:
+        items.append({
+            'id': log.id,
+            'log_type': log.log_type,
+            'module': log.module,
+            'message': log.message,
+            'details': log.details,
+            'created_at': log.created_at
+        })
+    
+    return {
+        'items': items,
+        'total': total,
+        'page': page,
+        'page_size': page_size
+    }
+
+@app.post("/api/system-logs/cleanup")
+async def cleanup_system_logs(
+    days: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """清理旧系统日志"""
+    cutoff_date = datetime.now() - timedelta(days=days)
+    count = db.query(SystemLog).filter(SystemLog.created_at < cutoff_date).count()
+    
+    if count > 0:
+        db.query(SystemLog).filter(SystemLog.created_at < cutoff_date).delete()
+        db.commit()
+    
+    return {
+        'message': f'清理了 {count} 条系统日志',
+        'deleted_count': count
+    }
+
+@app.post("/api/data-maintenance/aggregate-hourly")
+async def trigger_hourly_aggregation(
+    current_user: User = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None
+):
+    """手动触发小时级数据聚合"""
+    if background_tasks:
+        background_tasks.add_task(_do_hourly_aggregation)
+        return {'message': '小时级数据聚合任务已启动'}
+    else:
+        _do_hourly_aggregation()
+        return {'message': '小时级数据聚合完成'}
+
+@app.post("/api/data-maintenance/aggregate-daily")
+async def trigger_daily_aggregation(
+    current_user: User = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None
+):
+    """手动触发日级数据聚合"""
+    if background_tasks:
+        background_tasks.add_task(_do_daily_aggregation)
+        return {'message': '日级数据聚合任务已启动'}
+    else:
+        _do_daily_aggregation()
+        return {'message': '日级数据聚合完成'}
+
+@app.post("/api/data-maintenance/cleanup")
+async def trigger_data_cleanup(
+    days: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    """手动触发数据清理"""
+    if days is None:
+        # 从配置读取
+        config = db.query(SystemConfig).first()
+        days = config.data_retention_days if config else 30
+    
+    if background_tasks:
+        background_tasks.add_task(_do_data_cleanup, days)
+        return {'message': f'数据清理任务已启动（保留{days}天）'}
+    else:
+        _do_data_cleanup(days)
+        return {'message': f'数据清理完成（保留{days}天）'}
+
+def _do_hourly_aggregation():
+    """执行小时级聚合"""
+    from data_maintenance import DataMaintenance
+    DataMaintenance.aggregate_hourly_stats()
+
+def _do_daily_aggregation():
+    """执行日级聚合"""
+    from data_maintenance import DataMaintenance
+    DataMaintenance.aggregate_daily_stats()
+
+def _do_data_cleanup(days: int):
+    """执行数据清理"""
+    from data_maintenance import DataMaintenance
+    DataMaintenance.cleanup_old_records(days=days)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

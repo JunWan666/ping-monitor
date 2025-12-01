@@ -17,6 +17,10 @@
             <el-icon><Monitor /></el-icon>
             <span>仪表盘</span>
           </el-menu-item>
+          <el-menu-item index="databoard">
+            <el-icon><TrendCharts /></el-icon>
+            <span>数据看板</span>
+          </el-menu-item>
           <el-menu-item index="hosts">
             <el-icon><Document /></el-icon>
             <span>主机管理</span>
@@ -36,6 +40,9 @@
             <el-menu-item index="settings-logs">
               <span>Ping日志</span>
             </el-menu-item>
+            <el-menu-item index="settings-system-logs">
+              <span>系统日志</span>
+            </el-menu-item>
             <el-menu-item index="settings-profile">
               <span>修改密码</span>
             </el-menu-item>
@@ -51,9 +58,11 @@
         </el-header>
         <el-main style="overflow-y: auto">
           <Dashboard v-if="activeMenu === 'dashboard'" />
+          <DataBoard v-else-if="activeMenu === 'databoard'" />
           <HostManage v-else-if="activeMenu === 'hosts'" />
           <AlertList v-else-if="activeMenu === 'alerts'" />
           <UserProfile v-else-if="activeMenu === 'settings-profile'" />
+          <SystemLogs v-else-if="activeMenu === 'settings-system-logs'" />
           <Settings v-else-if="activeMenu.startsWith('settings')" :active-tab="activeMenu" />
         </el-main>
       </el-container>
@@ -65,20 +74,24 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import Dashboard from './Dashboard.vue'
+import DataBoard from './DataBoard.vue'
 import HostManage from './HostManage.vue'
 import AlertList from './AlertList.vue'
 import Settings from './Settings.vue'
 import UserProfile from './UserProfile.vue'
+import SystemLogs from './SystemLogs.vue'
 
 const router = useRouter()
 const activeMenu = ref('dashboard')
 
 const menuTitles = {
   dashboard: '监控仪表盘',
+  databoard: '数据看板',
   hosts: '主机管理',
   alerts: '告警记录',
   'settings-basic': '系统设置 - 基本设置',
   'settings-logs': '系统设置 - Ping日志',
+  'settings-system-logs': '系统设置 - 系统日志',
   'settings-profile': '系统设置 - 修改密码'
 }
 

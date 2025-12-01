@@ -33,8 +33,12 @@ class MonitorScheduler:
             config = db.query(SystemConfig).first()
             if config:
                 self.current_interval = config.check_interval
+                aggregate_interval = config.aggregate_interval
+                cleanup_hour, cleanup_minute = config.cleanup_time.split(':')
             else:
                 self.current_interval = 5  # 默认值
+                aggregate_interval = 1
+                cleanup_hour, cleanup_minute = '03', '00'
         finally:
             db.close()
         
@@ -46,8 +50,31 @@ class MonitorScheduler:
             id='monitor_hosts',
             replace_existing=True
         )
+        
+        # 每 N小时执行一次数据聚合
+        self.scheduler.add_job(
+            self._run_hourly_aggregation,
+            'cron',
+            hour=f'*/{aggregate_interval}',  # 按配置的间隔
+            minute=5,
+            id='hourly_aggregation',
+            replace_existing=True
+        )
+        
+        # 每天按配置时间执行日级聚合和数据清理
+        self.scheduler.add_job(
+            self._run_daily_tasks,
+            'cron',
+            hour=int(cleanup_hour),
+            minute=int(cleanup_minute),
+            id='daily_tasks',
+            replace_existing=True
+        )
+        
         self.scheduler.start()
         logger.info(f"监控调度器已启动，每{self.current_interval}分钟执行一次")
+        logger.info(f"数据聚合任务：每{aggregate_interval}小时执行一次")
+        logger.info(f"数据清理任务：每天{cleanup_hour}:{cleanup_minute}执行")
         
         # 在后台线程中立即执行一次监控（不阻塞启动）
         logger.info("立即执行首次监控...")
@@ -350,6 +377,33 @@ class MonitorScheduler:
             logger.error(f"❌ 发送告警通知异常 (Alert ID: {alert_id}): {str(e)}")
         finally:
             db.close()
+    
+    def _run_hourly_aggregation(self):
+        """执行小时级数据聚合"""
+        logger.info("📈 开始执行小时级数据聚合...")
+        try:
+            from data_maintenance import DataMaintenance
+            DataMaintenance.aggregate_hourly_stats()
+        except Exception as e:
+            logger.error(f"❌ 小时级数据聚合失败: {str(e)}")
+    
+    def _run_daily_tasks(self):
+        """执行每日任务：日级聚合 + 数据清理"""
+        logger.info("📅 开始执行每日维护任务...")
+        
+        # 1. 日级数据聚合
+        try:
+            from data_maintenance import DataMaintenance
+            DataMaintenance.aggregate_daily_stats()
+        except Exception as e:
+            logger.error(f"❌ 日级数据聚合失败: {str(e)}")
+        
+        # 2. 数据清理（保疕30天）
+        try:
+            from data_maintenance import DataMaintenance
+            DataMaintenance.cleanup_old_records(days=30)
+        except Exception as e:
+            logger.error(f"❌ 数据溅理失败: {str(e)}")
 
 # 全局调度器实例
 scheduler = MonitorScheduler()

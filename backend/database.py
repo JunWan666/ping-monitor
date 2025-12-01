@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -80,6 +80,10 @@ class SystemConfig(Base):
     webhook_url = Column(String, nullable=True)  # Webhook地址
     webhook_secret = Column(String, nullable=True)  # Webhook加签密钥(钉钉)
     notification_mode = Column(String, default='status_change')  # 通知模式: status_change(状态转换时), every_time(每次异常)
+    # 数据维护配置
+    data_retention_days = Column(Integer, default=30)  # 原始数据保留天数
+    cleanup_time = Column(String, default='03:00')  # 数据清理时间(HH:MM)
+    aggregate_interval = Column(Integer, default=1)  # 聚合间隔(小时)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 class User(Base):
@@ -92,8 +96,37 @@ class User(Base):
     is_admin = Column(Boolean, default=True)  # 是否管理员
     created_at = Column(DateTime, default=datetime.now)
 
+class PingStatistics(Base):
+    """聚合统计表（按小时/天聚合）"""
+    __tablename__ = "ping_statistics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    host_id = Column(Integer, index=True)
+    stat_type = Column(String, index=True)  # 'hourly' 或 'daily'
+    stat_time = Column(DateTime, index=True)  # 统计时间点
+    check_count = Column(Integer)  # 检测次数
+    online_count = Column(Integer)  # 在线次数
+    avg_packet_loss = Column(Float)  # 平均丢包率
+    avg_rtt = Column(Float, nullable=True)  # 平均延迟
+    min_rtt = Column(Float, nullable=True)  # 最小延迟
+    max_rtt = Column(Float, nullable=True)  # 最大延迟
+    created_at = Column(DateTime, default=datetime.now)
+
+class SystemLog(Base):
+    """系统日志表"""
+    __tablename__ = "system_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    log_type = Column(String, index=True)  # 'info', 'warning', 'error', 'cleanup', 'aggregate'
+    module = Column(String)  # 模块名称
+    message = Column(Text)  # 日志内容
+    details = Column(Text, nullable=True)  # 详细信息（JSON格式）
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
 def init_db():
     """初始化数据库"""
+    # 删除所有表并重新创建（仅在开发环境）
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     
     # 初始化系统配置

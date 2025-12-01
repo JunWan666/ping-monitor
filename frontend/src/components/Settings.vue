@@ -2,46 +2,100 @@
   <div>
     <!-- 基本设置 -->
     <div v-if="props.activeTab === 'settings-basic'">
-      <el-card shadow="hover" style="margin-bottom: 20px">
-        <template #header>
-          <span style="font-weight: bold">监控配置</span>
-        </template>
-        <el-form :model="config" label-width="150px" style="max-width: 700px">
-          <el-form-item label="检测间隔">
-            <div style="display: flex; flex-direction: column; width: 100%">
-              <div style="display: flex; align-items: center">
-                <el-input-number v-model="config.check_interval" :min="1" :max="1440" style="width: 150px" />
-                <span style="margin-left: 10px">分钟</span>
-              </div>
-              <div style="color: #909399; font-size: 12px; margin-top: 8px">
-                建议：1-60分钟，过小会增加系统负担
-              </div>
-            </div>
-          </el-form-item>
-          <el-form-item label="每次发送包数">
-            <div style="display: flex; flex-direction: column; width: 100%">
-              <div style="display: flex; align-items: center">
-                <el-input-number v-model="config.packet_count" :min="1" :max="100" style="width: 150px" />
-                <span style="margin-left: 10px">个</span>
-              </div>
-              <div style="color: #909399; font-size: 12px; margin-top: 8px">
-                建议：10-20个，包数越多结果越准确但耗时越长
-              </div>
-            </div>
-          </el-form-item>
-          <el-form-item label="超时时间">
-            <div style="display: flex; flex-direction: column; width: 100%">
-              <div style="display: flex; align-items: center">
-                <el-input-number v-model="config.packet_timeout" :min="1" :max="10" style="width: 150px" />
-                <span style="margin-left: 10px">秒</span>
-              </div>
-              <div style="color: #909399; font-size: 12px; margin-top: 8px">
-                建议：2-5秒
-              </div>
-            </div>
-          </el-form-item>
-        </el-form>
-      </el-card>
+      <!-- 监控配置和数据维护配置 - 左右布局 -->
+      <el-row :gutter="20" style="margin-bottom: 20px">
+        <!-- 左侧：监控配置 -->
+        <el-col :span="12">
+          <el-card shadow="hover" style="height: 100%">
+            <template #header>
+              <span style="font-weight: bold">监控配置</span>
+            </template>
+            <el-form :model="config" label-width="120px">
+              <el-form-item label="检测间隔">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <div style="display: flex; align-items: center">
+                    <el-input-number v-model="config.check_interval" :min="1" :max="1440" style="width: 150px" />
+                    <span style="margin-left: 10px">分钟</span>
+                  </div>
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    建议：1-60分钟，过小会增加系统负担
+                  </div>
+                </div>
+              </el-form-item>
+              <el-form-item label="每次发送包数">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <div style="display: flex; align-items: center">
+                    <el-input-number v-model="config.packet_count" :min="1" :max="100" style="width: 150px" />
+                    <span style="margin-left: 10px">个</span>
+                  </div>
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    建议：10-20个，包数越多结果越准确但耗时越长
+                  </div>
+                </div>
+              </el-form-item>
+              <el-form-item label="超时时间">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <div style="display: flex; align-items: center">
+                    <el-input-number v-model="config.packet_timeout" :min="1" :max="10" style="width: 150px" />
+                    <span style="margin-left: 10px">秒</span>
+                  </div>
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    建议：2-5秒
+                  </div>
+                </div>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-col>
+
+        <!-- 右侧：数据维护配置 -->
+        <el-col :span="12">
+          <el-card shadow="hover" style="height: 100%">
+            <template #header>
+              <span style="font-weight: bold">数据维护配置</span>
+            </template>
+            <el-form :model="config" label-width="120px">
+              <el-form-item label="原始数据保留">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <div style="display: flex; align-items: center">
+                    <el-input-number v-model="config.data_retention_days" :min="7" :max="365" style="width: 150px" />
+                    <span style="margin-left: 10px">天</span>
+                  </div>
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    原始 Ping 记录保留天数，超过后自动清理（聚合数据会永久保留）
+                  </div>
+                </div>
+              </el-form-item>
+              <el-form-item label="数据清理时间">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <el-time-select
+                    v-model="config.cleanup_time"
+                    start="00:00"
+                    step="01:00"
+                    end="23:00"
+                    placeholder="选择时间"
+                    style="width: 150px"
+                  />
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    每天执行数据清理的时间，建议选择业务低峰时段
+                  </div>
+                </div>
+              </el-form-item>
+              <el-form-item label="数据聚合间隔">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <div style="display: flex; align-items: center">
+                    <el-input-number v-model="config.aggregate_interval" :min="1" :max="24" style="width: 150px" />
+                    <span style="margin-left: 10px">小时</span>
+                  </div>
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    每隔多久执行一次小时级数据聚合，建议 1-6 小时
+                  </div>
+                </div>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-col>
+      </el-row>
 
       <el-card shadow="hover">
         <template #header>
@@ -267,7 +321,10 @@ const config = reactive({
   serverchan_key: '',
   webhook_url: '',
   webhook_secret: '',
-  notification_mode: 'status_change'
+  notification_mode: 'status_change',
+  data_retention_days: 30,
+  cleanup_time: '03:00',
+  aggregate_interval: 1
 })
 
 // 计算属性：是否可以测试通知
@@ -315,7 +372,10 @@ const saveConfig = async () => {
       serverchan_key: config.serverchan_key || null,
       webhook_url: config.webhook_url || null,
       webhook_secret: config.webhook_secret || null,
-      notification_mode: config.notification_mode
+      notification_mode: config.notification_mode,
+      data_retention_days: config.data_retention_days,
+      cleanup_time: config.cleanup_time,
+      aggregate_interval: config.aggregate_interval
     })
     ElMessage.success('配置保存成功，监控间隔将在下次检测时生效')
     loadConfig()

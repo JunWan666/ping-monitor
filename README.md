@@ -19,9 +19,11 @@
 - **登录页面** - 管理员账户登录，首次使用需初始化管理员
 - **仪表盘** - 查看所有主机的实时状态和统计信息，支持搜索和状态筛选
 - **主机管理** - 添加、编辑、删除监控主机，支持手动 Ping 和 Excel 导入/导出，支持搜索筛选和分页
+- **数据看板** - 查看不同时间范围的统计数据，支持整体趋势和分主机统计
 - **告警记录** - 查看历史告警信息，支持分页查询和时间范围筛选
-- **系统设置** - 配置检测参数和通知方式，支持通知模式设置
+- **系统设置** - 配置检测参数、数据维护和通知方式，支持通知模式设置
 - **Ping日志** - 查看详细的 Ping 检测记录，支持分页和状态筛选
+- **系统日志** - 查看系统自动操作记录，支持手动触发数据维护任务
 - **修改密码** - 支持修改用户名和密码，需验证原密码
 
 ## 2. 技术栈
@@ -51,6 +53,7 @@ ping-monitor/
 │   ├── database.py          # 数据库模型定义
 │   ├── ping_service.py      # Ping 检测服务
 │   ├── scheduler.py         # 定时任务调度器
+│   ├── data_maintenance.py  # 数据维护模块（清理和聚合）
 │   ├── notification.py      # 通知服务（Server酱/Webhook）
 │   ├── notification_template.py  # 通知消息模板（Markdown格式）
 │   ├── auth.py              # JWT认证和密码加密
@@ -62,7 +65,9 @@ ping-monitor/
 │   │   │   ├── Dashboard.vue      # 仪表盘
 │   │   │   ├── HostManage.vue     # 主机管理
 │   │   │   ├── AlertList.vue      # 告警记录
+│   │   │   ├── DataBoard.vue      # 数据看板
 │   │   │   ├── Settings.vue       # 系统设置
+│   │   │   ├── SystemLogs.vue     # 系统日志
 │   │   │   ├── Login.vue          # 登录页面
 │   │   │   ├── InitAdmin.vue      # 管理员初始化
 │   │   │   ├── UserProfile.vue    # 用户信息修改
@@ -295,10 +300,23 @@ npm run dev
 - `GET /api/records/{id}` - 获取主机监控记录
 - `GET /api/alerts` - 获取告警记录
 
-### 6.4 系统配置
+### 6.4 数据看板
+- `GET /api/databoard/stats/{timeRange}` - 获取数据看板统计（timeRange: 1h/1d/3d/7d/15d/30d）
+- `GET /api/databoard/host/{hostId}/{timeRange}` - 获取单个主机详细统计
+
+### 6.5 系统配置
 - `GET /api/config` - 获取系统配置
 - `PUT /api/config` - 更新系统配置
 - `POST /api/test-notification/{type}` - 测试通知功能
+
+### 6.6 系统日志
+- `GET /api/system-logs` - 获取系统日志（支持分页和筛选）
+- `POST /api/system-logs/cleanup` - 清理旧系统日志
+
+### 6.7 数据维护
+- `POST /api/data-maintenance/aggregate-hourly` - 手动触发小时级聚合
+- `POST /api/data-maintenance/aggregate-daily` - 手动触发日级聚合
+- `POST /api/data-maintenance/cleanup` - 手动触发数据清理
 
 详细的 API 文档请访问：http://localhost:8000/docs
 
@@ -343,6 +361,9 @@ npm run dev
 - `webhook_url` - Webhook 地址
 - `webhook_secret` - Webhook 加签密钥
 - `notification_mode` - 通知模式（status_change/every_time）
+- `data_retention_days` - 原始数据保留天数（默认30）
+- `cleanup_time` - 数据清理时间（默认03:00）
+- `aggregate_interval` - 数据聚合间隔（默认1小时）
 - `updated_at` - 更新时间
 
 ### 7.5 users（用户表）
@@ -350,6 +371,27 @@ npm run dev
 - `username` - 用户名（唯一）
 - `password_hash` - 加密后的密码
 - `is_admin` - 是否管理员
+- `created_at` - 创建时间
+
+### 7.6 ping_statistics（数据聚合表）
+- `id` - 统计 ID
+- `host_id` - 关联主机 ID
+- `stat_type` - 统计类型（hourly/daily）
+- `stat_time` - 统计时间点
+- `check_count` - 检测次数
+- `online_count` - 在线次数
+- `avg_packet_loss` - 平均丢包率（%）
+- `avg_rtt` - 平均延迟（ms）
+- `min_rtt` - 最小延迟（ms）
+- `max_rtt` - 最大延迟（ms）
+- `created_at` - 创建时间
+
+### 7.7 system_logs（系统日志表）
+- `id` - 日志 ID
+- `log_type` - 日志类型（info/warning/error/cleanup/aggregate）
+- `module` - 模块名称
+- `message` - 日志内容
+- `details` - 详细信息（JSON格式）
 - `created_at` - 创建时间
 
 ## 8. 通知配置
@@ -426,6 +468,69 @@ npm run build
 3. 数据库：在 `database.py` 中修改模型定义
 
 ## 11. 更新日志
+
+### v1.3.0 (2025-12-01)
+#### 📊 数据看板功能
+- ✨ 新增数据看板页面，支持查看不同时间范围的统计数据
+- 🕒 支持 6 种时间范围选择：过1小时、1天、3天、7天、15天、30天
+- 📊 显示整体趋势图：在线主机数、平均丢包率、平均延迟
+- 📊 分主机统计表格：监控次数、在线次数、在线率、平均丢包率、平均延迟
+- 🔍 支持查看单个主机的详细趋势图（弹窗显示）
+- 🎨 趋势图放在主机统计表格上方，布局更清晰
+- 📊 表格列动态占满宽度，充分利用空间
+
+#### 🛠️ 数据维护功能
+- 🗄️ 新增数据聚合功能，支持小时级和日级数据聚合
+- 🗑️ 新增自动数据清理，保留最近 30 天原始数据（可配置）
+- 💾 聚合数据永久保留，提供历史数据查询能力
+- ⏰ 定时任务自动执行：每小时聚合数据 + 每天凌晨3点清理旧数据（可配置）
+- 📊 新增 `PingStatistics` 表存储聚合数据
+- 📝 新增 `SystemLog` 表记录系统自动操作日志
+
+#### 📋 系统日志功能
+- 📝 新增系统日志菜单，集中查看系统自动操作记录
+- 🔍 支持按日志类型、模块筛选查询
+- 📊 分页显示（每靓50条），支持查看详细信息
+- 🗑️ 支持清理30天前的旧日志
+- 🔨 新增数据维护操作按钮：
+  - 执行小时级聚合
+  - 执行日级聚合
+  - 执行数据清理
+- 🏷️ 日志类型彩色标签：信息、警告、错误、数据清理、数据聚合
+
+#### ⚙️ 系统设置优化
+- 🎨 基本设置 UI 优化，采用左右布局
+  - 左侧：监控配置（检测间隔、发送包数、超时时间）
+  - 右侧：数据维护配置（数据保留、清理时间、聚合间隔）
+- 📊 充分利用屏幕空间，消除右侧空白区域
+- ⚙️ 新增数据维护配置项：
+  - 原始数据保留天数（7-365天）
+  - 数据清理时间（每小时可选）
+  - 数据聚合间隔（1-24小时）
+- 🔄 定时任务从数据库动态读取配置，支持实时更新
+
+#### 🔐 认证系统优化
+- ✅ 登录页面增加自动跳转检查
+- 🔀 无管理员时自动跳转到初始化页面
+- 🔒 优化初始化流程，提升用户体验
+
+#### 🛠️ 后端 API 增强
+- 🔌 `/api/databoard/stats/{timeRange}` - 获取数据看板统计
+- 🔌 `/api/databoard/host/{hostId}/{timeRange}` - 获取单个主机详细统计
+- 🔌 `/api/system-logs` - 获取系统日志（支持分页和筛选）
+- 🔌 `/api/system-logs/cleanup` - 清理旧系统日志
+- 🔌 `/api/data-maintenance/aggregate-hourly` - 手动触发小时级聚合
+- 🔌 `/api/data-maintenance/aggregate-daily` - 手动触发日级聚合
+- 🔌 `/api/data-maintenance/cleanup` - 手动触发数据清理
+
+#### 💾 数据库更新
+- 🆕 `system_config` 表新增字段：
+  - `data_retention_days` - 原始数据保留天数（默认30天）
+  - `cleanup_time` - 数据清理时间（默认03:00）
+  - `aggregate_interval` - 数据聚合间隔（默认1小时）
+- 🆕 新增 `ping_statistics` 表存储聚合统计数据
+- 🆕 新增 `system_logs` 表记录系统操作日志
+- ⚠️ 注意：升级时会自动重建数据库表，请备份旧数据
 
 ### v1.2.0 (2025-11-26)
 #### 🆕 通知系统优化

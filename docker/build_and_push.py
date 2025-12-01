@@ -112,28 +112,49 @@ def main():
     print("3. 网络连接问题")
     print()
 
-    # 获取版本号
-    version_tag = input("请输入要构建的版本号 (例如: 1.3.0): ").strip()
-    if not version_tag:
-        print("错误：必须提供版本号")
+    # 选择推送模式
+    print("请选择推送模式:")
+    print("1. 只推送版本标签 (需要输入版本号)")
+    print("2. 只推送latest标签")
+    print("3. 同时推送版本和latest标签 (推荐)")
+    print()
+    push_mode = input("请输入选项 (1/2/3，默认3): ").strip()
+    if not push_mode:
+        push_mode = '3'
+    
+    if push_mode not in ['1', '2', '3']:
+        print("错误：无效的选项,请输入1、2或3")
         input("按回车键退出...")
         return 1
 
-    # 自动添加'v'前缀如果不存在
-    if not version_tag.startswith('v'):
-        display_version = 'v' + version_tag
-    else:
-        display_version = version_tag
-        
-    # 移除开头的'v'字符用于标签命名
-    clean_version = display_version[1:] if display_version.startswith('v') else display_version
+    # 根据推送模式决定是否需要版本号
+    clean_version = None
+    display_version = None
+    
+    if push_mode in ['1', '3']:
+        # 获取版本号
+        print()
+        version_tag = input("请输入要构建的版本号 (例如: 1.3.0): ").strip()
+        if not version_tag:
+            print("错误：必须提供版本号")
+            input("按回车键退出...")
+            return 1
+
+        # 自动添加'v'前缀如果不存在
+        if not version_tag.startswith('v'):
+            clean_version = 'v' + version_tag
+        else:
+            clean_version = version_tag
 
     print()
     print("准备构建以下镜像标签：")
-    print(f"1. {docker_username}/{docker_repository}:{clean_version}-amd64")
-    print(f"2. {docker_username}/{docker_repository}:{clean_version}-arm64")
-    print(f"3. {docker_username}/{docker_repository}:latest-amd64")
-    print(f"4. {docker_username}/{docker_repository}:latest-arm64")
+    
+    if push_mode in ['1', '3']:
+        print(f"- {docker_username}/{docker_repository}:{clean_version} (支持amd64/arm64)")
+    
+    if push_mode in ['2', '3']:
+        print(f"- {docker_username}/{docker_repository}:latest (支持amd64/arm64)")
+    
     print()
 
     # 确认构建
@@ -151,146 +172,87 @@ def main():
     subprocess.run(["docker", "buildx", "inspect", "--bootstrap", "mybuilder"], 
                   capture_output=True, text=True)
 
-    # 构建并推送AMD64架构镜像
+    # 构建多架构镜像（直接推送Manifest，不推送带后缀的单架构镜像）
     print()
-    print("开始构建AMD64架构镜像...")
-    print()
-
-    print(f"构建并推送 {docker_username}/{docker_repository}:{clean_version}-amd64")
-    result = subprocess.run([
-        "docker", "buildx", "build", "--platform", "linux/amd64",
-        "-t", f"{docker_username}/{docker_repository}:{clean_version}-amd64",
-        "--push",
-        "-f", "docker/Dockerfile",
-        "."
-    ], cwd="..")
-    
-    if result.returncode != 0:
-        print("错误：AMD64架构镜像构建失败")
-        input("按回车键退出...")
-        return 1
-
-    print(f"构建并推送 {docker_username}/{docker_repository}:latest-amd64")
-    result = subprocess.run([
-        "docker", "buildx", "build", "--platform", "linux/amd64",
-        "-t", f"{docker_username}/{docker_repository}:latest-amd64",
-        "--push",
-        "-f", "docker/Dockerfile",
-        "."
-    ], cwd="..")
-    
-    if result.returncode != 0:
-        print("错误：AMD64架构latest镜像构建失败")
-        input("按回车键退出...")
-        return 1
-
-    # 构建并推送ARM64架构镜像
-    print()
-    print("开始构建ARM64架构镜像...")
+    print("开始构建多架构镜像...")
     print()
 
-    print(f"构建并推送 {docker_username}/{docker_repository}:{clean_version}-arm64")
-    result = subprocess.run([
-        "docker", "buildx", "build", "--platform", "linux/arm64",
-        "-t", f"{docker_username}/{docker_repository}:{clean_version}-arm64",
-        "--push",
-        "-f", "docker/Dockerfile",
-        "."
-    ], cwd="..")
-    
-    if result.returncode != 0:
-        print("错误：ARM64架构镜像构建失败")
-        input("按回车键退出...")
-        return 1
+    # 构建版本标签
+    if push_mode in ['1', '3']:
+        print(f"构建并推送多架构镜像: {docker_username}/{docker_repository}:{clean_version}")
+        
+        # 获取项目根目录（docker文件夹的上级目录）
+        import os
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        
+        result = subprocess.run([
+            "docker", "buildx", "build",
+            "--platform", "linux/amd64,linux/arm64",
+            "-t", f"{docker_username}/{docker_repository}:{clean_version}",
+            "--push",
+            "-f", "docker/Dockerfile",
+            "."
+        ], cwd=project_root)
+        
+        if result.returncode != 0:
+            print("错误：版本镜像构建失败")
+            input("按回车键退出...")
+            return 1
 
-    print(f"构建并推送 {docker_username}/{docker_repository}:latest-arm64")
-    result = subprocess.run([
-        "docker", "buildx", "build", "--platform", "linux/arm64",
-        "-t", f"{docker_username}/{docker_repository}:latest-arm64",
-        "--push",
-        "-f", "docker/Dockerfile",
-        "."
-    ], cwd="..")
-    
-    if result.returncode != 0:
-        print("错误：ARM64架构latest镜像构建失败")
-        input("按回车键退出...")
-        return 1
+    # 构建latest标签
+    if push_mode in ['2', '3']:
+        print(f"构建并推送多架构镜像: {docker_username}/{docker_repository}:latest")
+        
+        # 获取项目根目录（docker文件夹的上级目录）
+        import os
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        
+        result = subprocess.run([
+            "docker", "buildx", "build",
+            "--platform", "linux/amd64,linux/arm64",
+            "-t", f"{docker_username}/{docker_repository}:latest",
+            "--push",
+            "-f", "docker/Dockerfile",
+            "."
+        ], cwd=project_root)
+        
+        if result.returncode != 0:
+            print("错误：latest镜像构建失败")
+            input("按回车键退出...")
+            return 1
 
-    # 创建并推送Manifest清单以支持多架构
+    # Buildx会自动创建多架构Manifest，无需手动创建
     print()
-    print("创建多架构Manifest清单...")
-    print()
-
-    print(f"创建 {clean_version} 版本的多架构清单")
-    subprocess.run([
-        "docker", "manifest", "create", 
-        f"{docker_username}/{docker_repository}:{clean_version}",
-        f"{docker_username}/{docker_repository}:{clean_version}-amd64",
-        f"{docker_username}/{docker_repository}:{clean_version}-arm64"
-    ])
-    
-    subprocess.run([
-        "docker", "manifest", "annotate",
-        f"{docker_username}/{docker_repository}:{clean_version}",
-        f"{docker_username}/{docker_repository}:{clean_version}-amd64",
-        "--arch", "amd64", "--os", "linux"
-    ])
-    
-    subprocess.run([
-        "docker", "manifest", "annotate",
-        f"{docker_username}/{docker_repository}:{clean_version}",
-        f"{docker_username}/{docker_repository}:{clean_version}-arm64",
-        "--arch", "arm64", "--os", "linux"
-    ])
-    
-    subprocess.run([
-        "docker", "manifest", "push",
-        f"{docker_username}/{docker_repository}:{clean_version}"
-    ])
-
-    print("创建 latest 版本的多架构清单")
-    subprocess.run([
-        "docker", "manifest", "create", 
-        f"{docker_username}/{docker_repository}:latest",
-        f"{docker_username}/{docker_repository}:latest-amd64",
-        f"{docker_username}/{docker_repository}:latest-arm64"
-    ])
-    
-    subprocess.run([
-        "docker", "manifest", "annotate",
-        f"{docker_username}/{docker_repository}:latest",
-        f"{docker_username}/{docker_repository}:latest-amd64",
-        "--arch", "amd64", "--os", "linux"
-    ])
-    
-    subprocess.run([
-        "docker", "manifest", "annotate",
-        f"{docker_username}/{docker_repository}:latest",
-        f"{docker_username}/{docker_repository}:latest-arm64",
-        "--arch", "arm64", "--os", "linux"
-    ])
-    
-    subprocess.run([
-        "docker", "manifest", "push",
-        f"{docker_username}/{docker_repository}:latest"
-    ])
+    print("多架构镜像构建完成！")
+    print("Buildx已自动创建Manifest清单，支持AMD64和ARM64架构")
 
     print()
-    print("=" * 50)
+    print("="  * 50)
     print("构建和推送完成！")
     print("=" * 50)
     print("镜像信息：")
-    print(f"  版本：{docker_username}/{docker_repository}:{clean_version}")
-    print(f"  最新：{docker_username}/{docker_repository}:latest")
+    
+    if push_mode in ['1', '3']:
+        print(f"  版本：{docker_username}/{docker_repository}:{clean_version}")
+    if push_mode in ['2', '3']:
+        print(f"  最新：{docker_username}/{docker_repository}:latest")
+    
     print()
     print("这些镜像支持以下架构：")
     print("  - AMD64 (x86_64)")
     print("  - ARM64 (aarch64)")
     print()
     print("使用方法：")
-    print(f"  docker pull {docker_username}/{docker_repository}:{clean_version}")
-    print(f"  docker run -d -p 8000:8000 {docker_username}/{docker_repository}:{display_version}")
+    
+    if push_mode in ['1', '3']:
+        print(f"  docker pull {docker_username}/{docker_repository}:{clean_version}")
+        print(f"  docker run -d -p 8000:8000 {docker_username}/{docker_repository}:{clean_version}")
+    if push_mode in ['2', '3']:
+        print(f"  docker pull {docker_username}/{docker_repository}:latest")
+        print(f"  docker run -d -p 8000:8000 {docker_username}/{docker_repository}:latest")
+    
     print()
     
     input("按回车键退出...")

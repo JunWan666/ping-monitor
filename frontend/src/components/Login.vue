@@ -45,7 +45,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
@@ -66,6 +66,19 @@ const rules = {
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' }
   ]
+}
+
+// 检查是否需要初始化
+const checkInit = async () => {
+  try {
+    const result = await api.checkAdminExists()
+    if (!result.has_admin) {
+      // 没有管理员，跳转到初始化页面
+      router.push('/init')
+    }
+  } catch (error) {
+    console.error('检查初始化状态失败:', error)
+  }
 }
 
 const handleLogin = async () => {
@@ -91,6 +104,10 @@ const handleLogin = async () => {
     }
   })
 }
+
+onMounted(() => {
+  checkInit()
+})
 </script>
 
 <style scoped>

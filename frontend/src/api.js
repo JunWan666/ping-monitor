@@ -49,6 +49,7 @@ api.interceptors.response.use(
 export default {
   // 认证
   checkAdmin: () => api.get('/auth/check'),
+  checkAdminExists: () => api.get('/auth/check'),  // 别名，与 checkAdmin 相同
   initAdmin: (data) => api.post('/auth/init', data),
   login: (data) => api.post('/auth/login', data),
   getCurrentUser: () => api.get('/auth/me'),
@@ -112,8 +113,26 @@ export default {
   },
   getDashboard: () => api.get('/dashboard'),
   
+  // 数据看板
+  getDataBoardStats: (timeRange) => api.get(`/databoard/stats/${timeRange}`),
+  getHostDetailStats: (hostId, timeRange) => api.get(`/databoard/host/${hostId}/${timeRange}`),
+  
   // 系统配置
   getConfig: () => api.get('/config'),
   updateConfig: (data) => api.put('/config', data),
-  testNotification: (type) => api.post(`/test-notification/${type}`)
+  testNotification: (type) => api.post(`/test-notification/${type}`),
+  
+  // 系统日志
+  getSystemLogs: (logType, module, page = 1, pageSize = 50) => {
+    const params = { page, page_size: pageSize }
+    if (logType) params.log_type = logType
+    if (module) params.module = module
+    return api.get('/system-logs', { params })
+  },
+  cleanupSystemLogs: (days = 30) => api.post('/system-logs/cleanup', null, { params: { days } }),
+  
+  // 数据维护
+  triggerHourlyAggregation: () => api.post('/data-maintenance/aggregate-hourly'),
+  triggerDailyAggregation: () => api.post('/data-maintenance/aggregate-daily'),
+  triggerDataCleanup: (days) => api.post('/data-maintenance/cleanup', null, { params: days ? { days } : {} })
 }
