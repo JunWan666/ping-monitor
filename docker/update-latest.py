@@ -68,9 +68,10 @@ def main():
     print()
     print("正在启动新容器...")
     
-    # 获取当前目录的绝对路径
+    # 获取项目根目录的绝对路径（脚本在docker文件夹下，需要向上一级）
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(current_dir, "data")
+    project_root = os.path.dirname(current_dir)  # 向上一级到项目根目录
+    data_dir = os.path.join(project_root, "data")
     
     docker_run_cmd = f"""docker run -d \
         --name {CONTAINER_NAME} \

@@ -89,7 +89,7 @@
         </div>
       </template>
       
-      <el-table :data="filteredHostData" style="width: 100%" v-loading="loading">
+      <el-table :data="filteredHostData" style="width: 100%" v-loading="loading" @sort-change="handleSortChange">
         <el-table-column label="序号" width="70" align="center" header-align="center">
           <template #default="{ $index }">
             {{ (currentPage - 1) * pageSize + $index + 1 }}
@@ -102,17 +102,17 @@
             {{ row.check_count }}
           </template>
         </el-table-column>
-        <el-table-column label="在线率" min-width="90" align="center" header-align="center" sortable :sort-method="(a, b) => a.online_rate - b.online_rate">
+        <el-table-column label="在线率" min-width="90" align="center" header-align="center" sortable="custom" prop="online_rate">
           <template #default="{ row }">
             <el-tag :type="getOnlineRateType(row.online_rate)">{{ row.online_rate }}%</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="平均丢包率" min-width="100" align="center" header-align="center" sortable :sort-method="(a, b) => a.avg_packet_loss - b.avg_packet_loss">
+        <el-table-column label="平均丢包率" min-width="100" align="center" header-align="center" sortable="custom" prop="avg_packet_loss">
           <template #default="{ row }">
             <span :style="{ color: row.avg_packet_loss > 10 ? '#f56c6c' : '#67c23a' }">{{ row.avg_packet_loss }}%</span>
           </template>
         </el-table-column>
-        <el-table-column label="平均延迟" min-width="90" align="center" header-align="center" sortable :sort-method="(a, b) => a.avg_rtt - b.avg_rtt">
+        <el-table-column label="平均延迟" min-width="90" align="center" header-align="center" sortable="custom" prop="avg_rtt">
           <template #default="{ row }">
             <span :style="{ color: row.avg_rtt > 100 ? '#e6a23c' : '#67c23a' }">{{ row.avg_rtt }}ms</span>
           </template>
@@ -167,6 +167,8 @@ const selectedTimeRange = ref('1d')
 const searchKeyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
+const sortBy = ref('avg_packet_loss')  // 排序字段
+const sortOrder = ref('desc')  // 排序方向
 
 const stats = reactive({
   total_hosts: 0,
@@ -233,10 +235,23 @@ const handleTimeRangeChange = () => {
   loadData()
 }
 
+const handleSortChange = ({ prop, order }) => {
+  if (!prop || !order) {
+    // 恢复默认排序
+    sortBy.value = 'avg_packet_loss'
+    sortOrder.value = 'desc'
+  } else {
+    sortBy.value = prop
+    sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+  }
+  currentPage.value = 1
+  loadData()
+}
+
 const loadData = async () => {
   loading.value = true
   try {
-    const data = await api.getDataBoardStats(selectedTimeRange.value)
+    const data = await api.getDataBoardStats(selectedTimeRange.value, sortBy.value, sortOrder.value)
     
     // 更新统计数据
     stats.total_hosts = data.total_hosts

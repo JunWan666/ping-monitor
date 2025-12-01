@@ -626,6 +626,8 @@ def _format_time_for_range(dt: datetime, time_range: str) -> str:
 @app.get("/api/databoard/stats/{time_range}")
 async def get_databoard_stats(
     time_range: str,
+    sort_by: str = 'avg_packet_loss',  # 排序字段：avg_packet_loss, online_rate, avg_rtt
+    sort_order: str = 'desc',  # 排序方向：asc, desc
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -687,6 +689,15 @@ async def get_databoard_stats(
             "min_rtt": min_rtt,
             "max_rtt": max_rtt
         })
+    
+    # 排序主机数据
+    reverse = (sort_order == 'desc')
+    if sort_by == 'avg_packet_loss':
+        host_stats.sort(key=lambda x: x['avg_packet_loss'], reverse=reverse)
+    elif sort_by == 'online_rate':
+        host_stats.sort(key=lambda x: x['online_rate'], reverse=reverse)
+    elif sort_by == 'avg_rtt':
+        host_stats.sort(key=lambda x: x['avg_rtt'], reverse=reverse)
     
     # 计算整体平均值
     host_count = len(host_stats)

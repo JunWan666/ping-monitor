@@ -114,7 +114,10 @@ export default {
   getDashboard: () => api.get('/dashboard'),
   
   // 数据看板
-  getDataBoardStats: (timeRange) => api.get(`/databoard/stats/${timeRange}`),
+  getDataBoardStats: (timeRange, sortBy = 'avg_packet_loss', sortOrder = 'desc') => {
+    const params = { sort_by: sortBy, sort_order: sortOrder }
+    return api.get(`/databoard/stats/${timeRange}`, { params })
+  },
   getHostDetailStats: (hostId, timeRange) => api.get(`/databoard/host/${hostId}/${timeRange}`),
   
   // 系统配置
