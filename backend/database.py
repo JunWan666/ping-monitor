@@ -128,8 +128,9 @@ def init_db():
     """初始化数据库"""
     # 只创建不存在的表，不删除现有数据
     Base.metadata.create_all(bind=engine)
-    
-    # 初始化系统配置
+
+def init_default_config():
+    """初始化默认配置（在迁移后执行）"""
     db = SessionLocal()
     try:
         config = db.query(SystemConfig).first()

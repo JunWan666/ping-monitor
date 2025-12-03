@@ -147,12 +147,18 @@ class TokenResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """应用启动时执行"""
+    # 1. 创建表结构
     init_db()
     
-    # 执行数据库迁移
+    # 2. 执行数据库迁移(添加缺失字段)
     from database_migrations import DatabaseMigration
     DatabaseMigration.run_migrations()
     
+    # 3. 初始化默认配置
+    from database import init_default_config
+    init_default_config()
+    
+    # 4. 启动调度器
     scheduler.start()
     logger.info("✅ 数据库初始化完成")
     logger.info("✅ 监控调度器已启动")
