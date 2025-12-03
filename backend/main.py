@@ -7,9 +7,10 @@ from sqlalchemy import func
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
-from database import init_db, get_db, Host, PingRecord, Alert, SystemConfig, User, SystemLog
+from database import init_db, get_db, Host, PingRecord, Alert, SystemConfig, User, SystemLog, PingStatistics
 from ping_service import PingService
 from scheduler import scheduler
+from data_maintenance import DataMaintenance
 from auth import (
     get_password_hash, 
     verify_password, 
@@ -102,6 +103,10 @@ class SystemConfigUpdate(BaseModel):
     webhook_url: Optional[str] = None
     webhook_secret: Optional[str] = None
     notification_mode: Optional[str] = None
+    data_retention_days: Optional[int] = None
+    cleanup_time: Optional[str] = None
+    aggregate_interval: Optional[int] = None
+    dashboard_chart_points: Optional[int] = None
 
 class SystemConfigResponse(BaseModel):
     id: int
@@ -112,6 +117,10 @@ class SystemConfigResponse(BaseModel):
     webhook_url: Optional[str]
     webhook_secret: Optional[str]
     notification_mode: str
+    data_retention_days: int
+    cleanup_time: str
+    aggregate_interval: int
+    dashboard_chart_points: int
     updated_at: datetime
     
     class Config:
@@ -139,6 +148,11 @@ class TokenResponse(BaseModel):
 async def startup_event():
     """应用启动时执行"""
     init_db()
+    
+    # 执行数据库迁移
+    from database_migrations import DatabaseMigration
+    DatabaseMigration.run_migrations()
+    
     scheduler.start()
     logger.info("✅ 数据库初始化完成")
     logger.info("✅ 监控调度器已启动")
@@ -182,6 +196,15 @@ async def init_admin(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(admin_user)
     
+    # 记录系统日志
+    DataMaintenance.log_system_event(
+        db,
+        log_type='info',
+        module='authentication',
+        message=f'初始化管理员账户: {admin_user.username}',
+        details={'user_id': admin_user.id, 'username': admin_user.username}
+    )
+    
     # 生成token
     access_token = create_access_token(data={"sub": admin_user.username})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -191,10 +214,27 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     """用户登录"""
     user = db.query(User).filter(User.username == user_data.username).first()
     if not user or not verify_password(user_data.password, user.password_hash):
+        # 记录登录失败
+        DataMaintenance.log_system_event(
+            db,
+            log_type='warning',
+            module='authentication',
+            message=f'登录失败: 用户名 {user_data.username}',
+            details={'username': user_data.username, 'reason': 'invalid_credentials'}
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误"
         )
+    
+    # 记录登录成功
+    DataMaintenance.log_system_event(
+        db,
+        log_type='info',
+        module='authentication',
+        message=f'用户 {user.username} 登录成功',
+        details={'user_id': user.id, 'username': user.username}
+    )
     
     access_token = create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -218,6 +258,8 @@ async def update_password(user_data: UserPasswordUpdate, current_user: User = De
             detail="原密码错误"
         )
     
+    changes = []
+    
     # 更新用户名
     if user_data.new_username:
         if len(user_data.new_username) < 3:
@@ -226,15 +268,28 @@ async def update_password(user_data: UserPasswordUpdate, current_user: User = De
         existing_user = db.query(User).filter(User.username == user_data.new_username, User.id != current_user.id).first()
         if existing_user:
             raise HTTPException(status_code=400, detail="用户名已存在")
+        old_username = current_user.username
         current_user.username = user_data.new_username
+        changes.append(f'用户名: {old_username} -> {user_data.new_username}')
     
     # 更新密码
     if user_data.new_password:
         if len(user_data.new_password) < 5:
             raise HTTPException(status_code=400, detail="密码至少需要5个字符")
         current_user.password_hash = get_password_hash(user_data.new_password)
+        changes.append('密码已修改')
     
     db.commit()
+    
+    # 记录系统日志
+    DataMaintenance.log_system_event(
+        db,
+        log_type='info',
+        module='authentication',
+        message=f'用户 {current_user.username} 修改了账户信息',
+        details={'user_id': current_user.id, 'changes': changes}
+    )
+    
     return {"message": "修改成功"}
 
 # ==================== 主机管理API ====================
@@ -256,6 +311,16 @@ async def create_host(host: HostCreate, current_user: User = Depends(get_current
     db.add(db_host)
     db.commit()
     db.refresh(db_host)
+    
+    # 记录系统日志
+    DataMaintenance.log_system_event(
+        db,
+        log_type='info',
+        module='host_management',
+        message=f'用户 {current_user.username} 添加了主机: {db_host.name} ({db_host.address})',
+        details={'host_id': db_host.id, 'host_name': db_host.name, 'address': db_host.address}
+    )
+    
     return db_host
 
 @app.get("/api/hosts/{host_id}", response_model=HostResponse)
@@ -279,6 +344,16 @@ async def update_host(host_id: int, host_update: HostUpdate, current_user: User 
     
     db.commit()
     db.refresh(host)
+    
+    # 记录系统日志
+    DataMaintenance.log_system_event(
+        db,
+        log_type='info',
+        module='host_management',
+        message=f'用户 {current_user.username} 更新了主机: {host.name}',
+        details={'host_id': host.id, 'updated_fields': list(update_data.keys())}
+    )
+    
     return host
 
 @app.delete("/api/hosts/{host_id}")
@@ -288,11 +363,24 @@ async def delete_host(host_id: int, current_user: User = Depends(get_current_use
     if not host:
         raise HTTPException(status_code=404, detail="主机不存在")
     
+    host_name = host.name
+    host_address = host.address
+    
     # 删除相关记录和告警
     db.query(PingRecord).filter(PingRecord.host_id == host_id).delete()
     db.query(Alert).filter(Alert.host_id == host_id).delete()
     db.delete(host)
     db.commit()
+    
+    # 记录系统日志
+    DataMaintenance.log_system_event(
+        db,
+        log_type='warning',
+        module='host_management',
+        message=f'用户 {current_user.username} 删除了主机: {host_name} ({host_address})',
+        details={'host_id': host_id, 'host_name': host_name, 'address': host_address}
+    )
+    
     return {"message": "删除成功"}
 
 # ==================== Ping操作API ====================
@@ -437,13 +525,14 @@ async def ping_all(background_tasks: BackgroundTasks, current_user: User = Depen
 @app.get("/api/ping/logs")
 async def get_ping_logs(
     host_id: Optional[int] = None,
+    search: Optional[str] = None,  # 主机名称或地址模糊搜索
     status: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取Ping日志记录（分页、支持状态筛选）"""
+    """获取Ping日志记录（分页、支持状态筛选、支持模糊搜索）"""
     query = db.query(
         PingRecord.id,
         PingRecord.host_id,
@@ -462,6 +551,13 @@ async def get_ping_logs(
     # 如果指定了主机ID，过滤
     if host_id:
         query = query.filter(PingRecord.host_id == host_id)
+    
+    # 模糊搜索主机名称或地址
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            (Host.name.like(search_pattern)) | (Host.address.like(search_pattern))
+        )
     
     # 获取所有符合条件的记录（用于状态筛选）
     all_items = query.order_by(PingRecord.created_at.desc()).all()
@@ -631,7 +727,7 @@ async def get_databoard_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取数据看板统计数据"""
+    """获取数据看板统计数据（优化版：使用聚合数据）"""
     hours = _get_hours_from_range(time_range)
     since = datetime.now() - timedelta(hours=hours)
     
@@ -649,6 +745,11 @@ async def get_databoard_stats(
             "trend_data": []
         }
     
+    # 决定是否使用聚合数据（1天以上使用聚合数据）
+    # 优化: 1d/3d也使用hourly聚合数据,提升性能
+    use_aggregated = time_range in ['1d', '3d', '7d', '15d', '30d']
+    stat_type = 'daily' if time_range in ['15d', '30d'] else 'hourly'
+    
     # 计算每个主机的统计数据
     host_stats = []
     total_online_rate = 0
@@ -656,23 +757,52 @@ async def get_databoard_stats(
     total_avg_packet_loss = 0
     
     for host in hosts:
-        records = db.query(PingRecord).filter(
-            PingRecord.host_id == host.id,
-            PingRecord.created_at >= since
-        ).all()
-        
-        if not records:
-            continue
-        
-        # 计算统计指标
-        check_count = len(records)
-        online_count = sum(1 for r in records if r.packet_loss < host.alert_threshold)
-        online_rate = round((online_count / check_count) * 100, 2) if check_count > 0 else 0
-        
-        avg_packet_loss = round(sum(r.packet_loss for r in records) / check_count, 2)
-        avg_rtt = round(sum(r.avg_rtt or 0 for r in records) / check_count, 2)
-        min_rtt = round(min(r.min_rtt or 999999 for r in records), 2)
-        max_rtt = round(max(r.max_rtt or 0 for r in records), 2)
+        if use_aggregated:
+            # 使用聚合数据
+            stats = db.query(PingStatistics).filter(
+                PingStatistics.host_id == host.id,
+                PingStatistics.stat_type == stat_type,
+                PingStatistics.stat_time >= since
+            ).all()
+            
+            if not stats:
+                continue
+            
+            # 从聚合数据计算统计指标
+            check_count = sum(s.check_count for s in stats)
+            online_count = sum(s.online_count for s in stats)
+            online_rate = round((online_count / check_count) * 100, 2) if check_count > 0 else 0
+            
+            avg_packet_loss = round(sum(s.avg_packet_loss * s.check_count for s in stats) / check_count, 2)
+            
+            rtts = [(s.avg_rtt, s.check_count) for s in stats if s.avg_rtt is not None]
+            if rtts:
+                avg_rtt = round(sum(rtt * count for rtt, count in rtts) / sum(count for _, count in rtts), 2)
+                min_rtt = round(min(s.min_rtt for s in stats if s.min_rtt is not None), 2)
+                max_rtt = round(max(s.max_rtt for s in stats if s.max_rtt is not None), 2)
+            else:
+                avg_rtt = 0
+                min_rtt = 0
+                max_rtt = 0
+        else:
+            # 使用原始数据
+            records = db.query(PingRecord).filter(
+                PingRecord.host_id == host.id,
+                PingRecord.created_at >= since
+            ).all()
+            
+            if not records:
+                continue
+            
+            # 计算统计指标
+            check_count = len(records)
+            online_count = sum(1 for r in records if r.packet_loss < host.alert_threshold)
+            online_rate = round((online_count / check_count) * 100, 2) if check_count > 0 else 0
+            
+            avg_packet_loss = round(sum(r.packet_loss for r in records) / check_count, 2)
+            avg_rtt = round(sum(r.avg_rtt or 0 for r in records) / check_count, 2)
+            min_rtt = round(min(r.min_rtt or 999999 for r in records), 2)
+            max_rtt = round(max(r.max_rtt or 0 for r in records), 2)
         
         total_online_rate += online_rate
         total_avg_rtt += avg_rtt
@@ -705,74 +835,8 @@ async def get_databoard_stats(
     avg_rtt = round(total_avg_rtt / host_count, 2) if host_count > 0 else 0
     avg_packet_loss = round(total_avg_packet_loss / host_count, 2) if host_count > 0 else 0
     
-    # 生成趋势数据(按时间分组)
-    all_records = db.query(PingRecord).join(
-        Host, PingRecord.host_id == Host.id
-    ).filter(
-        Host.enabled == True,
-        PingRecord.created_at >= since
-    ).order_by(PingRecord.created_at).all()
-    
-    # 根据时间范围确定分组间隔
-    if time_range == '1h':
-        interval_minutes = 5  # 5分钟一组
-    elif time_range == '1d':
-        interval_minutes = 60  # 1小时一组
-    elif time_range == '3d':
-        interval_minutes = 180  # 3小时一组
-    elif time_range == '7d':
-        interval_minutes = 360  # 6小时一组
-    else:
-        interval_minutes = 1440  # 1天一组
-    
-    # 按时间分组统计
-    time_groups = {}
-    for record in all_records:
-        # 计算时间组的key
-        timestamp = record.created_at.timestamp()
-        group_key = int(timestamp // (interval_minutes * 60)) * (interval_minutes * 60)
-        
-        if group_key not in time_groups:
-            time_groups[group_key] = {
-                'records': [],
-                'hosts': set()
-            }
-        
-        time_groups[group_key]['records'].append(record)
-        time_groups[group_key]['hosts'].add(record.host_id)
-    
     # 生成趋势数据
-    trend_data = []
-    for timestamp in sorted(time_groups.keys()):
-        group = time_groups[timestamp]
-        records = group['records']
-        hosts_in_group = len(group['hosts'])
-        
-        if not records:
-            continue
-        
-        dt = datetime.fromtimestamp(timestamp)
-        time_str = _format_time_for_range(dt, time_range)
-        
-        # 计算该时间段的平均值
-        avg_packet_loss = round(sum(r.packet_loss for r in records) / len(records), 2)
-        avg_rtt = round(sum(r.avg_rtt or 0 for r in records) / len(records), 2)
-        
-        # 计算在线率（基于告警阈值）
-        online_count = 0
-        for r in records:
-            host = db.query(Host).filter(Host.id == r.host_id).first()
-            if host and r.packet_loss < host.alert_threshold:
-                online_count += 1
-        
-        online_rate = round((online_count / len(records)) * 100, 2) if len(records) > 0 else 0
-        
-        trend_data.append({
-            "time": time_str,
-            "avg_packet_loss": avg_packet_loss,
-            "avg_rtt": avg_rtt,
-            "online_rate": online_rate
-        })
+    trend_data = _get_trend_data(db, hosts, since, time_range, use_aggregated, stat_type)
     
     return {
         "total_hosts": total_hosts,
@@ -783,6 +847,113 @@ async def get_databoard_stats(
         "trend_data": trend_data
     }
 
+def _get_trend_data(db: Session, hosts: list, since: datetime, time_range: str, use_aggregated: bool, stat_type: str):
+    """生成趋势数据"""
+    if use_aggregated:
+        # 使用聚合数据
+        host_ids = [h.id for h in hosts]
+        stats = db.query(PingStatistics).filter(
+            PingStatistics.host_id.in_(host_ids),
+            PingStatistics.stat_type == stat_type,
+            PingStatistics.stat_time >= since
+        ).order_by(PingStatistics.stat_time).all()
+        
+        # 按时间分组
+        time_groups = {}
+        for stat in stats:
+            time_key = stat.stat_time
+            if time_key not in time_groups:
+                time_groups[time_key] = []
+            time_groups[time_key].append(stat)
+        
+        # 生成趋势数据
+        trend_data = []
+        for time_key in sorted(time_groups.keys()):
+            group_stats = time_groups[time_key]
+            
+            total_check = sum(s.check_count for s in group_stats)
+            total_online = sum(s.online_count for s in group_stats)
+            online_rate = round((total_online / total_check) * 100, 2) if total_check > 0 else 0
+            
+            avg_packet_loss = round(sum(s.avg_packet_loss * s.check_count for s in group_stats) / total_check, 2)
+            
+            rtts = [(s.avg_rtt, s.check_count) for s in group_stats if s.avg_rtt is not None]
+            if rtts:
+                avg_rtt = round(sum(rtt * count for rtt, count in rtts) / sum(count for _, count in rtts), 2)
+            else:
+                avg_rtt = 0
+            
+            time_str = _format_time_for_range(time_key, time_range)
+            trend_data.append({
+                "time": time_str,
+                "avg_packet_loss": avg_packet_loss,
+                "avg_rtt": avg_rtt,
+                "online_rate": online_rate
+            })
+    else:
+        # 使用原始数据（仅1小时数据）
+        # 构建主机ID到主机对象的字典,避免循环中重复查询
+        host_dict = {h.id: h for h in hosts}
+        
+        all_records = db.query(PingRecord).join(
+            Host, PingRecord.host_id == Host.id
+        ).filter(
+            Host.enabled == True,
+            PingRecord.created_at >= since
+        ).order_by(PingRecord.created_at).all()
+        
+        # 根据时间范围确定分组间隔
+        if time_range == '1h':
+            interval_minutes = 5
+        elif time_range == '1d':
+            interval_minutes = 60
+        elif time_range == '3d':
+            interval_minutes = 180
+        else:
+            interval_minutes = 360
+        
+        # 按时间分组统计
+        time_groups = {}
+        for record in all_records:
+            timestamp = record.created_at.timestamp()
+            group_key = int(timestamp // (interval_minutes * 60)) * (interval_minutes * 60)
+            
+            if group_key not in time_groups:
+                time_groups[group_key] = []
+            time_groups[group_key].append(record)
+        
+        # 生成趋势数据
+        trend_data = []
+        for timestamp in sorted(time_groups.keys()):
+            records = time_groups[timestamp]
+            
+            if not records:
+                continue
+            
+            dt = datetime.fromtimestamp(timestamp)
+            time_str = _format_time_for_range(dt, time_range)
+            
+            avg_packet_loss = round(sum(r.packet_loss for r in records) / len(records), 2)
+            avg_rtt = round(sum(r.avg_rtt or 0 for r in records) / len(records), 2)
+            
+            # 计算在线率 - 使用预加载的主机信息字典,避免N+1查询
+            online_count = 0
+            for r in records:
+                host = host_dict.get(r.host_id)
+                if host and r.packet_loss < host.alert_threshold:
+                    online_count += 1
+            
+            online_rate = round((online_count / len(records)) * 100, 2) if len(records) > 0 else 0
+            
+            trend_data.append({
+                "time": time_str,
+                "avg_packet_loss": avg_packet_loss,
+                "avg_rtt": avg_rtt,
+                "online_rate": online_rate
+            })
+    
+    return trend_data
+
 @app.get("/api/databoard/host/{host_id}/{time_range}")
 async def get_host_detail_stats(
     host_id: int,
@@ -790,7 +961,7 @@ async def get_host_detail_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取单个主机的详细统计数据"""
+    """获取单个主机的详细统计数据（优化版：使用聚合数据）"""
     host = db.query(Host).filter(Host.id == host_id).first()
     if not host:
         raise HTTPException(status_code=404, detail="主机不存在")
@@ -798,40 +969,53 @@ async def get_host_detail_stats(
     hours = _get_hours_from_range(time_range)
     since = datetime.now() - timedelta(hours=hours)
     
-    records = db.query(PingRecord).filter(
-        PingRecord.host_id == host_id,
-        PingRecord.created_at >= since
-    ).order_by(PingRecord.created_at).all()
+    # 决定是否使用聚合数据
+    use_aggregated = time_range in ['1d', '3d', '7d', '15d', '30d']
+    stat_type = 'daily' if time_range in ['15d', '30d'] else 'hourly'
     
-    if not records:
-        return []
-    
-    # 根据时间范围确定采样间隔
-    if time_range == '1h':
-        sample_interval = 1  # 显示所有数据点
-    elif time_range == '1d':
-        sample_interval = 2  # 每2个数据点取1个
-    elif time_range == '3d':
-        sample_interval = 5
-    elif time_range == '7d':
-        sample_interval = 10
-    else:
-        sample_interval = 20
-    
-    # 采样数据
-    sampled_records = records[::sample_interval] if sample_interval > 1 else records
-    
-    # 格式化输出
     result = []
-    for record in sampled_records:
-        time_str = _format_time_for_range(record.created_at, time_range)
-        result.append({
-            "time": time_str,
-            "packet_loss": record.packet_loss,
-            "avg_rtt": record.avg_rtt or 0,
-            "min_rtt": record.min_rtt or 0,
-            "max_rtt": record.max_rtt or 0
-        })
+    
+    if use_aggregated:
+        # 使用聚合数据
+        stats = db.query(PingStatistics).filter(
+            PingStatistics.host_id == host_id,
+            PingStatistics.stat_type == stat_type,
+            PingStatistics.stat_time >= since
+        ).order_by(PingStatistics.stat_time).all()
+        
+        if not stats:
+            return []
+        
+        # 格式化输出
+        for stat in stats:
+            time_str = _format_time_for_range(stat.stat_time, time_range)
+            result.append({
+                "time": time_str,
+                "packet_loss": stat.avg_packet_loss,
+                "avg_rtt": stat.avg_rtt or 0,
+                "min_rtt": stat.min_rtt or 0,
+                "max_rtt": stat.max_rtt or 0
+            })
+    else:
+        # 使用原始数据（仅1h）
+        records = db.query(PingRecord).filter(
+            PingRecord.host_id == host_id,
+            PingRecord.created_at >= since
+        ).order_by(PingRecord.created_at).all()
+        
+        if not records:
+            return []
+        
+        # 1小时数据显示所有点
+        for record in records:
+            time_str = _format_time_for_range(record.created_at, time_range)
+            result.append({
+                "time": time_str,
+                "packet_loss": record.packet_loss,
+                "avg_rtt": record.avg_rtt or 0,
+                "min_rtt": record.min_rtt or 0,
+                "max_rtt": record.max_rtt or 0
+            })
     
     return result
 
@@ -878,6 +1062,15 @@ async def update_config(config_update: SystemConfigUpdate, current_user: User = 
     
     db.commit()
     db.refresh(config)
+    
+    # 记录系统日志
+    DataMaintenance.log_system_event(
+        db,
+        log_type='info',
+        module='system_config',
+        message=f'用户 {current_user.username} 修改了系统配置',
+        details={'updated_fields': list(update_data.keys()), 'config': update_data}
+    )
     
     # 重启调度器以应用新配置
     if 'check_interval' in update_data:
@@ -964,9 +1157,9 @@ async def get_system_logs(
     # 计算总数
     total = query.count()
     
-    # 分页
+    # 分页(按ID降序,最新的在前面)
     offset = (page - 1) * page_size
-    logs = query.order_by(SystemLog.created_at.desc()).offset(offset).limit(page_size).all()
+    logs = query.order_by(SystemLog.id.desc()).offset(offset).limit(page_size).all()
     
     # 转换为字典列表
     items = []

@@ -98,10 +98,11 @@ export default {
     return eventSource
   },
   pingAll: () => api.post('/ping-all'),
-  getPingLogs: (hostId, page = 1, pageSize = 20, status = null) => {
+  getPingLogs: (hostId, page = 1, pageSize = 20, status = null, search = null) => {
     const params = { page, page_size: pageSize }
     if (hostId) params.host_id = hostId
     if (status) params.status = status
+    if (search) params.search = search
     return api.get('/ping/logs', { params })
   },
   

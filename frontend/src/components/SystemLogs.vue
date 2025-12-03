@@ -16,6 +16,9 @@
             <el-option label="全部" value="" />
             <el-option label="数据维护" value="data_maintenance" />
             <el-option label="监控调度" value="scheduler" />
+            <el-option label="主机管理" value="host_management" />
+            <el-option label="用户认证" value="authentication" />
+            <el-option label="系统配置" value="system_config" />
           </el-select>
           <el-button type="primary" @click="loadLogs" :loading="loading">
             <el-icon><Refresh /></el-icon> 刷新
@@ -65,9 +68,9 @@
       </template>
       
       <el-table :data="logs" style="width: 100%" v-loading="loading">
-        <el-table-column label="序号" width="70" align="center" header-align="center">
-          <template #default="{ $index }">
-            {{ (currentPage - 1) * pageSize + $index + 1 }}
+        <el-table-column label="ID" width="80" align="center" header-align="center">
+          <template #default="{ row }">
+            {{ row.id }}
           </template>
         </el-table-column>
         <el-table-column label="时间" width="180" align="center" header-align="center">
@@ -81,7 +84,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="module" label="模块" width="150" align="center" header-align="center" />
-        <el-table-column prop="message" label="消息" min-width="300" show-overflow-tooltip />
+        <el-table-column label="消息" min-width="300">
+          <template #default="{ row }">
+            <span :style="getMessageStyle(row.message)">{{ row.message }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="100" align="center" header-align="center">
           <template #default="{ row }">
             <el-button v-if="row.details" type="primary" size="small" @click="viewDetails(row)">查看详情</el-button>
@@ -131,7 +138,7 @@ const cleanupLoading = ref(false)
 const logs = ref([])
 const total = ref(0)
 const currentPage = ref(1)
-const pageSize = ref(50)
+const pageSize = ref(10)
 const logTypeFilter = ref('')
 const moduleFilter = ref('')
 const detailsVisible = ref(false)
@@ -258,6 +265,27 @@ const formatDetails = (details) => {
   } catch {
     return details
   }
+}
+
+const getMessageStyle = (message) => {
+  if (!message) return {}
+  
+  // 小时级聚合 - 蓝色
+  if (message.includes('小时级数据聚合')) {
+    return { color: '#409eff', fontWeight: '500' }
+  }
+  
+  // 日级聚合 - 橙色
+  if (message.includes('日级数据聚合')) {
+    return { color: '#e6a23c', fontWeight: 'bold' }
+  }
+  
+  // 数据清理 - 绿色
+  if (message.includes('数据清理')) {
+    return { color: '#67c23a', fontWeight: '500' }
+  }
+  
+  return {}
 }
 
 onMounted(() => {

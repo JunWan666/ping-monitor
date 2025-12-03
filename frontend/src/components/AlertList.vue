@@ -70,7 +70,7 @@ import api from '../api'
 const alerts = ref([])
 const timeRange = ref(24)
 const currentPage = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(10)
 const totalAlerts = ref(0)
 
 const loadAlerts = async () => {
@@ -109,6 +109,8 @@ const cleanMarkdown = (text) => {
     .replace(/警告/g, '')
     .replace(/提醒/g, '')
     .replace(/已恢复/g, '')
+    // 移除✅符号
+    .replace(/\u2705/g, '')
     // 将换行符替换为空格
     .replace(/\n+/g, ' ')
     // 移除多余空格
@@ -116,7 +118,7 @@ const cleanMarkdown = (text) => {
     .trim()
   
   // 移除重复的emoji（保留第一个）
-  const emojiPattern = /[\u{1F534}\u{1F7E0}\u{1F7E1}\u{2705}]/gu
+  const emojiPattern = /[\u{1F534}\u{1F7E0}\u{1F7E1}]/gu
   const emojis = result.match(emojiPattern)
   if (emojis && emojis.length > 1) {
     // 只保留第一个emoji，移除后续的

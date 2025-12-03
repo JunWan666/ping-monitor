@@ -339,12 +339,27 @@ const loadData = async () => {
 
 const loadOverallChart = async () => {
   try {
-    // 获取最近的ping日志，不分组，直接按时间显示
-    const response = await api.getPingLogs(null, 1, 50) // 获取最近50条记录
+    // 动态计算需要获取的记录数
+    // 从系统配置中读取目标检测次数
+    let targetCheckTimes = 12 // 默认值
+    try {
+      const config = await api.getConfig()
+      targetCheckTimes = config.dashboard_chart_points || 12
+    } catch (error) {
+      console.warn('获取配置失败，使用默认值', error)
+    }
+    
+    const hostCount = dashboard.host_status.length || 1 // 主机数量
+    const pageSize = Math.max(100, hostCount * targetCheckTimes) // 最少100条
+    
+    const response = await api.getPingLogs(null, 1, pageSize)
     const logs = response.items || []
     
     if (logs.length === 0) {
-      renderOverallChart([], [], [])
+      // 没有数据时不渲染图表，避免显示异常
+      if (overallChartInstance) {
+        overallChartInstance.clear()
+      }
       return
     }
     
@@ -359,6 +374,7 @@ const loadOverallChart = async () => {
         timeMap.set(timeKey, {
           packet_loss_sum: 0,
           avg_rtt_sum: 0,
+          online_count: 0,
           count: 0,
           timestamp: time.getTime()
         })
@@ -367,6 +383,10 @@ const loadOverallChart = async () => {
       const data = timeMap.get(timeKey)
       data.packet_loss_sum += log.packet_loss
       data.avg_rtt_sum += log.avg_rtt || 0
+      // 丢包率<10%算在线
+      if (log.packet_loss < 10) {
+        data.online_count += 1
+      }
       data.count += 1
     })
     
@@ -378,21 +398,33 @@ const loadOverallChart = async () => {
     const times = []
     const avgPacketLoss = []
     const avgRtt = []
+    const onlineRates = []
     
     sortedEntries.forEach(([time, data]) => {
       times.push(time)
       avgPacketLoss.push((data.packet_loss_sum / data.count).toFixed(2))
       avgRtt.push((data.avg_rtt_sum / data.count).toFixed(2))
+      // 计算在线率
+      const onlineRate = ((data.online_count / data.count) * 100).toFixed(2)
+      onlineRates.push(onlineRate)
     })
     
-    renderOverallChart(times, avgPacketLoss, avgRtt)
+    renderOverallChart(times, avgPacketLoss, avgRtt, onlineRates)
   } catch (error) {
     console.error('加载整体监控数据失败:', error)
   }
 }
 
-const renderOverallChart = (times, packetLoss, avgRtt) => {
+const renderOverallChart = (times, packetLoss, avgRtt, onlineRates) => {
   if (!overallChartDom.value) return
+  
+  // 数据有效性检查
+  if (!times || times.length === 0 || !packetLoss || packetLoss.length === 0) {
+    if (overallChartInstance) {
+      overallChartInstance.clear()
+    }
+    return
+  }
   
   if (overallChartInstance) {
     overallChartInstance.dispose()
@@ -408,7 +440,7 @@ const renderOverallChart = (times, packetLoss, avgRtt) => {
       }
     },
     legend: {
-      data: ['平均丢包率(%)', '平均延迟(ms)'],
+      data: ['在线率(%)', '平均丢包率(%)', '平均延迟(ms)'],
       top: 0
     },
     grid: {
@@ -430,11 +462,11 @@ const renderOverallChart = (times, packetLoss, avgRtt) => {
     yAxis: [
       {
         type: 'value',
-        name: '丢包率(%)',
+        name: '百分比(%)',
         position: 'left',
         axisLine: {
           lineStyle: {
-            color: '#f56c6c'
+            color: '#67c23a'
           }
         },
         splitLine: {
@@ -459,6 +491,26 @@ const renderOverallChart = (times, packetLoss, avgRtt) => {
       }
     ],
     series: [
+      {
+        name: '在线率(%)',
+        type: 'line',
+        data: onlineRates,
+        smooth: true,
+        itemStyle: { color: '#67c23a' },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(103, 194, 58, 0.3)' },
+              { offset: 1, color: 'rgba(103, 194, 58, 0.05)' }
+            ]
+          }
+        }
+      },
       {
         name: '平均丢包率(%)',
         type: 'line',

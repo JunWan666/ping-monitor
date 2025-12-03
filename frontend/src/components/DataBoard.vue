@@ -250,6 +250,7 @@ const handleSortChange = ({ prop, order }) => {
 
 const loadData = async () => {
   loading.value = true
+  const startTime = Date.now()
   try {
     const data = await api.getDataBoardStats(selectedTimeRange.value, sortBy.value, sortOrder.value)
     
@@ -265,6 +266,12 @@ const loadData = async () => {
     // 加载整体趋势图
     await nextTick()
     renderTrendChart(data.trend_data)
+    
+    // 性能监控
+    const loadTime = Date.now() - startTime
+    if (loadTime > 1000) {
+      console.warn(`数据看板加载耗时: ${loadTime}ms`)
+    }
   } catch (error) {
     ElMessage.error('加载数据失败')
     console.error('加载数据看板失败:', error)
@@ -274,7 +281,7 @@ const loadData = async () => {
 }
 
 const renderTrendChart = (trendData) => {
-  if (!trendChartDom.value) return
+  if (!trendChartDom.value || !trendData || trendData.length === 0) return
   
   if (trendChartInstance) {
     trendChartInstance.dispose()

@@ -40,7 +40,7 @@
                     <span style="margin-left: 10px">秒</span>
                   </div>
                   <div style="color: #909399; font-size: 12px; margin-top: 8px">
-                    建议：2-5秒
+                    建议：2-5秒，单个Ping包等待响应的最长时间，超过则认为丢包
                   </div>
                 </div>
               </el-form-item>
@@ -89,6 +89,17 @@
                   </div>
                   <div style="color: #909399; font-size: 12px; margin-top: 8px">
                     每隔多久执行一次小时级数据聚合，建议 1-6 小时
+                  </div>
+                </div>
+              </el-form-item>
+              <el-form-item label="仪表盘数据点">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <div style="display: flex; align-items: center">
+                    <el-input-number v-model="config.dashboard_chart_points" :min="3" :max="50" style="width: 150px" />
+                    <span style="margin-left: 10px">次检测</span>
+                  </div>
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    仪表盘趋势图显示多少次检测的数据，建议 12 次（1小时）
                   </div>
                 </div>
               </el-form-item>
@@ -198,15 +209,18 @@
           <div style="display: flex; justify-content: space-between; align-items: center">
             <span style="font-weight: bold">主机Ping记录</span>
             <div>
-              <el-select v-model="selectedHostId" placeholder="选择主机" style="width: 200px; margin-right: 10px" @change="loadPingLogs">
-                <el-option label="全部主机" value="" />
-                <el-option 
-                  v-for="host in hosts" 
-                  :key="host.id" 
-                  :label="host.name" 
-                  :value="host.id" 
-                />
-              </el-select>
+              <el-input
+                v-model="hostSearchKeyword"
+                placeholder="搜索主机名称或地址"
+                clearable
+                style="width: 250px; margin-right: 10px"
+                @clear="loadPingLogs"
+                @keyup.enter="loadPingLogs"
+              >
+                <template #prefix>
+                  <el-icon><Search /></el-icon>
+                </template>
+              </el-input>
               <el-select v-model="selectedStatus" placeholder="选择状态" style="width: 120px; margin-right: 10px" @change="loadPingLogs">
                 <el-option label="全部状态" value="" />
                 <el-option label="正常" value="normal" />
@@ -308,7 +322,7 @@ const testingNotification = ref(false)
 const notificationPlatform = ref('none')
 const hosts = ref([])
 const pingLogs = ref([])
-const selectedHostId = ref('')
+const hostSearchKeyword = ref('')
 const selectedStatus = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -324,7 +338,8 @@ const config = reactive({
   notification_mode: 'status_change',
   data_retention_days: 30,
   cleanup_time: '03:00',
-  aggregate_interval: 1
+  aggregate_interval: 1,
+  dashboard_chart_points: 12
 })
 
 // 计算属性：是否可以测试通知
@@ -365,20 +380,40 @@ const loadConfig = async () => {
 const saveConfig = async () => {
   saving.value = true
   try {
-    await api.updateConfig({
+    // 根据选择的平台决定发送哪些配置
+    let configData = {
       check_interval: config.check_interval,
       packet_count: config.packet_count,
       packet_timeout: config.packet_timeout,
-      serverchan_key: config.serverchan_key || null,
-      webhook_url: config.webhook_url || null,
-      webhook_secret: config.webhook_secret || null,
       notification_mode: config.notification_mode,
       data_retention_days: config.data_retention_days,
       cleanup_time: config.cleanup_time,
-      aggregate_interval: config.aggregate_interval
-    })
-    ElMessage.success('配置保存成功，监控间隔将在下次检测时生效')
-    loadConfig()
+      aggregate_interval: config.aggregate_interval,
+      dashboard_chart_points: config.dashboard_chart_points
+    }
+    
+    if (notificationPlatform.value === 'none') {
+      // 不启用通知，发送空值给后端（但前端保留输入框的值）
+      configData.serverchan_key = ''
+      configData.webhook_url = ''
+      configData.webhook_secret = ''
+    } else if (notificationPlatform.value === 'serverchan') {
+      // Server酱，只发送Server酱配置
+      configData.serverchan_key = config.serverchan_key || ''
+      configData.webhook_url = ''
+      configData.webhook_secret = ''
+    } else {
+      // Webhook(钉钉/企业微信)，只发送Webhook配置
+      configData.serverchan_key = ''
+      configData.webhook_url = config.webhook_url || ''
+      configData.webhook_secret = config.webhook_secret || ''
+    }
+    
+    await api.updateConfig(configData)
+    ElMessage.success('配置保存成功')
+    
+    // 保存成功后不重新加载，保持前端输入框的值
+    // 这样切换平台时之前的配置还在
   } catch (error) {
     ElMessage.error('配置保存失败')
   } finally {
@@ -396,9 +431,9 @@ const loadHosts = async () => {
 
 const loadPingLogs = async () => {
   try {
-    const hostId = selectedHostId.value || null
     const status = selectedStatus.value || null
-    const data = await api.getPingLogs(hostId, currentPage.value, pageSize.value, status)
+    const search = hostSearchKeyword.value || null
+    const data = await api.getPingLogs(null, currentPage.value, pageSize.value, status, search)
     pingLogs.value = data.items || []
     totalLogs.value = data.total || 0
   } catch (error) {

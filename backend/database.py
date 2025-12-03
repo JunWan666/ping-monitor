@@ -84,6 +84,7 @@ class SystemConfig(Base):
     data_retention_days = Column(Integer, default=30)  # 原始数据保留天数
     cleanup_time = Column(String, default='03:00')  # 数据清理时间(HH:MM)
     aggregate_interval = Column(Integer, default=1)  # 聚合间隔(小时)
+    dashboard_chart_points = Column(Integer, default=12)  # 仪表盘趋势图显示的检测次数
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 class User(Base):
@@ -125,8 +126,7 @@ class SystemLog(Base):
 
 def init_db():
     """初始化数据库"""
-    # 删除所有表并重新创建（仅在开发环境）
-    Base.metadata.drop_all(bind=engine)
+    # 只创建不存在的表，不删除现有数据
     Base.metadata.create_all(bind=engine)
     
     # 初始化系统配置
