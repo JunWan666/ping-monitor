@@ -1266,5 +1266,41 @@ def _do_data_cleanup(days: int):
     from data_maintenance import DataMaintenance
     DataMaintenance.cleanup_old_records(days=days)
 
+# ==================== 静态文件服务 ====================
+
+# 获取前端静态文件目录
+frontend_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+
+# 如果前端构建目录存在，配置静态文件服务
+if os.path.exists(frontend_dist):
+    # 挂载静态资源目录（js, css, images等）
+    assets_dir = os.path.join(frontend_dist, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    
+    # SPA回退路由 - 处理所有非API请求
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """SPA回退路由，返回index.html"""
+        # 如果是API请求，跳过（由其他路由处理）
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        
+        # 检查是否请求的是静态文件
+        file_path = os.path.join(frontend_dist, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        # 返回index.html（SPA入口）
+        index_path = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        
+        raise HTTPException(status_code=404, detail="前端资源未找到")
+    
+    logger.info(f"✅ 前端静态文件服务已启用: {frontend_dist}")
+else:
+    logger.warning(f"⚠️ 前端构建目录不存在: {frontend_dist}")
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
