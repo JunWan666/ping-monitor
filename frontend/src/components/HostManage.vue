@@ -310,7 +310,6 @@
 import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled, Download, Upload } from '@element-plus/icons-vue'
-import * as XLSX from 'xlsx'
 import api from '../api'
 
 const hosts = ref([])
@@ -336,6 +335,15 @@ const searchKeyword = ref('')
 const statusFilter = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
+let xlsxModulePromise = null
+
+const getXLSX = async () => {
+  if (!xlsxModulePromise) {
+    xlsxModulePromise = import('xlsx')
+  }
+  return xlsxModulePromise
+}
+
 const form = reactive({
   id: null,
   name: '',
@@ -383,9 +391,12 @@ const handleCurrentChange = (val) => {
 
 const loadHosts = async () => {
   try {
-    hosts.value = await api.getHosts()
-    // 获取每个主机的最新状态
-    const dashboardData = await api.getDashboard()
+    const [hostList, dashboardData] = await Promise.all([
+      api.getHosts(),
+      api.getDashboard()
+    ])
+
+    hosts.value = hostList
     const statusMap = new Map()
     dashboardData.host_status.forEach(hs => {
       statusMap.set(hs.id, hs.status)
@@ -702,7 +713,9 @@ const submitBatchImport = async () => {
   }
 }
 
-const downloadTemplate = () => {
+const downloadTemplate = async () => {
+  const XLSX = await getXLSX()
+
   // 创建示例数据
   const data = [
     ['主机名称', '地址', '描述', '告警阈值(%)'],
@@ -721,11 +734,13 @@ const downloadTemplate = () => {
   ElMessage.success('模板下载成功')
 }
 
-const exportHosts = () => {
+const exportHosts = async () => {
   if (hostsWithStatus.value.length === 0) {
     ElMessage.warning('没有可导出的主机数据')
     return
   }
+
+  const XLSX = await getXLSX()
   
   // 准备导出数据，格式与导入模板一致
   const data = [
@@ -810,8 +825,9 @@ const handleFileChange = (file) => {
   fileList.value = [file]
   const reader = new FileReader()
   
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     try {
+      const XLSX = await getXLSX()
       const data = new Uint8Array(e.target.result)
       const workbook = XLSX.read(data, { type: 'array' })
       const sheetName = workbook.SheetNames[0]

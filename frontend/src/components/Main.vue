@@ -57,29 +57,30 @@
           <el-button type="danger" size="small" @click="handleLogout">退出登录</el-button>
         </el-header>
         <el-main style="overflow-y: auto">
-          <Dashboard v-if="activeMenu === 'dashboard'" />
-          <DataBoard v-else-if="activeMenu === 'databoard'" />
-          <HostManage v-else-if="activeMenu === 'hosts'" />
-          <AlertList v-else-if="activeMenu === 'alerts'" />
-          <UserProfile v-else-if="activeMenu === 'settings-profile'" />
-          <SystemLogs v-else-if="activeMenu === 'settings-system-logs'" />
-          <Settings v-else-if="activeMenu.startsWith('settings')" :active-tab="activeMenu" />
+          <KeepAlive :max="6">
+            <component
+              :is="currentComponent"
+              :key="currentComponentKey"
+              v-bind="currentComponentProps"
+            />
+          </KeepAlive>
         </el-main>
       </el-container>
     </el-container>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import Dashboard from './Dashboard.vue'
-import DataBoard from './DataBoard.vue'
-import HostManage from './HostManage.vue'
-import AlertList from './AlertList.vue'
-import Settings from './Settings.vue'
-import UserProfile from './UserProfile.vue'
-import SystemLogs from './SystemLogs.vue'
+
+const Dashboard = defineAsyncComponent(() => import('./Dashboard.vue'))
+const DataBoard = defineAsyncComponent(() => import('./DataBoard.vue'))
+const HostManage = defineAsyncComponent(() => import('./HostManage.vue'))
+const AlertList = defineAsyncComponent(() => import('./AlertList.vue'))
+const Settings = defineAsyncComponent(() => import('./Settings.vue'))
+const UserProfile = defineAsyncComponent(() => import('./UserProfile.vue'))
+const SystemLogs = defineAsyncComponent(() => import('./SystemLogs.vue'))
 
 const router = useRouter()
 const activeMenu = ref('dashboard')
@@ -96,6 +97,47 @@ const menuTitles = {
 }
 
 const menuTitle = ref(menuTitles.dashboard)
+
+const currentComponent = computed(() => {
+  if (activeMenu.value === 'settings-profile') {
+    return UserProfile
+  }
+
+  if (activeMenu.value === 'settings-system-logs') {
+    return SystemLogs
+  }
+
+  if (activeMenu.value.startsWith('settings')) {
+    return Settings
+  }
+
+  const menuComponentMap = {
+    dashboard: Dashboard,
+    databoard: DataBoard,
+    hosts: HostManage,
+    alerts: AlertList
+  }
+
+  return menuComponentMap[activeMenu.value] || Dashboard
+})
+
+const currentComponentKey = computed(() => {
+  if (activeMenu.value === 'settings-basic' || activeMenu.value === 'settings-logs') {
+    return 'settings'
+  }
+
+  return activeMenu.value
+})
+
+const currentComponentProps = computed(() => {
+  if (currentComponentKey.value === 'settings') {
+    return {
+      activeTab: activeMenu.value
+    }
+  }
+
+  return {}
+})
 
 const handleMenuSelect = (key) => {
   activeMenu.value = key

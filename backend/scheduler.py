@@ -1,409 +1,386 @@
-from apscheduler.schedulers.background import BackgroundScheduler
-from sqlalchemy.orm import Session
-from database import SessionLocal, Host, PingRecord, Alert, SystemConfig
-from ping_service import PingService
-from notification_template import NotificationTemplate
-from datetime import datetime
+from __future__ import annotations
+
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-# 配置日志格式，添加时间戳
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy.orm import Session
+
+from cache import cache_manager
+from database import Alert, Host, PingRecord, SessionLocal, SystemConfig, get_database_backend
+from notification_template import NotificationTemplate
+from ping_service import PingService
+
 logger = logging.getLogger(__name__)
 
+
 class MonitorScheduler:
-    """监控调度器"""
-    
-    def __init__(self):
-        self.scheduler = BackgroundScheduler()
+    def __init__(self) -> None:
+        self.scheduler = BackgroundScheduler(
+            timezone=ZoneInfo("Asia/Shanghai"),
+            job_defaults={
+                "coalesce": True,
+                "max_instances": 1,
+                "misfire_grace_time": 120,
+            },
+        )
         self.ping_service = PingService()
-        self.current_interval = None  # 将从数据库读取
-        self.alert_queue = []  # 告警队列
-        self.alert_lock = threading.Lock()  # 线程锁
-        
-    def start(self):
-        """启动定时任务"""
-        # 从数据库读取配置
+        self.alert_queue = []
+        self.alert_lock = threading.Lock()
+        self.current_interval = 5
+        self.aggregate_interval = 1
+        self.cleanup_time = "03:00"
+
+    def start(self) -> None:
+        self.reload_config(initial=True)
+
+        if not self.scheduler.running:
+            self.scheduler.start()
+            logger.info("监控调度器已启动")
+
+        thread = threading.Thread(target=self.monitor_all_hosts, daemon=True)
+        thread.start()
+
+    def stop(self) -> None:
+        if self.scheduler.running:
+            self.scheduler.shutdown()
+            logger.info("监控调度器已停止")
+
+    def reload_config(self, initial: bool = False) -> None:
         db = SessionLocal()
         try:
             config = db.query(SystemConfig).first()
             if config:
                 self.current_interval = config.check_interval
-                aggregate_interval = config.aggregate_interval
-                cleanup_hour, cleanup_minute = config.cleanup_time.split(':')
+                self.aggregate_interval = config.aggregate_interval
+                self.cleanup_time = config.cleanup_time or "03:00"
             else:
-                self.current_interval = 5  # 默认值
-                aggregate_interval = 1
-                cleanup_hour, cleanup_minute = '03', '00'
+                self.current_interval = 5
+                self.aggregate_interval = 1
+                self.cleanup_time = "03:00"
         finally:
             db.close()
-        
-        # 每 N 分钟执行一次监控
-        self.scheduler.add_job(
-            self.monitor_all_hosts,
-            'interval',
+
+        cleanup_hour, cleanup_minute = self.cleanup_time.split(":")
+
+        self._upsert_job(
+            job_id="monitor_hosts",
+            func=self.monitor_all_hosts,
+            trigger="interval",
+            replace_existing=True,
             minutes=self.current_interval,
-            id='monitor_hosts',
-            replace_existing=True
         )
-        
-        # 每 N小时执行一次数据聚合
-        self.scheduler.add_job(
-            self._run_hourly_aggregation,
-            'cron',
-            hour=f'*/{aggregate_interval}',  # 按配置的间隔
+        self._upsert_job(
+            job_id="hourly_aggregation",
+            func=self._run_hourly_aggregation,
+            trigger="cron",
+            replace_existing=True,
+            hour=f"*/{self.aggregate_interval}",
             minute=5,
-            id='hourly_aggregation',
-            replace_existing=True
         )
-        
-        # 每天按配置时间执行日级聚合和数据清理
-        self.scheduler.add_job(
-            self._run_daily_tasks,
-            'cron',
+        self._upsert_job(
+            job_id="daily_tasks",
+            func=self._run_daily_tasks,
+            trigger="cron",
+            replace_existing=True,
             hour=int(cleanup_hour),
             minute=int(cleanup_minute),
-            id='daily_tasks',
-            replace_existing=True
         )
-        
-        self.scheduler.start()
-        logger.info(f"监控调度器已启动，每{self.current_interval}分钟执行一次")
-        logger.info(f"数据聚合任务：每{aggregate_interval}小时执行一次")
-        logger.info(f"数据清理任务：每天{cleanup_hour}:{cleanup_minute}执行")
-        
-        # 在后台线程中立即执行一次监控（不阻塞启动）
-        logger.info("立即执行首次监控...")
-        thread = threading.Thread(target=self.monitor_all_hosts, daemon=True)
-        thread.start()
-    
-    def update_interval(self, minutes: int):
-        """更新监控间隔"""
+
+        if not initial:
+            logger.info(
+                "调度配置已刷新: check_interval=%s, aggregate_interval=%s, cleanup_time=%s",
+                self.current_interval,
+                self.aggregate_interval,
+                self.cleanup_time,
+            )
+
+    def _upsert_job(self, *, job_id: str, func, trigger: str, replace_existing: bool, **kwargs) -> None:
+        existing = self.scheduler.get_job(job_id)
+        if existing:
+            self.scheduler.remove_job(job_id)
+
+        self.scheduler.add_job(
+            func,
+            trigger,
+            id=job_id,
+            replace_existing=replace_existing,
+            **kwargs,
+        )
+
+    def update_interval(self, minutes: int) -> None:
         self.current_interval = minutes
-        self.scheduler.reschedule_job(
-            'monitor_hosts',
-            trigger='interval',
-            minutes=minutes
+        self._upsert_job(
+            job_id="monitor_hosts",
+            func=self.monitor_all_hosts,
+            trigger="interval",
+            replace_existing=True,
+            minutes=minutes,
         )
-        logger.info(f"监控间隔已更新为{minutes}分钟")
-    
-    def stop(self):
-        """停止调度器"""
-        self.scheduler.shutdown()
-        logger.info("监控调度器已停止")
-    
-    def monitor_all_hosts(self):
-        """监控所有启用的主机（并发执行）"""
+        logger.info("监控间隔已更新为 %s 分钟", minutes)
+
+    def monitor_all_hosts(self) -> None:
         start_time = datetime.now()
-        logger.info("="*20 + " 定时监控任务开始 " + "="*20)
-        
-        # 清空告警队列
         with self.alert_lock:
             self.alert_queue = []
-        
+
         db = SessionLocal()
         try:
-            hosts = db.query(Host).filter(Host.enabled == True).all()
-            logger.info(f"本次需要监控 {len(hosts)} 台主机")
-            
-            # 为每个主机启动独立线程，并发执行
-            threads = []
-            for host in hosts:
-                thread = threading.Thread(
-                    target=self._monitor_host_in_thread,
-                    args=(host.id, host.name, host.address, host.alert_threshold),
-                    daemon=True
-                )
-                thread.start()
-                threads.append(thread)
-            
-            # 等待所有线程完成（最多等待 60 秒）
-            for thread in threads:
-                thread.join(timeout=60)
-            
-            end_time = datetime.now()
-            duration = (end_time - start_time).total_seconds()
-            logger.info(f"定时监控任务完成，耗时: {duration:.2f}秒")
-            
-            # 输出告警信息
-            if self.alert_queue:
-                logger.warning("="*20 + " 告警信息汇总 " + "="*20)
-                for alert_info in self.alert_queue:
-                    logger.warning(f"🚨 [{alert_info['type']}] {alert_info['host']} ({alert_info['address']}) - 丢包率: {alert_info['packet_loss']}%, 阈值: {alert_info['threshold']}%, 延迟: {alert_info['rtt']}")
-                logger.warning("="*20 + f" 共 {len(self.alert_queue)} 条告警 " + "="*20)
-            
-            logger.info("="*20 + " 定时监控任务结束 " + "="*20)
-                
-        except Exception as e:
-            logger.error(f"监控任务执行失败: {str(e)}")
-            logger.info("="*20 + " 定时监控任务结束 " + "="*20)
+            config = db.query(SystemConfig).first()
+            packet_count = config.packet_count if config else 10
+            packet_timeout = config.packet_timeout if config else 2
+            notification_mode = config.notification_mode if config else "status_change"
+            hosts = db.query(Host).filter(Host.enabled.is_(True)).all()
         finally:
             db.close()
-    
-    def _monitor_host_in_thread(self, host_id: int, host_name: str, host_address: str, alert_threshold: float):
-        """在独立线程中监控单个主机"""
+
+        if not hosts:
+            logger.info("没有启用中的主机，跳过本轮监控")
+            return
+
+        backend = get_database_backend()
+        max_workers = 4 if backend == "sqlite" else min(max(len(hosts), 4), 32)
+
+        logger.info(
+            "开始执行监控任务，主机数=%s, packet_count=%s, packet_timeout=%s, workers=%s",
+            len(hosts),
+            packet_count,
+            packet_timeout,
+            max_workers,
+        )
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(
+                    self._monitor_host_in_thread,
+                    host.id,
+                    packet_count,
+                    packet_timeout,
+                    notification_mode,
+                )
+                for host in hosts
+            ]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    logger.error("监控线程执行失败: %s", exc)
+
+        duration = (datetime.now() - start_time).total_seconds()
+        logger.info("监控任务完成，耗时 %.2f 秒", duration)
+
+        cache_manager.invalidate_namespace("dashboard")
+        cache_manager.invalidate_namespace("databoard")
+
+        if self.alert_queue:
+            logger.warning("本轮监控产生 %s 条告警", len(self.alert_queue))
+            for alert_info in self.alert_queue:
+                logger.warning(
+                    "[%s] %s (%s) - 丢包率 %s, 阈值 %s, 延迟 %s",
+                    alert_info["type"],
+                    alert_info["host"],
+                    alert_info["address"],
+                    alert_info["packet_loss"],
+                    alert_info["threshold"],
+                    alert_info["rtt"],
+                )
+
+    def _monitor_host_in_thread(
+        self,
+        host_id: int,
+        packet_count: int,
+        packet_timeout: int,
+        notification_mode: str,
+    ) -> None:
         db = SessionLocal()
         try:
-            # 重新获取 host 对象（因为是新的数据库会话）
             host = db.query(Host).filter(Host.id == host_id).first()
             if host:
-                self.monitor_single_host(db, host)
-        except Exception as e:
-            logger.error(f"监控主机 {host_name} 线程失败: {str(e)}")
+                self.monitor_single_host(
+                    db,
+                    host,
+                    packet_count=packet_count,
+                    packet_timeout=packet_timeout,
+                    notification_mode=notification_mode,
+                )
         finally:
             db.close()
-    
-    def monitor_single_host(self, db: Session, host: Host):
-        """监控单个主机"""
+
+    def monitor_single_host(
+        self,
+        db: Session,
+        host: Host,
+        *,
+        packet_count: int,
+        packet_timeout: int,
+        notification_mode: str,
+    ) -> None:
         try:
-            # 执行ping
-            result = self.ping_service.ping_host(host.address, count=10, timeout=2)
-            
-            # 保存记录
+            result = self.ping_service.ping_host(
+                host.address,
+                count=packet_count,
+                timeout=packet_timeout,
+            )
+
             record = PingRecord(
                 host_id=host.id,
-                packet_sent=result['packet_sent'],
-                packet_received=result['packet_received'],
-                packet_loss=result['packet_loss'],
-                min_rtt=result['min_rtt'],
-                max_rtt=result['max_rtt'],
-                avg_rtt=result['avg_rtt'],
-                created_at=datetime.now()
+                packet_sent=result["packet_sent"],
+                packet_received=result["packet_received"],
+                packet_loss=result["packet_loss"],
+                min_rtt=result["min_rtt"],
+                max_rtt=result["max_rtt"],
+                avg_rtt=result["avg_rtt"],
+                created_at=datetime.now(),
             )
             db.add(record)
             db.commit()
-            
-            # 获取系统配置
-            config = db.query(SystemConfig).first()
-            notification_mode = config.notification_mode if config else 'status_change'
-            
-            # 判断当前状态
-            current_status = 'normal'
-            if result['status'] == 'unreachable' or result['packet_loss'] >= host.alert_threshold:
-                current_status = 'abnormal'
-            
-            # 获取上次状态
+
+            current_status = "normal"
+            if result["status"] == "unreachable" or result["packet_loss"] >= host.alert_threshold:
+                current_status = "abnormal"
+
             last_status = host.last_status
-            
-            # 判断是否需要发送通知
             should_alert = False
-            alert_message = ""
-            alert_type = ""
-            
-            # 状态转换模式：只在状态变化时通知
-            if notification_mode == 'status_change':
-                # 首次检测（无上次状态）且当前异常，需要通知
-                if last_status is None and current_status == 'abnormal':
+
+            if notification_mode == "status_change":
+                if last_status is None and current_status == "abnormal":
                     should_alert = True
-                # 从正常转为异常，或从异常转为正常
-                elif last_status != current_status and last_status is not None:
+                elif last_status is not None and last_status != current_status:
                     should_alert = True
-            # 每次异常模式：每次检测到异常都通知
-            elif notification_mode == 'every_time':
-                if current_status == 'abnormal':
-                    should_alert = True
-            
-            # 更新主机状态
+            elif notification_mode == "every_time" and current_status == "abnormal":
+                should_alert = True
+
             host.last_status = current_status
             db.commit()
-            
-            # 如果需要通知，生成通知消息
+
             if should_alert:
-                if current_status == 'abnormal':
-                    # 异常通知
-                    if result['packet_loss'] >= host.alert_threshold:
-                        alert_type = '丢包告警'
-                        
-                        # 使用模板生成通知消息
-                        msg_data = NotificationTemplate.get_abnormal_alert(
-                            host_name=host.name,
-                            host_address=host.address,
-                            packet_loss=result['packet_loss'],
-                            alert_threshold=host.alert_threshold,
-                            avg_rtt=result['avg_rtt'],
-                            use_markdown=True
-                        )
-                        alert_message = msg_data['content']
-                        alert_title = msg_data['title']
-                        
-                        # 添加到告警队列
-                        with self.alert_lock:
-                            self.alert_queue.append({
-                                'type': alert_type,
-                                'host': host.name,
-                                'address': host.address,
-                                'packet_loss': f"{result['packet_loss']:.1f}",
-                                'threshold': f"{host.alert_threshold:.0f}",
-                                'rtt': f"{result['avg_rtt']:.2f}ms" if result['avg_rtt'] else '无数据'
-                            })
-                        
-                        alert = Alert(
-                            host_id=host.id,
-                            host_name=host.name,
-                            alert_type='packet_loss',
-                            message=alert_message,
-                            is_sent=False,
-                            created_at=datetime.now()
-                        )
-                        db.add(alert)
-                        db.commit()
-                        db.refresh(alert)
-                        
-                    elif result['status'] == 'unreachable':
-                        alert_type = '主机不可达'
-                        
-                        # 使用模板生成通知消息
-                        msg_data = NotificationTemplate.get_unreachable_alert(
-                            host_name=host.name,
-                            host_address=host.address,
-                            use_markdown=True
-                        )
-                        alert_message = msg_data['content']
-                        alert_title = msg_data['title']
-                        
-                        # 添加到告警队列
-                        with self.alert_lock:
-                            self.alert_queue.append({
-                                'type': alert_type,
-                                'host': host.name,
-                                'address': host.address,
-                                'packet_loss': '100.0',
-                                'threshold': f"{host.alert_threshold:.0f}",
-                                'rtt': '无响应'
-                            })
-                        
-                        alert = Alert(
-                            host_id=host.id,
-                            host_name=host.name,
-                            alert_type='unreachable',
-                            message=alert_message,
-                            is_sent=False,
-                            created_at=datetime.now()
-                        )
-                        db.add(alert)
-                        db.commit()
-                        db.refresh(alert)
-                    
-                    # 发送异常通知
-                    self._send_alert_notification(db, alert, alert_message, alert_title)
-                    
-                elif current_status == 'normal' and last_status == 'abnormal':
-                    # 恢复正常通知
-                    alert_type = '恢复正常'
-                    
-                    # 使用模板生成通知消息
-                    msg_data = NotificationTemplate.get_recovery_alert(
-                        host_name=host.name,
-                        host_address=host.address,
-                        packet_loss=result['packet_loss'],
-                        avg_rtt=result['avg_rtt'],
-                        use_markdown=True
-                    )
-                    alert_message = msg_data['content']
-                    alert_title = msg_data['title']
-                    
-                    alert = Alert(
-                        host_id=host.id,
-                        host_name=host.name,
-                        alert_type='recovery',
-                        message=alert_message,
-                        is_sent=False,
-                        created_at=datetime.now()
-                    )
-                    db.add(alert)
-                    db.commit()
-                    db.refresh(alert)
-                    
-                    # 发送恢复通知
-                    self._send_alert_notification(db, alert, alert_message, alert_title)
-                
-                logger.info(f"✅ {host.name} - 监控完成: 丢包率 {result['packet_loss']}%, 平均延迟 {result['avg_rtt']:.2f}ms")
-            
-        except Exception as e:
-            logger.error(f"监控主机 {host.name} 失败: {str(e)}")
-    
-    def _send_alert_notification(self, db: Session, alert: Alert, message: str, title: str = None):
-        """发送告警通知（异步）"""
-        # 在新线程中发送通知，不阻塞主监控线程
+                self._handle_host_alert(db, host, result, current_status, last_status)
+        except Exception as exc:
+            logger.error("监控主机 %s 失败: %s", host.name, exc)
+
+    def _handle_host_alert(self, db: Session, host: Host, result: dict, current_status: str, last_status: str | None) -> None:
+        if current_status == "abnormal":
+            if result["packet_loss"] >= host.alert_threshold:
+                alert_type = "packet_loss"
+                msg_data = NotificationTemplate.get_abnormal_alert(
+                    host_name=host.name,
+                    host_address=host.address,
+                    packet_loss=result["packet_loss"],
+                    alert_threshold=host.alert_threshold,
+                    avg_rtt=result["avg_rtt"],
+                    use_markdown=True,
+                )
+                rtt_text = f"{result['avg_rtt']:.2f}ms" if result["avg_rtt"] is not None else "无数据"
+            else:
+                alert_type = "unreachable"
+                msg_data = NotificationTemplate.get_unreachable_alert(
+                    host_name=host.name,
+                    host_address=host.address,
+                    use_markdown=True,
+                )
+                rtt_text = "无响应"
+
+            with self.alert_lock:
+                self.alert_queue.append(
+                    {
+                        "type": alert_type,
+                        "host": host.name,
+                        "address": host.address,
+                        "packet_loss": f"{result['packet_loss']:.1f}%",
+                        "threshold": f"{host.alert_threshold:.0f}%",
+                        "rtt": rtt_text,
+                    }
+                )
+
+            alert = Alert(
+                host_id=host.id,
+                host_name=host.name,
+                alert_type=alert_type,
+                message=msg_data["content"],
+                is_sent=False,
+                created_at=datetime.now(),
+            )
+            db.add(alert)
+            db.commit()
+            db.refresh(alert)
+            self._send_alert_notification(alert.id, msg_data["content"], alert_type, msg_data["title"])
+            return
+
+        if current_status == "normal" and last_status == "abnormal":
+            msg_data = NotificationTemplate.get_recovery_alert(
+                host_name=host.name,
+                host_address=host.address,
+                packet_loss=result["packet_loss"],
+                avg_rtt=result["avg_rtt"],
+                use_markdown=True,
+            )
+            alert = Alert(
+                host_id=host.id,
+                host_name=host.name,
+                alert_type="recovery",
+                message=msg_data["content"],
+                is_sent=False,
+                created_at=datetime.now(),
+            )
+            db.add(alert)
+            db.commit()
+            db.refresh(alert)
+            self._send_alert_notification(alert.id, msg_data["content"], "recovery", msg_data["title"])
+
+    def _send_alert_notification(self, alert_id: int, message: str, alert_type: str, title: str | None = None) -> None:
         thread = threading.Thread(
             target=self._do_send_notification,
-            args=(alert.id, message, alert.alert_type, title),
-            daemon=True
+            args=(alert_id, message, alert_type, title),
+            daemon=True,
         )
         thread.start()
-    
-    def _do_send_notification(self, alert_id: int, message: str, alert_type: str, title: str = None):
-        """实际执行通知发送（后台线程）"""
+
+    def _do_send_notification(self, alert_id: int, message: str, alert_type: str, title: str | None = None) -> None:
         db = SessionLocal()
         try:
             from notification import notifier
-            from database import SystemConfig
-            
-            # 获取系统配置
+
             config = db.query(SystemConfig).first()
             if not config:
-                logger.warning("系统配置不存在，无法发送通知")
                 return
-            
-            # 配置通知器
+
             notifier.configure(
                 serverchan_key=config.serverchan_key,
                 webhook_url=config.webhook_url,
-                webhook_secret=config.webhook_secret
+                webhook_secret=config.webhook_secret,
             )
-            
-            # 发送通知
+
             success = False
             if config.serverchan_key:
                 success = notifier.send_serverchan(title or "告警通知", message)
             elif config.webhook_url:
                 success = notifier.send_webhook(message, alert_type=alert_type, title=title)
-            
-            # 更新发送状态
+
             if success:
                 alert = db.query(Alert).filter(Alert.id == alert_id).first()
                 if alert:
                     alert.is_sent = True
                     db.commit()
-                logger.info(f"✅ 告警通知已发送 (Alert ID: {alert_id})")
-            else:
-                logger.error(f"❌ 告警通知发送失败 (Alert ID: {alert_id}, Type: {alert_type})")
-                
-        except Exception as e:
-            logger.error(f"❌ 发送告警通知异常 (Alert ID: {alert_id}): {str(e)}")
+        except Exception as exc:
+            logger.error("发送告警通知失败: %s", exc)
         finally:
             db.close()
-    
-    def _run_hourly_aggregation(self):
-        """执行小时级数据聚合"""
-        logger.info("📈 开始执行小时级数据聚合...")
-        try:
-            from data_maintenance import DataMaintenance
-            DataMaintenance.aggregate_hourly_stats()
-        except Exception as e:
-            logger.error(f"❌ 小时级数据聚合失败: {str(e)}")
-    
-    def _run_daily_tasks(self):
-        """执行每日任务：日级聚合 + 数据清理"""
-        logger.info("📅 开始执行每日维护任务...")
-        
-        # 1. 日级数据聚合
-        try:
-            from data_maintenance import DataMaintenance
-            DataMaintenance.aggregate_daily_stats()
-        except Exception as e:
-            logger.error(f"❌ 日级数据聚合失败: {str(e)}")
-        
-        # 2. 数据清理（保疕30天）
-        try:
-            from data_maintenance import DataMaintenance
-            DataMaintenance.cleanup_old_records(days=30)
-        except Exception as e:
-            logger.error(f"❌ 数据溅理失败: {str(e)}")
 
-# 全局调度器实例
+    def _run_hourly_aggregation(self) -> None:
+        from data_maintenance import DataMaintenance
+
+        logger.info("开始执行小时聚合任务")
+        DataMaintenance.aggregate_hourly_stats()
+
+    def _run_daily_tasks(self) -> None:
+        from data_maintenance import DataMaintenance
+
+        logger.info("开始执行每日维护任务")
+        DataMaintenance.aggregate_daily_stats()
+        DataMaintenance.cleanup_old_records()
+
+
 scheduler = MonitorScheduler()

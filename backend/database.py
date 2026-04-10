@@ -1,136 +1,178 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from __future__ import annotations
+
 from datetime import datetime
-import os
 
-# 数据库文件路径，支持Docker环境
-# 使用绝对路径，确保数据库文件始终保存在项目根目录的data文件夹
-import sys
-from pathlib import Path
-
-# 获取项目根目录（backend的父目录）
-if os.getenv('DB_PATH'):
-    # Docker环境使用环境变量
-    DB_PATH = os.getenv('DB_PATH')
-else:
-    # 本地环境：使用项目根目录/data
-    PROJECT_ROOT = Path(__file__).parent.parent  # backend的父目录
-    DATA_DIR = PROJECT_ROOT / 'data'
-    DATA_DIR.mkdir(exist_ok=True)
-    DB_PATH = str(DATA_DIR / 'ping_monitor.db')
-
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    inspect,
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+from sqlalchemy.orm import declarative_base, sessionmaker
 
+from app_settings import settings
+
+
+def _create_engine():
+    if settings.database_backend == "sqlite":
+        return create_engine(
+            settings.database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+    return create_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        pool_size=10,
+        max_overflow=20,
+    )
+
+
+engine = _create_engine()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
+
 class Host(Base):
-    """监控主机表"""
     __tablename__ = "hosts"
-    
+    __table_args__ = (
+        Index("ix_hosts_enabled_created_at", "enabled", "created_at"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)  # 主机名称
-    address = Column(String)  # IP或域名
-    description = Column(String, nullable=True)  # 描述
-    enabled = Column(Boolean, default=True)  # 是否启用
-    alert_threshold = Column(Float, default=20.0)  # 丢包率告警阈值(%)
-    last_status = Column(String, nullable=True)  # 上次状态: normal, abnormal, unknown
-    created_at = Column(DateTime, default=datetime.now)
+    name = Column(String(255), unique=True, index=True, nullable=False)
+    address = Column(String(255), nullable=False)
+    description = Column(String(500), nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    alert_threshold = Column(Float, default=20.0, nullable=False)
+    last_status = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
 
 class PingRecord(Base):
-    """Ping记录表"""
     __tablename__ = "ping_records"
-    
+    __table_args__ = (
+        Index("ix_ping_records_host_created_at", "host_id", "created_at"),
+        Index("ix_ping_records_created_host", "created_at", "host_id"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    host_id = Column(Integer, index=True)
-    packet_sent = Column(Integer)  # 发送包数
-    packet_received = Column(Integer)  # 接收包数
-    packet_loss = Column(Float)  # 丢包率(%)
-    min_rtt = Column(Float, nullable=True)  # 最小延迟(ms)
-    max_rtt = Column(Float, nullable=True)  # 最大延迟(ms)
-    avg_rtt = Column(Float, nullable=True)  # 平均延迟(ms)
-    created_at = Column(DateTime, default=datetime.now, index=True)
+    host_id = Column(Integer, index=True, nullable=False)
+    packet_sent = Column(Integer, nullable=False)
+    packet_received = Column(Integer, nullable=False)
+    packet_loss = Column(Float, nullable=False)
+    min_rtt = Column(Float, nullable=True)
+    max_rtt = Column(Float, nullable=True)
+    avg_rtt = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
+
 
 class Alert(Base):
-    """告警记录表"""
     __tablename__ = "alerts"
-    
+    __table_args__ = (
+        Index("ix_alerts_host_created_at", "host_id", "created_at"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    host_id = Column(Integer, index=True)
-    host_name = Column(String)
-    alert_type = Column(String)  # packet_loss, timeout, unreachable
-    message = Column(String)
-    is_sent = Column(Boolean, default=False)  # 是否已发送通知
-    created_at = Column(DateTime, default=datetime.now, index=True)
+    host_id = Column(Integer, index=True, nullable=False)
+    host_name = Column(String(255), nullable=False)
+    alert_type = Column(String(50), nullable=False)
+    message = Column(String(2000), nullable=False)
+    is_sent = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
+
 
 class SystemConfig(Base):
-    """系统配置表"""
     __tablename__ = "system_config"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    check_interval = Column(Integer, default=5)  # 检测间隔(分钟)
-    packet_count = Column(Integer, default=10)  # 每次发送包数
-    packet_timeout = Column(Integer, default=2)  # 超时时间(秒)
-    serverchan_key = Column(String, nullable=True)  # Server酱密钥
-    webhook_url = Column(String, nullable=True)  # Webhook地址
-    webhook_secret = Column(String, nullable=True)  # Webhook加签密钥(钉钉)
-    notification_mode = Column(String, default='status_change')  # 通知模式: status_change(状态转换时), every_time(每次异常)
-    # 数据维护配置
-    data_retention_days = Column(Integer, default=30)  # 原始数据保留天数
-    cleanup_time = Column(String, default='03:00')  # 数据清理时间(HH:MM)
-    aggregate_interval = Column(Integer, default=1)  # 聚合间隔(小时)
-    dashboard_chart_points = Column(Integer, default=12)  # 仪表盘趋势图显示的检测次数
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    check_interval = Column(Integer, default=5, nullable=False)
+    packet_count = Column(Integer, default=10, nullable=False)
+    packet_timeout = Column(Integer, default=2, nullable=False)
+    serverchan_key = Column(String(255), nullable=True)
+    webhook_url = Column(String(1000), nullable=True)
+    webhook_secret = Column(String(255), nullable=True)
+    notification_mode = Column(String(50), default="status_change", nullable=False)
+    data_retention_days = Column(Integer, default=30, nullable=False)
+    cleanup_time = Column(String(10), default="03:00", nullable=False)
+    aggregate_interval = Column(Integer, default=1, nullable=False)
+    dashboard_chart_points = Column(Integer, default=12, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
 
 class User(Base):
-    """用户表"""
     __tablename__ = "users"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)  # 用户名
-    password_hash = Column(String)  # 密码哈希
-    is_admin = Column(Boolean, default=True)  # 是否管理员
-    created_at = Column(DateTime, default=datetime.now)
+    username = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    is_admin = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
 
 class PingStatistics(Base):
-    """聚合统计表（按小时/天聚合）"""
     __tablename__ = "ping_statistics"
-    
+    __table_args__ = (
+        UniqueConstraint("host_id", "stat_type", "stat_time", name="uq_ping_statistics_host_type_time"),
+        Index("ix_ping_statistics_type_time", "stat_type", "stat_time"),
+        Index("ix_ping_statistics_host_type_time", "host_id", "stat_type", "stat_time"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    host_id = Column(Integer, index=True)
-    stat_type = Column(String, index=True)  # 'hourly' 或 'daily'
-    stat_time = Column(DateTime, index=True)  # 统计时间点
-    check_count = Column(Integer)  # 检测次数
-    online_count = Column(Integer)  # 在线次数
-    avg_packet_loss = Column(Float)  # 平均丢包率
-    avg_rtt = Column(Float, nullable=True)  # 平均延迟
-    min_rtt = Column(Float, nullable=True)  # 最小延迟
-    max_rtt = Column(Float, nullable=True)  # 最大延迟
-    created_at = Column(DateTime, default=datetime.now)
+    host_id = Column(Integer, index=True, nullable=False)
+    stat_type = Column(String(20), index=True, nullable=False)
+    stat_time = Column(DateTime, index=True, nullable=False)
+    check_count = Column(Integer, nullable=False)
+    online_count = Column(Integer, nullable=False)
+    avg_packet_loss = Column(Float, nullable=False)
+    avg_rtt = Column(Float, nullable=True)
+    min_rtt = Column(Float, nullable=True)
+    max_rtt = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
 
 class SystemLog(Base):
-    """系统日志表"""
     __tablename__ = "system_logs"
-    
+    __table_args__ = (
+        Index("ix_system_logs_type_created_at", "log_type", "created_at"),
+        Index("ix_system_logs_module_created_at", "module", "created_at"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    log_type = Column(String, index=True)  # 'info', 'warning', 'error', 'cleanup', 'aggregate'
-    module = Column(String)  # 模块名称
-    message = Column(Text)  # 日志内容
-    details = Column(Text, nullable=True)  # 详细信息（JSON格式）
-    created_at = Column(DateTime, default=datetime.now, index=True)
+    log_type = Column(String(50), index=True, nullable=False)
+    module = Column(String(100), nullable=False)
+    message = Column(Text, nullable=False)
+    details = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
 
-def init_db():
-    """初始化数据库"""
-    # 只创建不存在的表，不删除现有数据
+
+def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_indexes()
 
-def init_default_config():
-    """初始化默认配置（在迁移后执行）"""
+
+def ensure_indexes() -> None:
+    inspector = inspect(engine)
+    existing_indexes = {
+        table_name: {item["name"] for item in inspector.get_indexes(table_name)}
+        for table_name in inspector.get_table_names()
+    }
+    for table in Base.metadata.tables.values():
+        known = existing_indexes.get(table.name, set())
+        for index in table.indexes:
+            if index.name not in known:
+                index.create(bind=engine, checkfirst=True)
+
+
+def init_default_config() -> None:
     db = SessionLocal()
     try:
         config = db.query(SystemConfig).first()
@@ -141,10 +183,18 @@ def init_default_config():
     finally:
         db.close()
 
+
 def get_db():
-    """获取数据库会话"""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def get_database_backend() -> str:
+    return settings.database_backend
+
+
+def get_database_url() -> str:
+    return settings.database_url

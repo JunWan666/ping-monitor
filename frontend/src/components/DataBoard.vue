@@ -157,10 +157,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
-import * as echarts from 'echarts'
+import { echarts } from '../lib/echarts'
 
 const loading = ref(false)
 const selectedTimeRange = ref('1d')
@@ -184,6 +184,8 @@ const trendChartDom = ref(null)
 const hostChartDom = ref(null)
 let trendChartInstance = null
 let hostChartInstance = null
+let resizeHandler = null
+const lastLoadedAt = ref(0)
 
 const timeRangeText = computed(() => {
   const rangeMap = {
@@ -214,6 +216,51 @@ const filteredHostData = computed(() => {
   const end = start + pageSize.value
   return filteredAllHostData.value.slice(start, end)
 })
+
+const ensureTrendChart = () => {
+  if (!trendChartDom.value) {
+    return null
+  }
+
+  if (!trendChartInstance) {
+    trendChartInstance = echarts.init(trendChartDom.value)
+  }
+
+  return trendChartInstance
+}
+
+const ensureHostChart = () => {
+  if (!hostChartDom.value) {
+    return null
+  }
+
+  if (!hostChartInstance) {
+    hostChartInstance = echarts.init(hostChartDom.value)
+  }
+
+  return hostChartInstance
+}
+
+const bindResizeListener = () => {
+  if (resizeHandler) {
+    return
+  }
+
+  resizeHandler = () => {
+    trendChartInstance?.resize()
+    hostChartInstance?.resize()
+  }
+  window.addEventListener('resize', resizeHandler)
+}
+
+const unbindResizeListener = () => {
+  if (!resizeHandler) {
+    return
+  }
+
+  window.removeEventListener('resize', resizeHandler)
+  resizeHandler = null
+}
 
 const handleSizeChange = (val) => {
   pageSize.value = val
@@ -249,6 +296,10 @@ const handleSortChange = ({ prop, order }) => {
 }
 
 const loadData = async () => {
+  if (loading.value) {
+    return
+  }
+
   loading.value = true
   const startTime = Date.now()
   try {
@@ -262,6 +313,7 @@ const loadData = async () => {
     
     // 更新主机数据
     hostData.value = data.host_stats
+    lastLoadedAt.value = Date.now()
     
     // 加载整体趋势图
     await nextTick()
@@ -281,20 +333,20 @@ const loadData = async () => {
 }
 
 const renderTrendChart = (trendData) => {
-  if (!trendChartDom.value || !trendData || trendData.length === 0) return
-  
-  if (trendChartInstance) {
-    trendChartInstance.dispose()
+  const instance = ensureTrendChart()
+  if (!instance) return
+
+  if (!trendData || trendData.length === 0) {
+    instance.clear()
+    return
   }
-  
-  trendChartInstance = echarts.init(trendChartDom.value)
-  
+
   const times = trendData.map(d => d.time)
   const avgPacketLoss = trendData.map(d => d.avg_packet_loss)
   const avgRtt = trendData.map(d => d.avg_rtt)
   const onlineRate = trendData.map(d => d.online_rate)
   
-  const option = {
+  instance.setOption({
     tooltip: {
       trigger: 'axis',
       axisPointer: {
@@ -415,9 +467,7 @@ const renderTrendChart = (trendData) => {
         }
       }
     ]
-  }
-  
-  trendChartInstance.setOption(option)
+  }, true)
 }
 
 const viewHostChart = async (host) => {
@@ -435,19 +485,19 @@ const viewHostChart = async (host) => {
 }
 
 const renderHostChart = (data) => {
-  if (!hostChartDom.value) return
-  
-  if (hostChartInstance) {
-    hostChartInstance.dispose()
+  const instance = ensureHostChart()
+  if (!instance) return
+
+  if (!data || data.length === 0) {
+    instance.clear()
+    return
   }
-  
-  hostChartInstance = echarts.init(hostChartDom.value)
-  
+
   const times = data.map(d => d.time)
   const packetLoss = data.map(d => d.packet_loss)
   const avgRtt = data.map(d => d.avg_rtt)
   
-  const option = {
+  instance.setOption({
     tooltip: {
       trigger: 'axis',
       axisPointer: {
@@ -511,30 +561,42 @@ const renderHostChart = (data) => {
         itemStyle: { color: '#409eff' }
       }
     ]
-  }
-  
-  hostChartInstance.setOption(option)
+  }, true)
 }
 
 watch(chartVisible, (val) => {
-  if (!val && hostChartInstance) {
-    hostChartInstance.dispose()
-    hostChartInstance = null
+  if (val) {
+    nextTick(() => {
+      hostChartInstance?.resize()
+    })
   }
 })
 
 onMounted(() => {
   loadData()
-  
-  // 监听窗口大小变化
-  window.addEventListener('resize', () => {
-    if (trendChartInstance) {
-      trendChartInstance.resize()
-    }
+  bindResizeListener()
+})
+
+onActivated(() => {
+  bindResizeListener()
+
+  nextTick(() => {
+    trendChartInstance?.resize()
+    hostChartInstance?.resize()
   })
+
+  if (!lastLoadedAt.value || Date.now() - lastLoadedAt.value > 30000) {
+    loadData()
+  }
+})
+
+onDeactivated(() => {
+  unbindResizeListener()
 })
 
 onBeforeUnmount(() => {
+  unbindResizeListener()
+
   if (trendChartInstance) {
     trendChartInstance.dispose()
     trendChartInstance = null

@@ -2,12 +2,34 @@ import { createApp } from 'vue'
 import './style.css'
 import App from './App.vue'
 import router from './router'
-import ElementPlus from 'element-plus'
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
-import 'element-plus/dist/index.css'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import {
+  ArrowDown,
+  ArrowUp,
+  Bell,
+  Check,
+  CircleCheck,
+  CopyDocument,
+  DataAnalysis,
+  Delete,
+  Document,
+  Download,
+  Lock,
+  Monitor,
+  Plus,
+  Promotion,
+  Refresh,
+  Search,
+  Select,
+  Setting,
+  SuccessFilled,
+  Timer,
+  TrendCharts,
+  Upload,
+  UploadFilled,
+  User,
+  WarningFilled
+} from '@element-plus/icons-vue'
 
-// 清除所有已注册的 Service Worker
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
     registrations.forEach(registration => {
@@ -18,12 +40,36 @@ if ('serviceWorker' in navigator) {
 
 const app = createApp(App)
 app.use(router)
-app.use(ElementPlus, {
-  locale: zhCn,
-})
 
-// 注册所有图标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+const appIcons = {
+  ArrowDown,
+  ArrowUp,
+  Bell,
+  Check,
+  CircleCheck,
+  CopyDocument,
+  DataAnalysis,
+  Delete,
+  Document,
+  Download,
+  Lock,
+  Monitor,
+  Plus,
+  Promotion,
+  Refresh,
+  Search,
+  Select,
+  Setting,
+  SuccessFilled,
+  Timer,
+  TrendCharts,
+  Upload,
+  UploadFilled,
+  User,
+  WarningFilled
+}
+
+for (const [key, component] of Object.entries(appIcons)) {
   app.component(key, component)
 }
 

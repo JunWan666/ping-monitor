@@ -199,10 +199,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
-import * as echarts from 'echarts'
+import { echarts } from '../lib/echarts'
 
 const loading = ref(false)
 const pingAllLoading = ref(false)
@@ -210,8 +210,10 @@ const searchKeyword = ref('')
 const statusFilter = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
-const sortColumn = ref('status') // 默认按状态排序
-const sortOrder = ref('desc') // 默认降序(异常在前)
+const sortColumn = ref('status')
+const sortOrder = ref('desc')
+const chartPointLimit = ref(12)
+const chartSettingsLoaded = ref(false)
 const dashboard = reactive({
   total_hosts: 0,
   enabled_hosts: 0,
@@ -225,6 +227,9 @@ const chartDom = ref(null)
 const overallChartDom = ref(null)
 let chartInstance = null
 let overallChartInstance = null
+let refreshTimer = null
+let resizeHandler = null
+const lastLoadedAt = ref(0)
 
 const onlineRate = computed(() => {
   if (dashboard.total_hosts === 0) return 0
@@ -297,6 +302,88 @@ const filteredHostStatus = computed(() => {
   return filteredAllHosts.value.slice(start, end)
 })
 
+const ensureChartSettings = async (force = false) => {
+  if (chartSettingsLoaded.value && !force) {
+    return
+  }
+
+  try {
+    const config = await api.getConfig()
+    chartPointLimit.value = Math.max(3, config.dashboard_chart_points || 12)
+  } catch (error) {
+    console.warn('获取仪表盘图表配置失败，使用默认值', error)
+  } finally {
+    chartSettingsLoaded.value = true
+  }
+}
+
+const ensureOverallChart = () => {
+  if (!overallChartDom.value) {
+    return null
+  }
+
+  if (!overallChartInstance) {
+    overallChartInstance = echarts.init(overallChartDom.value)
+  }
+
+  return overallChartInstance
+}
+
+const ensureHostChart = () => {
+  if (!chartDom.value) {
+    return null
+  }
+
+  if (!chartInstance) {
+    chartInstance = echarts.init(chartDom.value)
+  }
+
+  return chartInstance
+}
+
+const startRefreshTimer = () => {
+  if (refreshTimer) {
+    return
+  }
+
+  refreshTimer = setInterval(() => {
+    if (document.hidden) {
+      return
+    }
+    loadData()
+  }, 30000)
+}
+
+const stopRefreshTimer = () => {
+  if (!refreshTimer) {
+    return
+  }
+
+  clearInterval(refreshTimer)
+  refreshTimer = null
+}
+
+const bindResizeListener = () => {
+  if (resizeHandler) {
+    return
+  }
+
+  resizeHandler = () => {
+    overallChartInstance?.resize()
+    chartInstance?.resize()
+  }
+  window.addEventListener('resize', resizeHandler)
+}
+
+const unbindResizeListener = () => {
+  if (!resizeHandler) {
+    return
+  }
+
+  window.removeEventListener('resize', resizeHandler)
+  resizeHandler = null
+}
+
 const handleSizeChange = (val) => {
   pageSize.value = val
   currentPage.value = 1
@@ -323,13 +410,24 @@ const getRowClassName = ({ row }) => {
   return row.status === '异常' ? 'error-row' : ''
 }
 
-const loadData = async () => {
+const loadData = async (options = {}) => {
+  if (loading.value) {
+    return
+  }
+
   loading.value = true
   try {
-    const data = await api.getDashboard()
-    Object.assign(dashboard, data)
-    // 加载整体监控数据
-    await loadOverallChart()
+    await ensureChartSettings(options.forceChartSettings === true)
+
+    const [dashboardData, databoardData] = await Promise.all([
+      api.getDashboard(),
+      api.getDataBoardStats('1h')
+    ])
+
+    Object.assign(dashboard, dashboardData)
+    lastLoadedAt.value = Date.now()
+    await nextTick()
+    renderOverallChart(databoardData.trend_data || [])
   } catch (error) {
     ElMessage.error('加载数据失败')
   } finally {
@@ -337,102 +435,22 @@ const loadData = async () => {
   }
 }
 
-const loadOverallChart = async () => {
-  try {
-    // 动态计算需要获取的记录数
-    // 从系统配置中读取目标检测次数
-    let targetCheckTimes = 12 // 默认值
-    try {
-      const config = await api.getConfig()
-      targetCheckTimes = config.dashboard_chart_points || 12
-    } catch (error) {
-      console.warn('获取配置失败，使用默认值', error)
-    }
-    
-    const hostCount = dashboard.host_status.length || 1 // 主机数量
-    const pageSize = Math.max(100, hostCount * targetCheckTimes) // 最少100条
-    
-    const response = await api.getPingLogs(null, 1, pageSize)
-    const logs = response.items || []
-    
-    if (logs.length === 0) {
-      // 没有数据时不渲染图表，避免显示异常
-      if (overallChartInstance) {
-        overallChartInstance.clear()
-      }
-      return
-    }
-    
-    // 按时间分组，每次检测的数据汇总（同一时间点的所有主机）
-    const timeMap = new Map()
-    
-    logs.forEach(log => {
-      const time = new Date(log.check_time)
-      const timeKey = `${time.getMonth()+1}/${time.getDate()} ${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
-      
-      if (!timeMap.has(timeKey)) {
-        timeMap.set(timeKey, {
-          packet_loss_sum: 0,
-          avg_rtt_sum: 0,
-          online_count: 0,
-          count: 0,
-          timestamp: time.getTime()
-        })
-      }
-      
-      const data = timeMap.get(timeKey)
-      data.packet_loss_sum += log.packet_loss
-      data.avg_rtt_sum += log.avg_rtt || 0
-      // 丢包率<10%算在线
-      if (log.packet_loss < 10) {
-        data.online_count += 1
-      }
-      data.count += 1
-    })
-    
-    // 计算平均值并按时间排序
-    const sortedEntries = Array.from(timeMap.entries())
-      .sort((a, b) => a[1].timestamp - b[1].timestamp)
-      .slice(-30) // 只显示最近30个数据点
-    
-    const times = []
-    const avgPacketLoss = []
-    const avgRtt = []
-    const onlineRates = []
-    
-    sortedEntries.forEach(([time, data]) => {
-      times.push(time)
-      avgPacketLoss.push((data.packet_loss_sum / data.count).toFixed(2))
-      avgRtt.push((data.avg_rtt_sum / data.count).toFixed(2))
-      // 计算在线率
-      const onlineRate = ((data.online_count / data.count) * 100).toFixed(2)
-      onlineRates.push(onlineRate)
-    })
-    
-    renderOverallChart(times, avgPacketLoss, avgRtt, onlineRates)
-  } catch (error) {
-    console.error('加载整体监控数据失败:', error)
-  }
-}
+const renderOverallChart = (trendData) => {
+  const instance = ensureOverallChart()
+  if (!instance) return
 
-const renderOverallChart = (times, packetLoss, avgRtt, onlineRates) => {
-  if (!overallChartDom.value) return
-  
-  // 数据有效性检查
-  if (!times || times.length === 0 || !packetLoss || packetLoss.length === 0) {
-    if (overallChartInstance) {
-      overallChartInstance.clear()
-    }
+  if (!trendData || trendData.length === 0) {
+    instance.clear()
     return
   }
-  
-  if (overallChartInstance) {
-    overallChartInstance.dispose()
-  }
-  
-  overallChartInstance = echarts.init(overallChartDom.value)
-  
-  const option = {
+
+  const points = trendData.slice(-chartPointLimit.value)
+  const times = points.map(item => item.time)
+  const packetLoss = points.map(item => item.avg_packet_loss)
+  const avgRtt = points.map(item => item.avg_rtt)
+  const onlineRates = points.map(item => item.online_rate)
+
+  instance.setOption({
     tooltip: {
       trigger: 'axis',
       axisPointer: {
@@ -455,7 +473,7 @@ const renderOverallChart = (times, packetLoss, avgRtt, onlineRates) => {
       data: times,
       axisLabel: {
         rotate: 45,
-        interval: 0
+        interval: 'auto'
       },
       boundaryGap: false
     },
@@ -553,9 +571,7 @@ const renderOverallChart = (times, packetLoss, avgRtt, onlineRates) => {
         }
       }
     ]
-  }
-  
-  overallChartInstance.setOption(option)
+  }, true)
 }
 
 const pingHost = async (host) => {
@@ -624,19 +640,19 @@ const viewChart = async (host) => {
 }
 
 const renderChart = (records) => {
-  if (!chartDom.value) return
-  
-  if (chartInstance) {
-    chartInstance.dispose()
+  const instance = ensureHostChart()
+  if (!instance) return
+
+  if (!records || records.length === 0) {
+    instance.clear()
+    return
   }
-  
-  chartInstance = echarts.init(chartDom.value)
-  
+
   const times = records.map(r => new Date(r.created_at).toLocaleString()).reverse()
   const packetLoss = records.map(r => r.packet_loss).reverse()
   const avgRtt = records.map(r => r.avg_rtt || 0).reverse()
   
-  const option = {
+  instance.setOption({
     tooltip: {
       trigger: 'axis'
     },
@@ -685,9 +701,7 @@ const renderChart = (records) => {
         itemStyle: { color: '#409eff' }
       }
     ]
-  }
-  
-  chartInstance.setOption(option)
+  }, true)
 }
 
 const formatTime = (time) => {
@@ -695,34 +709,42 @@ const formatTime = (time) => {
 }
 
 watch(chartVisible, (val) => {
-  if (!val && chartInstance) {
-    chartInstance.dispose()
-    chartInstance = null
+  if (val) {
+    nextTick(() => {
+      chartInstance?.resize()
+    })
   }
 })
 
-let refreshTimer = null
-
 onMounted(() => {
-  loadData()
-  // 每30秒自动刷新
-  refreshTimer = setInterval(loadData, 30000)
-  
-  // 监听窗口大小变化，重绘图表
-  window.addEventListener('resize', () => {
-    if (overallChartInstance) {
-      overallChartInstance.resize()
-    }
+  loadData({ forceChartSettings: true })
+  startRefreshTimer()
+  bindResizeListener()
+})
+
+onActivated(() => {
+  bindResizeListener()
+  startRefreshTimer()
+
+  nextTick(() => {
+    overallChartInstance?.resize()
+    chartInstance?.resize()
   })
+
+  if (!lastLoadedAt.value || Date.now() - lastLoadedAt.value > 15000) {
+    loadData()
+  }
+})
+
+onDeactivated(() => {
+  stopRefreshTimer()
+  unbindResizeListener()
 })
 
 onBeforeUnmount(() => {
-  // 清除定时器
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-  // 清除图表实例
+  stopRefreshTimer()
+  unbindResizeListener()
+
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null

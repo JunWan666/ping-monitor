@@ -1,0 +1,63 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ping-monitor-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ping_monitor}
+      MYSQL_USER: ${MYSQL_USER:-ping_monitor}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ping-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ping-monitor-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ping-network
+
+  ping-monitor:
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:?set MYSQL_USER in .env}?charset=utf8mb4
+      REDIS_URL: redis://redis:6379/0
+      ENABLE_CACHE: ${ENABLE_CACHE:-true}
+      CACHE_TTL_DASHBOARD: ${CACHE_TTL_DASHBOARD:-15}
+      CACHE_TTL_DATABOARD: ${CACHE_TTL_DATABOARD:-45}
+      CACHE_TTL_HOST_DETAIL: ${CACHE_TTL_HOST_DETAIL:-30}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env}
+
+volumes:
+  mysql_data:
+  redis_data:
