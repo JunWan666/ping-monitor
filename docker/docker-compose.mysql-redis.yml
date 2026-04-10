@@ -12,8 +12,8 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ping_monitor}
       MYSQL_USER: ${MYSQL_USER:-ping_monitor}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
-    ports:
-      - "${MYSQL_PORT:-3306}:3306"
+    expose:
+      - "3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -30,8 +30,8 @@ services:
     container_name: ping-monitor-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     healthcheck:

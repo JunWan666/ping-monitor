@@ -1,8 +1,8 @@
-# MySQL + Redis 可选部署说明
+# MySQL + Redis 部署说明
 
 ## 1. 部署模式
 
-当前项目支持两种模式：
+当前项目支持两种运行模式：
 
 ### 模式一：默认 SQLite
 
@@ -22,9 +22,9 @@ docker compose -f docker/docker-compose.yml up -d
 
 适合：
 
-- `ping_records` 达到 100 万级以上
-- 希望提升日志查询、看板统计和聚合速度
-- 需要可选缓存能力
+- `ping_records` 已达到百万级
+- 希望提升日志查询、仪表盘统计、聚合接口响应速度
+- 需要使用缓存减轻数据库压力
 
 启动方式：
 
@@ -32,7 +32,7 @@ docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis.yml up -d
 ```
 
-## 2. 配置文件
+## 2. 环境变量
 
 建议先复制一份环境变量文件：
 
@@ -40,7 +40,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis
 cp .env.example .env
 ```
 
-Windows PowerShell:
+Windows PowerShell：
 
 ```powershell
 Copy-Item .env.example .env
@@ -58,63 +58,103 @@ Copy-Item .env.example .env
 - `CACHE_TTL_DATABOARD`
 - `CACHE_TTL_HOST_DETAIL`
 
-## 3. SQLite 与 MySQL 的选择逻辑
+## 3. 数据库与缓存选择逻辑
 
-系统启动时规则如下：
+系统启动时遵循以下规则：
 
 - 如果设置了 `DATABASE_URL`，优先使用 `DATABASE_URL`
 - 如果没有设置 `DATABASE_URL`，自动回退到 SQLite
 - 如果没有设置 `REDIS_URL`，自动关闭 Redis 缓存
 
-因此：
+这意味着：
 
-- 原有 SQLite 部署不受影响
-- MySQL + Redis 只是增强模式，不是强依赖
+- 原有 SQLite 部署不会被破坏
+- MySQL + Redis 是增强模式，不是强依赖
 
-## 4. 首次从 SQLite 迁移到 MySQL
+## 4. 默认端口策略
 
-如果你已有 SQLite 历史数据，可以执行迁移脚本：
+从当前版本开始，`MySQL` 和 `Redis` 默认只在 Docker 内部网络暴露：
+
+- 应用容器通过 `mysql:3306` 访问 MySQL
+- 应用容器通过 `redis:6379` 访问 Redis
+- 宿主机默认只开放 Web 服务的 `8000` 端口
+
+这样做的好处：
+
+- 不会和宿主机已有的 `3306` / `6379` 冲突
+- 更适合一台服务器上同时运行多个服务
+- 对当前项目功能没有影响
+
+如果你确实需要从宿主机直接连接 MySQL 或 Redis，再单独给对应服务添加 `ports` 映射即可。
+
+## 5. 首次从 SQLite 迁移到 MySQL
+
+### 推荐方式：使用更新脚本自动迁移
 
 ```bash
-python scripts/migrate_sqlite_to_mysql.py --mysql-url "mysql+pymysql://ping_monitor:CHANGE_ME_IN_DOT_ENV@127.0.0.1:3306/ping_monitor?charset=utf8mb4"
+./scripts/update-latest.sh --mode mysql-redis --migrate-sqlite --truncate-mysql
 ```
 
-如果希望先清空 MySQL 目标表，再重新导入：
+说明：
+
+- `--migrate-sqlite` 会把 `data/ping_monitor.db` 迁移到 MySQL
+- `--truncate-mysql` 会在导入前清空目标表，适合首次迁移或重导
+
+### 手动方式：在应用容器内执行迁移
+
+因为默认不对宿主机暴露 MySQL 端口，手动迁移建议在容器内部执行：
 
 ```bash
-python scripts/migrate_sqlite_to_mysql.py --mysql-url "mysql+pymysql://ping_monitor:CHANGE_ME_IN_DOT_ENV@127.0.0.1:3306/ping_monitor?charset=utf8mb4" --truncate
+docker exec ping-monitor python /app/scripts/migrate_sqlite_to_mysql.py \
+  --sqlite-path data/ping_monitor.db \
+  --mysql-url "mysql+pymysql://ping_monitor:CHANGE_ME_IN_DOT_ENV@mysql:3306/ping_monitor?charset=utf8mb4" \
+  --batch-size 5000 \
+  --rebuild-statistics
 ```
 
-默认 SQLite 路径为：
+如果需要先清空 MySQL 再导入：
+
+```bash
+docker exec ping-monitor python /app/scripts/migrate_sqlite_to_mysql.py \
+  --sqlite-path data/ping_monitor.db \
+  --mysql-url "mysql+pymysql://ping_monitor:CHANGE_ME_IN_DOT_ENV@mysql:3306/ping_monitor?charset=utf8mb4" \
+  --batch-size 5000 \
+  --rebuild-statistics \
+  --truncate
+```
+
+默认 SQLite 路径：
 
 ```text
 data/ping_monitor.db
 ```
 
-如需指定其他 SQLite 文件：
+如果你的 SQLite 文件不在默认位置，可以自行替换 `--sqlite-path`。
 
-```bash
-python scripts/migrate_sqlite_to_mysql.py --sqlite-path "data/your.db" --mysql-url "mysql+pymysql://ping_monitor:CHANGE_ME_IN_DOT_ENV@127.0.0.1:3306/ping_monitor?charset=utf8mb4"
-```
+## 6. Redis 的作用
 
-## 5. Redis 作用说明
-
-Redis 当前用于：
+Redis 当前主要用于：
 
 - 仪表盘缓存
 - 数据看板缓存
-- 单主机图表缓存
+- 单主机趋势图缓存
 
-Redis 当前不作为：
+Redis 当前不是：
 
-- 历史 Ping 数据唯一存储
-- 聚合统计唯一存储
+- 历史 Ping 明细的唯一存储
+- 聚合统计的唯一存储
 
-真实数据仍然保存在 SQL 数据库中。
+真实业务数据仍然保存在 SQL 数据库中。
 
-## 6. 常用命令
+## 7. 常用命令
 
-查看服务日志：
+查看服务状态：
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis.yml ps
+```
+
+查看日志：
 
 ```bash
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis.yml logs -f
@@ -132,18 +172,18 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis.yml up -d --build
 ```
 
-## 7. 验证是否生效
+## 8. 如何确认已经生效
 
-应用启动后访问根接口或登录系统后查看：
+部署完成后，可以从这些角度确认：
 
-- 数据库是否为 MySQL
-- 缓存是否启用
+- `docker ps` 中 `ping-monitor-mysql` 和 `ping-monitor-redis` 正常运行
+- 应用页面里的数据库状态显示为 MySQL
+- 仪表盘、数据看板、趋势接口响应时间明显下降
+- 重启容器后数据仍然存在，说明 MySQL / Redis 卷已经生效
 
-若未配置前端构建资源，后端根路径会返回 JSON 信息。
+如果页面仍然卡顿，优先继续检查：
 
-启用增强模式后，预期效果：
-
-- 大日志表分页更稳定
-- 仪表盘刷新更快
-- 数据看板统计响应更快
-- 配置修改后调度任务可热更新
+- 是否已经完成 SQLite 到 MySQL 的数据迁移
+- 是否仍在读取旧 SQLite 文件
+- 聚合任务是否执行成功
+- Redis 缓存是否启用
