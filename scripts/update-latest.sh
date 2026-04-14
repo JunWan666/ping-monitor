@@ -47,14 +47,15 @@ usage() {
       迁移前先清空 MySQL 目标表，通常只在首次迁移或重导时使用
 
   --skip-git-pull
-      跳过 git pull，适合你已经手动上传好代码的情况
+      跳过 git pull，适合已经手动上传好代码的情况
 
   --no-build
-      跳过 docker compose build，直接用现有本地镜像启动
+      跳过 docker compose build，直接使用已有本地镜像或预构建远程镜像
 
 示例:
   ./scripts/update-latest.sh
   ./scripts/update-latest.sh --mode mysql-redis --migrate-sqlite --truncate-mysql
+  ./scripts/update-latest.sh --mode mysql-redis --no-build
   ./scripts/update-latest.sh --mode sqlite
 EOF
 }
@@ -109,7 +110,7 @@ if [[ ! -d "$PROJECT_ROOT/.git" ]]; then
 fi
 
 if [[ "$MODE" == "mysql-redis" && ! -f "$ENV_FILE" ]]; then
-    die "MySQL + Redis 模式需要先创建 $ENV_FILE。可先执行: cp .env.example .env"
+    die "MySQL + Redis 模式需要先创建 $ENV_FILE。可先执行 cp .env.example .env"
 fi
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -182,6 +183,18 @@ compose_down() {
     "${compose_cmd[@]}" down --remove-orphans || true
 }
 
+compose_pull_runtime_images() {
+    if [[ "$MODE" == "mysql-redis" ]]; then
+        log "拉取 MySQL / Redis 基础镜像..."
+        "${compose_cmd[@]}" pull mysql redis || true
+    fi
+
+    if [[ "$NO_BUILD" -eq 1 && -n "${PING_MONITOR_IMAGE:-}" ]]; then
+        log "拉取应用镜像: $PING_MONITOR_IMAGE"
+        "${compose_cmd[@]}" pull ping-monitor
+    fi
+}
+
 compose_up() {
     log "启动服务..."
 
@@ -210,13 +223,6 @@ verify_stack() {
             || die "应用容器无法解析 mysql，请检查 Docker 网络"
         docker exec ping-monitor sh -lc 'getent hosts redis >/dev/null' \
             || die "应用容器无法解析 redis，请检查 Docker 网络"
-    fi
-}
-
-compose_pull_runtime_images() {
-    if [[ "$MODE" == "mysql-redis" ]]; then
-        log "拉取 MySQL / Redis 基础镜像..."
-        "${compose_cmd[@]}" pull mysql redis || true
     fi
 }
 
@@ -271,6 +277,9 @@ show_summary() {
     printf '部署模式: %s\n' "$MODE"
     printf '项目目录: %s\n' "$PROJECT_ROOT"
     printf '访问地址: http://<你的服务器IP>:8000\n'
+    if [[ -n "${PING_MONITOR_IMAGE:-}" ]]; then
+        printf '应用镜像: %s\n' "$PING_MONITOR_IMAGE"
+    fi
     if [[ "$MODE" == "mysql-redis" ]]; then
         printf '\n'
         printf '数据库 / 缓存连接信息:\n'
