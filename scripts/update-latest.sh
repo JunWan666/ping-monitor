@@ -191,7 +191,13 @@ compose_pull_runtime_images() {
 
     if [[ "$NO_BUILD" -eq 1 && -n "${PING_MONITOR_IMAGE:-}" ]]; then
         log "拉取应用镜像: $PING_MONITOR_IMAGE"
-        "${compose_cmd[@]}" pull ping-monitor
+        if ! "${compose_cmd[@]}" pull ping-monitor; then
+            if docker image inspect "$PING_MONITOR_IMAGE" >/dev/null 2>&1; then
+                warn "应用镜像拉取失败，但本地已存在镜像，继续使用本地镜像部署: $PING_MONITOR_IMAGE"
+            else
+                die "应用镜像拉取失败，且本地不存在镜像: $PING_MONITOR_IMAGE"
+            fi
+        fi
     fi
 }
 
