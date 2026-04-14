@@ -108,13 +108,13 @@
         </el-col>
       </el-row>
 
-      <el-card shadow="hover">
+      <el-card shadow="hover" style="margin-bottom: 20px">
         <template #header>
-          <span style="font-weight: bold">通知配置</span>
+          <span style="font-weight: bold">告警通知配置</span>
         </template>
         <el-form :model="config" label-width="150px" style="max-width: 600px">
-          <el-form-item label="通知平台">
-            <el-select v-model="notificationPlatform" placeholder="选择通知平台" style="width: 100%">
+          <el-form-item label="告警平台">
+            <el-select v-model="notificationPlatform" placeholder="选择告警平台" style="width: 100%">
               <el-option label="不启用" value="none" />
               <el-option label="Server酱" value="serverchan" />
               <el-option label="钉钉机器人" value="dingtalk" />
@@ -151,14 +151,14 @@
             <el-form-item label="Webhook地址">
               <el-input 
                 v-model="config.webhook_url" 
-                placeholder="钉钉机器人 Webhook URL" 
+                placeholder="告警钉钉机器人 Webhook URL" 
                 clearable
               />
             </el-form-item>
             <el-form-item label="加签密钥">
               <el-input 
                 v-model="config.webhook_secret" 
-                placeholder="加签密钥(可选)" 
+                placeholder="告警机器人加签密钥(可选)" 
                 clearable
               />
               <div style="color: #909399; font-size: 12px; margin-top: 5px">
@@ -186,7 +186,7 @@
               :loading="testingNotification"
               :disabled="!canTestNotification"
             >
-              <el-icon><Bell /></el-icon> 测试通知
+              <el-icon><Bell /></el-icon> 测试告警通知
             </el-button>
           </el-form-item>
 
@@ -197,6 +197,130 @@
             <el-button @click="loadConfig">
               <el-icon><Refresh /></el-icon> 重置
             </el-button>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <el-card shadow="hover">
+        <template #header>
+          <span style="font-weight: bold">报表通知配置（钉钉）</span>
+        </template>
+        <el-form :model="config" label-width="150px" style="max-width: 700px">
+          <div
+            style="
+              margin: 0 0 20px 150px;
+              padding: 12px 14px;
+              background: #f5f7fa;
+              border-radius: 8px;
+              color: #606266;
+              font-size: 12px;
+              line-height: 1.7;
+            "
+          >
+            报表机器人与告警机器人完全分离，适合把日报、周报、月报发到单独群里。日报统计上一自然日并对比前一日，周报统计上一自然周并对比再前一周，月报统计上一自然月并对比再前一月。
+          </div>
+
+          <el-form-item label="报表Webhook地址">
+            <el-input
+              v-model="config.report_webhook_url"
+              placeholder="报表专用钉钉机器人 Webhook URL"
+              clearable
+            />
+          </el-form-item>
+
+          <el-form-item label="报表加签密钥">
+            <el-input
+              v-model="config.report_webhook_secret"
+              placeholder="报表机器人加签密钥(可选)"
+              clearable
+            />
+            <div style="color: #909399; font-size: 12px; margin-top: 5px">
+              建议新建一个专门收报表的钉钉机器人，避免和实时告警混在一起
+            </div>
+          </el-form-item>
+
+          <el-form-item label="日报">
+            <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                <el-switch v-model="config.daily_report_enabled" />
+                <span style="color: #606266">每日发送</span>
+                <el-time-select
+                  v-model="config.daily_report_time"
+                  start="00:00"
+                  step="00:30"
+                  end="23:30"
+                  placeholder="发送时间"
+                  style="width: 150px"
+                  :disabled="!config.daily_report_enabled"
+                />
+                <el-button
+                  link
+                  type="primary"
+                  @click="sendReport('daily')"
+                  :loading="sendingReportType === 'daily'"
+                  :disabled="!canSendDingTalkReport"
+                >
+                  立即发送
+                </el-button>
+              </div>
+              <div style="color: #909399; font-size: 12px">默认发送昨日数据，对比前一日</div>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="周报">
+            <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                <el-switch v-model="config.weekly_report_enabled" />
+                <span style="color: #606266">每周一发送</span>
+                <el-time-select
+                  v-model="config.weekly_report_time"
+                  start="00:00"
+                  step="00:30"
+                  end="23:30"
+                  placeholder="发送时间"
+                  style="width: 150px"
+                  :disabled="!config.weekly_report_enabled"
+                />
+                <el-button
+                  link
+                  type="primary"
+                  @click="sendReport('weekly')"
+                  :loading="sendingReportType === 'weekly'"
+                  :disabled="!canSendDingTalkReport"
+                >
+                  立即发送
+                </el-button>
+              </div>
+              <div style="color: #909399; font-size: 12px">固定汇总上周数据，对比再前一周</div>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="月报">
+            <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                <el-switch v-model="config.monthly_report_enabled" />
+                <span style="color: #606266">每月 1 日发送</span>
+                <el-time-select
+                  v-model="config.monthly_report_time"
+                  start="00:00"
+                  step="00:30"
+                  end="23:30"
+                  placeholder="发送时间"
+                  style="width: 150px"
+                  :disabled="!config.monthly_report_enabled"
+                />
+                <el-button
+                  link
+                  type="primary"
+                  @click="sendReport('monthly')"
+                  :loading="sendingReportType === 'monthly'"
+                  :disabled="!canSendDingTalkReport"
+                >
+                  立即发送
+                </el-button>
+              </div>
+              <div style="color: #909399; font-size: 12px">固定汇总上月数据，对比再前一月</div>
+            </div>
           </el-form-item>
         </el-form>
       </el-card>
@@ -319,6 +443,7 @@ const props = defineProps({
 
 const saving = ref(false)
 const testingNotification = ref(false)
+const sendingReportType = ref('')
 const notificationPlatform = ref('none')
 const hosts = ref([])
 const pingLogs = ref([])
@@ -335,11 +460,19 @@ const config = reactive({
   serverchan_key: '',
   webhook_url: '',
   webhook_secret: '',
+  report_webhook_url: '',
+  report_webhook_secret: '',
   notification_mode: 'status_change',
   data_retention_days: 30,
   cleanup_time: '03:00',
   aggregate_interval: 1,
-  dashboard_chart_points: 12
+  dashboard_chart_points: 12,
+  daily_report_enabled: false,
+  daily_report_time: '09:00',
+  weekly_report_enabled: false,
+  weekly_report_time: '09:00',
+  monthly_report_enabled: false,
+  monthly_report_time: '09:00'
 })
 
 // 计算属性：是否可以测试通知
@@ -350,6 +483,10 @@ const canTestNotification = computed(() => {
     return !!config.webhook_url
   }
   return false
+})
+
+const canSendDingTalkReport = computed(() => {
+  return !!config.report_webhook_url
 })
 
 const loadConfig = async () => {
@@ -389,7 +526,15 @@ const saveConfig = async () => {
       data_retention_days: config.data_retention_days,
       cleanup_time: config.cleanup_time,
       aggregate_interval: config.aggregate_interval,
-      dashboard_chart_points: config.dashboard_chart_points
+      dashboard_chart_points: config.dashboard_chart_points,
+      report_webhook_url: config.report_webhook_url,
+      report_webhook_secret: config.report_webhook_secret,
+      daily_report_enabled: config.daily_report_enabled,
+      daily_report_time: config.daily_report_time,
+      weekly_report_enabled: config.weekly_report_enabled,
+      weekly_report_time: config.weekly_report_time,
+      monthly_report_enabled: config.monthly_report_enabled,
+      monthly_report_time: config.monthly_report_time
     }
     
     if (notificationPlatform.value === 'none') {
@@ -470,6 +615,23 @@ const testNotification = async () => {
     ElMessage.error(`测试通知失败: ${error.response?.data?.detail || error.message || '网络错误'}`)
   } finally {
     testingNotification.value = false
+  }
+}
+
+const sendReport = async (type) => {
+  if (!canSendDingTalkReport.value) {
+    ElMessage.warning('请先配置报表专用钉钉机器人 Webhook 地址')
+    return
+  }
+
+  sendingReportType.value = type
+  try {
+    const data = await api.sendReport(type)
+    ElMessage.success(data.message || '报表发送成功')
+  } catch (error) {
+    ElMessage.error(`报表发送失败: ${error.response?.data?.detail || error.message || '网络错误'}`)
+  } finally {
+    sendingReportType.value = ''
   }
 }
 

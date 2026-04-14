@@ -125,6 +125,7 @@ export default {
   getConfig: () => api.get('/config'),
   updateConfig: (data) => api.put('/config', data),
   testNotification: (type) => api.post(`/test-notification/${type}`),
+  sendReport: (reportType) => api.post(`/reports/${reportType}/send`),
   
   // 系统日志
   getSystemLogs: (logType, module, page = 1, pageSize = 50) => {

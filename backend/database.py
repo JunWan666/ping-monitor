@@ -105,6 +105,14 @@ class SystemConfig(Base):
     cleanup_time = Column(String(10), default="03:00", nullable=False)
     aggregate_interval = Column(Integer, default=1, nullable=False)
     dashboard_chart_points = Column(Integer, default=12, nullable=False)
+    report_webhook_url = Column(String(1000), nullable=True)
+    report_webhook_secret = Column(String(255), nullable=True)
+    daily_report_enabled = Column(Boolean, default=False, nullable=False)
+    daily_report_time = Column(String(10), default="09:00", nullable=False)
+    weekly_report_enabled = Column(Boolean, default=False, nullable=False)
+    weekly_report_time = Column(String(10), default="09:00", nullable=False)
+    monthly_report_enabled = Column(Boolean, default=False, nullable=False)
+    monthly_report_time = Column(String(10), default="09:00", nullable=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
 

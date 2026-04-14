@@ -33,6 +33,12 @@ class MonitorScheduler:
         self.current_interval = 5
         self.aggregate_interval = 1
         self.cleanup_time = "03:00"
+        self.daily_report_enabled = False
+        self.daily_report_time = "09:00"
+        self.weekly_report_enabled = False
+        self.weekly_report_time = "09:00"
+        self.monthly_report_enabled = False
+        self.monthly_report_time = "09:00"
 
     def start(self) -> None:
         self.reload_config(initial=True)
@@ -57,14 +63,35 @@ class MonitorScheduler:
                 self.current_interval = config.check_interval
                 self.aggregate_interval = config.aggregate_interval
                 self.cleanup_time = config.cleanup_time or "03:00"
+                self.daily_report_enabled = bool(
+                    config.daily_report_enabled and self._is_dingtalk_webhook(config.report_webhook_url)
+                )
+                self.daily_report_time = config.daily_report_time or "09:00"
+                self.weekly_report_enabled = bool(
+                    config.weekly_report_enabled and self._is_dingtalk_webhook(config.report_webhook_url)
+                )
+                self.weekly_report_time = config.weekly_report_time or "09:00"
+                self.monthly_report_enabled = bool(
+                    config.monthly_report_enabled and self._is_dingtalk_webhook(config.report_webhook_url)
+                )
+                self.monthly_report_time = config.monthly_report_time or "09:00"
             else:
                 self.current_interval = 5
                 self.aggregate_interval = 1
                 self.cleanup_time = "03:00"
+                self.daily_report_enabled = False
+                self.daily_report_time = "09:00"
+                self.weekly_report_enabled = False
+                self.weekly_report_time = "09:00"
+                self.monthly_report_enabled = False
+                self.monthly_report_time = "09:00"
         finally:
             db.close()
 
         cleanup_hour, cleanup_minute = self.cleanup_time.split(":")
+        daily_report_hour, daily_report_minute = self.daily_report_time.split(":")
+        weekly_report_hour, weekly_report_minute = self.weekly_report_time.split(":")
+        monthly_report_hour, monthly_report_minute = self.monthly_report_time.split(":")
 
         self._upsert_job(
             job_id="monitor_hosts",
@@ -89,19 +116,55 @@ class MonitorScheduler:
             hour=int(cleanup_hour),
             minute=int(cleanup_minute),
         )
+        self._sync_report_job(
+            enabled=self.daily_report_enabled,
+            job_id="daily_report",
+            func=self._run_daily_report,
+            trigger="cron",
+            replace_existing=True,
+            hour=int(daily_report_hour),
+            minute=int(daily_report_minute),
+        )
+        self._sync_report_job(
+            enabled=self.weekly_report_enabled,
+            job_id="weekly_report",
+            func=self._run_weekly_report,
+            trigger="cron",
+            replace_existing=True,
+            day_of_week="mon",
+            hour=int(weekly_report_hour),
+            minute=int(weekly_report_minute),
+        )
+        self._sync_report_job(
+            enabled=self.monthly_report_enabled,
+            job_id="monthly_report",
+            func=self._run_monthly_report,
+            trigger="cron",
+            replace_existing=True,
+            day=1,
+            hour=int(monthly_report_hour),
+            minute=int(monthly_report_minute),
+        )
 
         if not initial:
             logger.info(
-                "调度配置已刷新: check_interval=%s, aggregate_interval=%s, cleanup_time=%s",
+                (
+                    "调度配置已刷新: check_interval=%s, aggregate_interval=%s, cleanup_time=%s, "
+                    "daily_report=%s@%s, weekly_report=%s@%s, monthly_report=%s@%s"
+                ),
                 self.current_interval,
                 self.aggregate_interval,
                 self.cleanup_time,
+                self.daily_report_enabled,
+                self.daily_report_time,
+                self.weekly_report_enabled,
+                self.weekly_report_time,
+                self.monthly_report_enabled,
+                self.monthly_report_time,
             )
 
     def _upsert_job(self, *, job_id: str, func, trigger: str, replace_existing: bool, **kwargs) -> None:
-        existing = self.scheduler.get_job(job_id)
-        if existing:
-            self.scheduler.remove_job(job_id)
+        self._remove_job_if_exists(job_id)
 
         self.scheduler.add_job(
             func,
@@ -110,6 +173,27 @@ class MonitorScheduler:
             replace_existing=replace_existing,
             **kwargs,
         )
+
+    def _sync_report_job(self, *, enabled: bool, job_id: str, func, trigger: str, replace_existing: bool, **kwargs) -> None:
+        if not enabled:
+            self._remove_job_if_exists(job_id)
+            return
+        self._upsert_job(
+            job_id=job_id,
+            func=func,
+            trigger=trigger,
+            replace_existing=replace_existing,
+            **kwargs,
+        )
+
+    def _remove_job_if_exists(self, job_id: str) -> None:
+        existing = self.scheduler.get_job(job_id)
+        if existing:
+            self.scheduler.remove_job(job_id)
+
+    @staticmethod
+    def _is_dingtalk_webhook(webhook_url: str | None) -> bool:
+        return bool(webhook_url and "oapi.dingtalk.com" in webhook_url)
 
     def update_interval(self, minutes: int) -> None:
         self.current_interval = minutes
@@ -381,6 +465,24 @@ class MonitorScheduler:
         logger.info("开始执行每日维护任务")
         DataMaintenance.aggregate_daily_stats()
         DataMaintenance.cleanup_old_records()
+
+    def _run_daily_report(self) -> None:
+        from report_service import ReportService
+
+        logger.info("开始发送日报")
+        ReportService.send_report_with_new_session("daily", trigger_source="scheduler")
+
+    def _run_weekly_report(self) -> None:
+        from report_service import ReportService
+
+        logger.info("开始发送周报")
+        ReportService.send_report_with_new_session("weekly", trigger_source="scheduler")
+
+    def _run_monthly_report(self) -> None:
+        from report_service import ReportService
+
+        logger.info("开始发送月报")
+        ReportService.send_report_with_new_session("monthly", trigger_source="scheduler")
 
 
 scheduler = MonitorScheduler()

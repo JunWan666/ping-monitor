@@ -117,6 +117,14 @@ class SystemConfigUpdate(BaseModel):
     cleanup_time: Optional[str] = None
     aggregate_interval: Optional[int] = None
     dashboard_chart_points: Optional[int] = None
+    report_webhook_url: Optional[str] = None
+    report_webhook_secret: Optional[str] = None
+    daily_report_enabled: Optional[bool] = None
+    daily_report_time: Optional[str] = None
+    weekly_report_enabled: Optional[bool] = None
+    weekly_report_time: Optional[str] = None
+    monthly_report_enabled: Optional[bool] = None
+    monthly_report_time: Optional[str] = None
 
 
 class SystemConfigResponse(BaseModel):
@@ -132,6 +140,14 @@ class SystemConfigResponse(BaseModel):
     cleanup_time: str
     aggregate_interval: int
     dashboard_chart_points: int
+    report_webhook_url: Optional[str]
+    report_webhook_secret: Optional[str]
+    daily_report_enabled: bool
+    daily_report_time: str
+    weekly_report_enabled: bool
+    weekly_report_time: str
+    monthly_report_enabled: bool
+    monthly_report_time: str
     updated_at: datetime
 
     class Config:
@@ -174,6 +190,20 @@ def get_or_create_system_config(db: Session) -> SystemConfig:
 def invalidate_runtime_cache() -> None:
     cache_manager.invalidate_namespace("dashboard")
     cache_manager.invalidate_namespace("databoard")
+
+
+def is_valid_time_text(value: str) -> bool:
+    try:
+        hour_text, minute_text = value.split(":")
+        hour = int(hour_text)
+        minute = int(minute_text)
+    except (AttributeError, ValueError):
+        return False
+    return 0 <= hour <= 23 and 0 <= minute <= 59
+
+
+def is_dingtalk_webhook(value: str | None) -> bool:
+    return bool(value and "oapi.dingtalk.com" in value)
 
 
 def cache_get_or_set(namespace: str, key_parts: list[str], ttl: int, builder):
@@ -681,6 +711,28 @@ async def update_config(
         raise HTTPException(status_code=400, detail="发包数量必须大于 0")
     if "packet_timeout" in update_data and update_data["packet_timeout"] < 1:
         raise HTTPException(status_code=400, detail="超时时间必须大于 0")
+    for field_name, field_label in {
+        "cleanup_time": "数据清理时间",
+        "daily_report_time": "日报发送时间",
+        "weekly_report_time": "周报发送时间",
+        "monthly_report_time": "月报发送时间",
+    }.items():
+        if field_name in update_data and update_data[field_name] is not None:
+            if not is_valid_time_text(update_data[field_name]):
+                raise HTTPException(status_code=400, detail=f"{field_label}格式应为 HH:MM")
+
+    if "report_webhook_url" in update_data and update_data["report_webhook_url"]:
+        if not is_dingtalk_webhook(update_data["report_webhook_url"]):
+            raise HTTPException(status_code=400, detail="报表机器人仅支持钉钉 Webhook 地址")
+
+    final_report_webhook_url = update_data.get("report_webhook_url", config.report_webhook_url)
+    report_enabled_flags = {
+        "daily_report_enabled": update_data.get("daily_report_enabled", config.daily_report_enabled),
+        "weekly_report_enabled": update_data.get("weekly_report_enabled", config.weekly_report_enabled),
+        "monthly_report_enabled": update_data.get("monthly_report_enabled", config.monthly_report_enabled),
+    }
+    if any(bool(value) for value in report_enabled_flags.values()) and not is_dingtalk_webhook(final_report_webhook_url):
+        raise HTTPException(status_code=400, detail="启用日报/周报/月报前，请先配置报表专用钉钉机器人 Webhook 地址")
 
     for key, value in update_data.items():
         setattr(config, key, value)
@@ -736,6 +788,28 @@ async def test_notification(
     if not success:
         raise HTTPException(status_code=500, detail="测试通知发送失败")
     return {"message": "测试通知已发送"}
+
+
+@app.post("/api/reports/{report_type}/send")
+async def send_report(
+    report_type: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from report_service import ReportService
+
+    try:
+        result = ReportService.send_report(
+            report_type,
+            db=db,
+            trigger_source=f"manual:{current_user.username}",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return result
 
 
 @app.get("/api/system-logs")

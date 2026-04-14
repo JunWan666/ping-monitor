@@ -12,6 +12,8 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ping_monitor}
       MYSQL_USER: ${MYSQL_USER:-ping_monitor}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    ports:
+      - "${MYSQL_BIND_HOST:-127.0.0.1}:${MYSQL_PORT:-3307}:3306"
     expose:
       - "3306"
     volumes:
@@ -29,13 +31,21 @@ services:
     image: redis:7-alpine
     container_name: ping-monitor-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --protected-mode yes --requirepass "$$REDIS_PASSWORD"
+    ports:
+      - "${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_PORT:-6380}:6379"
     expose:
       - "6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -51,7 +61,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:?set MYSQL_USER in .env}?charset=utf8mb4
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
       ENABLE_CACHE: ${ENABLE_CACHE:-true}
       CACHE_TTL_DASHBOARD: ${CACHE_TTL_DASHBOARD:-15}
       CACHE_TTL_DATABOARD: ${CACHE_TTL_DATABOARD:-45}

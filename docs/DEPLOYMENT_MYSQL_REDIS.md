@@ -49,10 +49,15 @@ Copy-Item .env.example .env
 常用配置：
 
 - `JWT_SECRET_KEY`
+- `MYSQL_BIND_HOST`
+- `MYSQL_PORT`
 - `MYSQL_ROOT_PASSWORD`
 - `MYSQL_DATABASE`
 - `MYSQL_USER`
 - `MYSQL_PASSWORD`
+- `REDIS_BIND_HOST`
+- `REDIS_PORT`
+- `REDIS_PASSWORD`
 - `ENABLE_CACHE`
 - `CACHE_TTL_DASHBOARD`
 - `CACHE_TTL_DATABOARD`
@@ -73,19 +78,97 @@ Copy-Item .env.example .env
 
 ## 4. 默认端口策略
 
-从当前版本开始，`MySQL` 和 `Redis` 默认只在 Docker 内部网络暴露：
+从当前版本开始，`MySQL` 和 `Redis` 默认会同时具备两层访问能力：
 
 - 应用容器通过 `mysql:3306` 访问 MySQL
 - 应用容器通过 `redis:6379` 访问 Redis
-- 宿主机默认只开放 Web 服务的 `8000` 端口
+- 宿主机默认把 MySQL 绑定到 `127.0.0.1:${MYSQL_PORT:-3307}`
+- 宿主机默认把 Redis 绑定到 `127.0.0.1:${REDIS_PORT:-6380}`
 
 这样做的好处：
 
 - 不会和宿主机已有的 `3306` / `6379` 冲突
-- 更适合一台服务器上同时运行多个服务
+- 默认只能在服务器本机访问，更安全
+- 仍然支持通过 SSH 隧道远程查看数据库 / Redis
 - 对当前项目功能没有影响
 
-如果你确实需要从宿主机直接连接 MySQL 或 Redis，再单独给对应服务添加 `ports` 映射即可。
+如果你确实需要让外部机器直接访问：
+
+- 把 `MYSQL_BIND_HOST` 改成 `0.0.0.0`
+- 把 `REDIS_BIND_HOST` 改成 `0.0.0.0`
+- 保持密码已修改
+- 再额外配置防火墙，只允许你的办公 IP 访问
+
+默认情况下不建议直接把数据库和 Redis 暴露到公网。
+
+## 4.1 默认安全配置示例
+
+`.env` 示例：
+
+```dotenv
+MYSQL_BIND_HOST=127.0.0.1
+MYSQL_PORT=3307
+MYSQL_ROOT_PASSWORD=CHANGE_ME_IN_DOT_ENV
+MYSQL_DATABASE=ping_monitor
+MYSQL_USER=ping_monitor
+MYSQL_PASSWORD=CHANGE_ME_IN_DOT_ENV
+
+REDIS_BIND_HOST=127.0.0.1
+REDIS_PORT=6380
+REDIS_PASSWORD=CHANGE_ME_IN_DOT_ENV
+```
+
+在这个配置下：
+
+- 应用容器内部仍然正常通过 `mysql:3306` 和 `redis:6379` 通信
+- 宿主机可以通过 `127.0.0.1:3307` 访问 MySQL
+- 宿主机可以通过 `127.0.0.1:6380` 访问 Redis
+- 外部机器不能直接访问，更适合生产环境
+
+## 4.2 推荐远程查看方式：SSH 隧道
+
+如果你想从自己电脑远程查看数据库，推荐走 SSH 隧道，而不是直接开放公网端口。
+
+MySQL：
+
+```bash
+ssh -L 3307:127.0.0.1:3307 root@你的服务器IP
+```
+
+连接参数：
+
+- Host: `127.0.0.1`
+- Port: `3307`
+- User: `ping_monitor`
+- Password: `.env` 中的 `MYSQL_PASSWORD`
+- Database: `ping_monitor`
+
+Redis：
+
+```bash
+ssh -L 6380:127.0.0.1:6380 root@你的服务器IP
+```
+
+测试命令：
+
+```bash
+redis-cli -h 127.0.0.1 -p 6380 -a "你的REDIS_PASSWORD" ping
+```
+
+## 4.3 如需公网直连
+
+如果你确认要让其他机器直接连服务器上的 MySQL / Redis：
+
+```dotenv
+MYSQL_BIND_HOST=0.0.0.0
+REDIS_BIND_HOST=0.0.0.0
+```
+
+然后重启这套 compose。这样做以后，请务必：
+
+- 修改默认密码
+- 配置云防火墙 / `ufw` / 安全组白名单
+- 不要开放给整个公网
 
 ## 5. 首次从 SQLite 迁移到 MySQL
 
@@ -146,6 +229,11 @@ Redis 当前不是：
 
 真实业务数据仍然保存在 SQL 数据库中。
 
+Redis 在当前版本已支持密码保护：
+
+- 应用容器内部自动使用 `REDIS_PASSWORD` 连接
+- 宿主机或远程调试时，请使用 `redis-cli -a "你的REDIS_PASSWORD"`
+
 ## 7. 常用命令
 
 查看服务状态：
@@ -172,11 +260,24 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.mysql-redis.yml up -d --build
 ```
 
+仅查看 MySQL：
+
+```bash
+docker exec -it ping-monitor-mysql mysql -u"${MYSQL_USER:-ping_monitor}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE:-ping_monitor}"
+```
+
+仅查看 Redis：
+
+```bash
+docker exec -it ping-monitor-redis sh -lc 'redis-cli -a "$REDIS_PASSWORD"'
+```
+
 ## 8. 如何确认已经生效
 
 部署完成后，可以从这些角度确认：
 
 - `docker ps` 中 `ping-monitor-mysql` 和 `ping-monitor-redis` 正常运行
+- `docker exec ping-monitor sh -lc 'getent hosts mysql && getent hosts redis'` 可以解析
 - 应用页面里的数据库状态显示为 MySQL
 - 仪表盘、数据看板、趋势接口响应时间明显下降
 - 重启容器后数据仍然存在，说明 MySQL / Redis 卷已经生效

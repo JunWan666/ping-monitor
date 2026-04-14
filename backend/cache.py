@@ -31,6 +31,12 @@ class CacheManager:
 
         self.ensure_connection()
 
+    def _mark_runtime_failure(self, exc: Exception) -> None:
+        self.client = None
+        self.enabled = False
+        self._next_retry_at = time.monotonic() + self._retry_interval_seconds
+        logger.warning("Redis runtime error, cache temporarily disabled: %s", exc)
+
     def _cache_is_configured(self) -> bool:
         return bool(settings.enable_cache and settings.redis_url and redis is not None)
 
@@ -62,19 +68,25 @@ class CacheManager:
     def get_version(self, namespace: str) -> int:
         if not self.ensure_connection():
             return 1
-        raw = self.client.get(f"cache:version:{namespace}")
-        if raw is None:
-            self.client.set(f"cache:version:{namespace}", 1)
-            return 1
         try:
+            raw = self.client.get(f"cache:version:{namespace}")
+            if raw is None:
+                self.client.set(f"cache:version:{namespace}", 1)
+                return 1
             return int(raw)
         except ValueError:
+            return 1
+        except Exception as exc:
+            self._mark_runtime_failure(exc)
             return 1
 
     def invalidate_namespace(self, namespace: str) -> None:
         if not self.ensure_connection():
             return
-        self.client.incr(f"cache:version:{namespace}")
+        try:
+            self.client.incr(f"cache:version:{namespace}")
+        except Exception as exc:
+            self._mark_runtime_failure(exc)
 
     def build_key(self, namespace: str, *parts: Any) -> str:
         version = self.get_version(namespace)
@@ -84,19 +96,25 @@ class CacheManager:
     def get_json(self, key: str) -> Optional[Any]:
         if not self.ensure_connection():
             return None
-        raw = self.client.get(key)
-        if raw is None:
-            return None
         try:
+            raw = self.client.get(key)
+            if raw is None:
+                return None
             return json.loads(raw)
         except json.JSONDecodeError:
+            return None
+        except Exception as exc:
+            self._mark_runtime_failure(exc)
             return None
 
     def set_json(self, key: str, value: Any, ttl: int) -> None:
         if not self.ensure_connection():
             return
-        payload = json.dumps(value, ensure_ascii=False, default=_json_default)
-        self.client.setex(key, ttl, payload)
+        try:
+            payload = json.dumps(value, ensure_ascii=False, default=_json_default)
+            self.client.setex(key, ttl, payload)
+        except Exception as exc:
+            self._mark_runtime_failure(exc)
 
 
 cache_manager = CacheManager()

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
+trap 'printf "[ERROR] 脚本执行失败，第 %s 行命令: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 MODE="mysql-redis"
 MIGRATE_SQLITE=0
@@ -196,6 +197,22 @@ compose_up() {
     "${compose_cmd[@]}" "${up_args[@]}"
 }
 
+verify_stack() {
+    log "校验部署结果..."
+
+    docker inspect ping-monitor >/dev/null 2>&1 || die "未找到 ping-monitor 容器"
+
+    if [[ "$MODE" == "mysql-redis" ]]; then
+        docker inspect ping-monitor-mysql >/dev/null 2>&1 || die "未找到 ping-monitor-mysql 容器"
+        docker inspect ping-monitor-redis >/dev/null 2>&1 || die "未找到 ping-monitor-redis 容器"
+
+        docker exec ping-monitor sh -lc 'getent hosts mysql >/dev/null' \
+            || die "应用容器无法解析 mysql，请检查 Docker 网络"
+        docker exec ping-monitor sh -lc 'getent hosts redis >/dev/null' \
+            || die "应用容器无法解析 redis，请检查 Docker 网络"
+    fi
+}
+
 compose_pull_runtime_images() {
     if [[ "$MODE" == "mysql-redis" ]]; then
         log "拉取 MySQL / Redis 基础镜像..."
@@ -254,6 +271,16 @@ show_summary() {
     printf '部署模式: %s\n' "$MODE"
     printf '项目目录: %s\n' "$PROJECT_ROOT"
     printf '访问地址: http://<你的服务器IP>:8000\n'
+    if [[ "$MODE" == "mysql-redis" ]]; then
+        printf '\n'
+        printf '数据库 / 缓存连接信息:\n'
+        printf '  MySQL: %s:%s (user=%s, db=%s)\n' \
+            "${MYSQL_BIND_HOST:-127.0.0.1}" "${MYSQL_PORT:-3307}" \
+            "${MYSQL_USER:-ping_monitor}" "${MYSQL_DATABASE:-ping_monitor}"
+        printf '  Redis: %s:%s (password required)\n' \
+            "${REDIS_BIND_HOST:-127.0.0.1}" "${REDIS_PORT:-6380}"
+        printf '  提示: 默认只绑定 127.0.0.1，更安全；如需公网直连，请显式改 *_BIND_HOST=0.0.0.0 并配置防火墙。\n'
+    fi
     printf '\n'
     printf '常用命令:\n'
     printf '  查看日志:\n'
@@ -261,6 +288,9 @@ show_summary() {
     printf '\n'
     printf '  查看容器状态:\n'
     printf '  %s ps\n' "${compose_cmd[*]}"
+    printf '\n'
+    printf '当前服务状态:\n'
+    "${compose_cmd[@]}" ps
     printf '========================================\n'
 }
 
@@ -275,6 +305,7 @@ main() {
     compose_down
     stop_legacy_containers
     compose_up
+    verify_stack
     run_sqlite_migration
     show_summary
 }
