@@ -59,7 +59,7 @@ dist-ssr/
 *.sqlite3
 ping_monitor.db
 
-# 数据目录（仅忽略内容，保留目录结构）
+# 数据目录
 data/*
 !data/.gitkeep
 backend/data/
@@ -67,6 +67,7 @@ backend/data/
 # Excel 文件
 *.xlsx
 *.xls
+主机列表_*.xlsx
 
 # 测试文件
 test_*.py
