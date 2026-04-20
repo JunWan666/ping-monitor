@@ -52,6 +52,7 @@ dist-ssr/
 *.swo
 *~
 .DS_Store
+.claude
 
 # 数据库
 *.db

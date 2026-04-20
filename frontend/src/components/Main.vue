@@ -149,9 +149,10 @@ const handleLogout = async () => {
     await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
-      type: 'warning'
+      type: 'warning',
+      center: true
     })
-    
+
     localStorage.removeItem('token')
     // 使用 replace 并刷新页面，确保清除所有组件状态
     window.location.href = '/login'

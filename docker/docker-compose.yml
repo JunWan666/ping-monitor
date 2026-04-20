@@ -17,8 +17,50 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+      - DATABASE_URL=mysql+pymysql://root:CHANGE_ME_IN_DOT_ENV@ping-monitor-mysql:3306/ping_monitor?charset=utf8mb4
+      - REDIS_URL=redis://ping-monitor-redis:6379/0
     networks:
       - ping-network
+    depends_on:
+      - mysql
+      - redis
+
+  mysql:
+    image: mysql:8.4
+    container_name: ping-monitor-mysql
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=CHANGE_ME_IN_DOT_ENV
+      - MYSQL_DATABASE=ping_monitor
+      - TZ=Asia/Shanghai
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: ping-monitor-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - ping-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mysql-data:
 
 networks:
   ping-network:

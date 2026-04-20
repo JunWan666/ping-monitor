@@ -559,9 +559,10 @@ const deleteHost = async (host) => {
     await ElMessageBox.confirm(`确定要删除主机 "${host.name}" 吗？`, '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
-      type: 'warning'
+      type: 'warning',
+      center: true
     })
-    
+
     await api.deleteHost(host.id)
     ElMessage.success('删除成功')
     loadHosts()
@@ -589,7 +590,8 @@ const batchDelete = async () => {
       {
         confirmButtonText: '确定删除',
         cancelButtonText: '取消',
-        type: 'warning'
+        type: 'warning',
+        center: true
       }
     )
 
@@ -643,14 +645,14 @@ const copyAddress = async (address) => {
 
 const submitBatchImport = async () => {
   let hostsToImport = []
-  
+
   // 根据当前标签页决定数据来源
   if (importTabActive.value === 'text') {
     if (!batchImportText.value.trim()) {
       ElMessage.warning('请输入主机信息')
       return
     }
-    
+
     const lines = batchImportText.value.split('\n').filter(line => line.trim())
     hostsToImport = lines.map((line, index) => {
       const parts = line.split(',').map(p => p.trim())
@@ -670,7 +672,9 @@ const submitBatchImport = async () => {
 
   importing.value = true
   let successCount = 0
+  let duplicateCount = 0
   let failCount = 0
+  const duplicateHosts = []
   const errors = []
 
   for (const item of hostsToImport) {
@@ -689,26 +693,69 @@ const submitBatchImport = async () => {
       })
       successCount++
     } catch (error) {
-      failCount++
-      errors.push(`${item.name || '第' + item.index + '行'}：${error.response?.data?.detail || '导入失败'}`)
+      const errorDetail = error.response?.data?.detail || '导入失败'
+
+      // 判断是否为重复主机
+      if (errorDetail.includes('已存在') || errorDetail.includes('duplicate')) {
+        duplicateCount++
+        duplicateHosts.push(item.name)
+      } else {
+        failCount++
+        errors.push(`${item.name || '第' + item.index + '行'}：${errorDetail}`)
+      }
     }
   }
 
   importing.value = false
-  
+
+  // 构建结果消息
+  const totalCount = hostsToImport.length
+  let resultMessage = `导入完成！\n\n`
+  resultMessage += `总计：${totalCount} 个主机\n`
+  resultMessage += `成功导入：${successCount} 个\n`
+
+  if (duplicateCount > 0) {
+    resultMessage += `重复跳过：${duplicateCount} 个\n`
+  }
+
+  if (failCount > 0) {
+    resultMessage += `导入失败：${failCount} 个\n`
+  }
+
+  // 显示详细信息
+  if (duplicateCount > 0 || failCount > 0) {
+    resultMessage += `\n详细信息：\n`
+
+    if (duplicateCount > 0) {
+      const showDuplicates = duplicateHosts.slice(0, 3).join('、')
+      resultMessage += `• 重复主机：${showDuplicates}${duplicateCount > 3 ? ` 等${duplicateCount}个` : ''}\n`
+    }
+
+    if (failCount > 0) {
+      const showErrors = errors.slice(0, 3).join('\n  ')
+      resultMessage += `• 失败原因：\n  ${showErrors}${errors.length > 3 ? `\n  ...还有${errors.length - 3}个错误` : ''}`
+    }
+  }
+
+  // 刷新主机列表
   if (successCount > 0) {
-    ElMessage.success(`成功导入 ${successCount} 个主机`)
     loadHosts()
   }
-  
-  if (failCount > 0) {
-    const errorMsg = errors.slice(0, 5).join('\n') + (errors.length > 5 ? '\n...' : '')
-    ElMessageBox.alert(
-      `失败 ${failCount} 个，错误信息：\n${errorMsg}`,
-      '导入结果',
-      { confirmButtonText: '确定', type: 'warning' }
-    )
-  } else {
+
+  // 显示结果弹窗
+  const messageType = failCount > 0 ? 'warning' : (successCount > 0 ? 'success' : 'info')
+
+  await ElMessageBox.alert(resultMessage, '导入结果', {
+    confirmButtonText: '确定',
+    type: messageType,
+    center: true,
+    customStyle: {
+      width: '500px'
+    }
+  })
+
+  // 如果全部成功或只有重复，关闭对话框
+  if (failCount === 0) {
     batchDialogVisible.value = false
   }
 }

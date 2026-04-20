@@ -2,7 +2,7 @@
   <div>
     <!-- 统计卡片 -->
     <el-row :gutter="20" style="margin-bottom: 20px">
-      <el-col :span="6">
+      <el-col :span="4">
         <el-card shadow="hover">
           <div style="display: flex; justify-content: space-between; align-items: center">
             <div>
@@ -13,7 +13,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="4">
         <el-card shadow="hover">
           <div style="display: flex; justify-content: space-between; align-items: center">
             <div>
@@ -24,7 +24,29 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="4">
+        <el-card shadow="hover">
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <div>
+              <div style="font-size: 14px; color: #909399">在线主机</div>
+              <div style="font-size: 28px; font-weight: bold; margin-top: 10px; color: #67c23a">{{ onlineHosts }}</div>
+            </div>
+            <el-icon :size="40" color="#67c23a"><CircleCheckFilled /></el-icon>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="4">
+        <el-card shadow="hover">
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <div>
+              <div style="font-size: 14px; color: #909399">异常主机</div>
+              <div style="font-size: 28px; font-weight: bold; margin-top: 10px; color: #f56c6c">{{ abnormalHosts }}</div>
+            </div>
+            <el-icon :size="40" color="#f56c6c"><CircleCloseFilled /></el-icon>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="4">
         <el-card shadow="hover">
           <div style="display: flex; justify-content: space-between; align-items: center">
             <div>
@@ -35,7 +57,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="4">
         <el-card shadow="hover">
           <div style="display: flex; justify-content: space-between; align-items: center">
             <div>
@@ -235,6 +257,14 @@ const onlineRate = computed(() => {
   if (dashboard.total_hosts === 0) return 0
   const online = dashboard.host_status.filter(h => h.status === '正常').length
   return Math.round((online / dashboard.total_hosts) * 100)
+})
+
+const onlineHosts = computed(() => {
+  return dashboard.host_status.filter(h => h.status === '正常').length
+})
+
+const abnormalHosts = computed(() => {
+  return dashboard.host_status.filter(h => h.status === '异常').length
 })
 
 // 排序函数
