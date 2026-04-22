@@ -172,6 +172,12 @@ npm run dev
 - 后端：`http://localhost:8000`
 - API 文档：`http://localhost:8000/docs`
 
+## 相关文档
+
+- Debian 11 Docker 部署教程：`docs/DEPLOYMENT_DOCKER_DEBIAN11.md`
+- MySQL + Redis 部署说明：`docs/DEPLOYMENT_MYSQL_REDIS.md`
+- 一键部署脚本：`scripts/deploy-docker-debian11.sh`
+
 ## 环境变量
 
 常用环境变量如下：
