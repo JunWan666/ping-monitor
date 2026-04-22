@@ -392,7 +392,7 @@
           </el-table-column>
           <el-table-column label="状态" width="100" align="center" header-align="center">
             <template #default="{ row }">
-              <el-tag :type="row.status === '正常' ? 'success' : 'danger'">
+              <el-tag :type="row.status === '正常' ? 'success' : row.status === '异常' ? 'warning' : row.status === '离线' ? 'danger' : 'info'">
                 {{ row.status }}
               </el-tag>
             </template>

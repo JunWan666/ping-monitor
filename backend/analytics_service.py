@@ -4,10 +4,18 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
+from data_maintenance import DataMaintenance
 from database import Alert, Host, PingRecord, PingStatistics
+from host_status import (
+    ONLINE_PACKET_LOSS_THRESHOLD,
+    get_host_status_label,
+    get_host_status_type,
+    is_host_alerting,
+    is_host_reachable,
+)
 
 
 TIME_RANGE_TO_HOURS = {
@@ -100,7 +108,7 @@ def get_ping_logs_page(
 
     logs = []
     for item in items:
-        is_normal = item.packet_loss < item.alert_threshold
+        status_label = get_host_status_label(item.packet_loss, item.alert_threshold)
         logs.append(
             {
                 "id": item.id,
@@ -114,7 +122,7 @@ def get_ping_logs_page(
                 "max_rtt": item.max_rtt,
                 "avg_rtt": item.avg_rtt,
                 "check_time": item.check_time,
-                "status": "正常" if is_normal else "异常",
+                "status": status_label,
             }
         )
 
@@ -181,10 +189,8 @@ def get_dashboard_payload(db: Session):
 
     host_status = []
     for row in rows:
-        if row.last_check is None:
-            status = "未知"
-        else:
-            status = "正常" if row.packet_loss < row.alert_threshold else "异常"
+        status_type = get_host_status_type(row.packet_loss, row.alert_threshold)
+        status = get_host_status_label(row.packet_loss, row.alert_threshold)
 
         host_status.append(
             {
@@ -193,6 +199,9 @@ def get_dashboard_payload(db: Session):
                 "address": row.address,
                 "enabled": row.enabled,
                 "status": status,
+                "status_type": status_type,
+                "is_online": is_host_reachable(row.packet_loss),
+                "is_alerting": is_host_alerting(row.packet_loss, row.alert_threshold),
                 "packet_loss": row.packet_loss,
                 "avg_rtt": row.avg_rtt,
                 "last_check": row.last_check,
@@ -263,12 +272,19 @@ def get_databoard_stats_payload(
             .all()
         )
         if stat_rows:
+            online_count_overrides = _build_online_count_overrides(
+                db=db,
+                host_ids=list(host_dict.keys()),
+                since=since,
+                bucket="day" if stat_type == "daily" else "hour",
+            )
             return _build_databoard_from_aggregated(
                 hosts=hosts,
                 stat_rows=stat_rows,
                 time_range=time_range,
                 sort_by=sort_by,
                 sort_order=sort_order,
+                online_count_overrides=online_count_overrides,
             )
 
     record_rows = (
@@ -362,12 +378,13 @@ def get_host_detail_stats_payload(db: Session, *, host_id: int, time_range: str)
     return result
 
 
-def _build_databoard_from_aggregated(*, hosts, stat_rows, time_range, sort_by, sort_order):
+def _build_databoard_from_aggregated(*, hosts, stat_rows, time_range, sort_by, sort_order, online_count_overrides):
     host_stats_map: Dict[int, Dict[str, float]] = {}
     trend_groups = defaultdict(list)
 
     for row in stat_rows:
-        trend_groups[row.stat_time].append(row)
+        current_online_count = int(online_count_overrides.get((row.host_id, row.stat_time), row.online_count or 0))
+        trend_groups[row.stat_time].append((row, current_online_count))
 
         host_entry = host_stats_map.setdefault(
             row.host_id,
@@ -382,7 +399,7 @@ def _build_databoard_from_aggregated(*, hosts, stat_rows, time_range, sort_by, s
             },
         )
         host_entry["check_count"] += row.check_count
-        host_entry["online_count"] += row.online_count
+        host_entry["online_count"] += current_online_count
         host_entry["weighted_packet_loss"] += row.avg_packet_loss * row.check_count
         if row.avg_rtt is not None:
             host_entry["weighted_rtt"] += row.avg_rtt * row.check_count
@@ -431,15 +448,15 @@ def _build_databoard_from_aggregated(*, hosts, stat_rows, time_range, sort_by, s
     trend_data = []
     for time_key in sorted(trend_groups.keys()):
         rows = trend_groups[time_key]
-        total_check = sum(row.check_count for row in rows)
+        total_check = sum(row.check_count for row, _ in rows)
         if total_check == 0:
             continue
-        total_online = sum(row.online_count for row in rows)
-        avg_packet_loss = round(sum(row.avg_packet_loss * row.check_count for row in rows) / total_check, 2)
+        total_online = sum(online_count for _, online_count in rows)
+        avg_packet_loss = round(sum(row.avg_packet_loss * row.check_count for row, _ in rows) / total_check, 2)
 
         weighted_rtt = 0.0
         weighted_rtt_count = 0
-        for row in rows:
+        for row, _ in rows:
             if row.avg_rtt is not None:
                 weighted_rtt += row.avg_rtt * row.check_count
                 weighted_rtt_count += row.check_count
@@ -490,7 +507,7 @@ def _build_databoard_from_raw(*, hosts, host_dict, record_rows, time_range, sort
             },
         )
         host_entry["check_count"] += 1
-        if row.packet_loss < host.alert_threshold:
+        if is_host_reachable(row.packet_loss):
             host_entry["online_count"] += 1
         host_entry["packet_loss_sum"] += row.packet_loss
         if row.avg_rtt is not None:
@@ -501,7 +518,7 @@ def _build_databoard_from_raw(*, hosts, host_dict, record_rows, time_range, sort
 
         timestamp = row.created_at.timestamp()
         group_key = int(timestamp // (interval_minutes * 60)) * (interval_minutes * 60)
-        trend_groups[group_key].append((row, host.alert_threshold))
+        trend_groups[group_key].append(row)
 
     host_stats = []
     total_online_rate = 0.0
@@ -542,10 +559,10 @@ def _build_databoard_from_raw(*, hosts, host_dict, record_rows, time_range, sort
         items = trend_groups[group_key]
         if not items:
             continue
-        avg_packet_loss = round(sum(row.packet_loss for row, _ in items) / len(items), 2)
-        valid_rtts = [row.avg_rtt for row, _ in items if row.avg_rtt is not None]
+        avg_packet_loss = round(sum(row.packet_loss for row in items) / len(items), 2)
+        valid_rtts = [row.avg_rtt for row in items if row.avg_rtt is not None]
         avg_rtt = round(sum(valid_rtts) / len(valid_rtts), 2) if valid_rtts else 0
-        online_count = sum(1 for row, threshold in items if row.packet_loss < threshold)
+        online_count = sum(1 for row in items if is_host_reachable(row.packet_loss))
         trend_data.append(
             {
                 "time": format_time_for_range(datetime.fromtimestamp(group_key), time_range),
@@ -573,3 +590,36 @@ def _sort_host_stats(host_stats: List[dict], sort_by: str, sort_order: str) -> N
     if sort_by not in {"avg_packet_loss", "online_rate", "avg_rtt"}:
         sort_by = "avg_packet_loss"
     host_stats.sort(key=lambda item: item.get(sort_by, 0), reverse=reverse)
+
+
+def _build_online_count_overrides(*, db: Session, host_ids: List[int], since: datetime, bucket: str) -> Dict[tuple[int, datetime], int]:
+    if not host_ids:
+        return {}
+
+    bucket_expr = DataMaintenance._time_bucket_expr(db.bind.dialect.name, PingRecord.created_at, bucket=bucket)
+    rows = (
+        db.query(
+            PingRecord.host_id.label("host_id"),
+            bucket_expr.label("bucket_time"),
+            func.sum(
+                case(
+                    (PingRecord.packet_loss < ONLINE_PACKET_LOSS_THRESHOLD, 1),
+                    else_=0,
+                )
+            ).label("online_count"),
+        )
+        .filter(
+            PingRecord.host_id.in_(host_ids),
+            PingRecord.created_at >= since,
+        )
+        .group_by(PingRecord.host_id, bucket_expr)
+        .all()
+    )
+
+    return {
+        (
+            int(row.host_id),
+            DataMaintenance._parse_bucket_time(row.bucket_time, bucket=bucket),
+        ): int(row.online_count or 0)
+        for row in rows
+    }

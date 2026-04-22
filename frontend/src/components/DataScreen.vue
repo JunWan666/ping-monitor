@@ -176,7 +176,7 @@
               </div>
               <div class="legend-row">
                 <span class="legend-dot warning"></span>
-                <span>区域高延迟 (>= {{ WARNING_RTT_THRESHOLD }}ms)</span>
+                <span>区域告警/高延迟</span>
               </div>
               <div class="legend-row">
                 <span class="legend-dot danger"></span>
@@ -485,6 +485,70 @@ const mapStageStyle = computed(() => ({
 
 const hosts = computed(() => datascreenPayload.value.host_status || [])
 
+const getHostStatusType = (host) => {
+  if (host?.status_type) {
+    return host.status_type
+  }
+  if (host?.status === '离线') {
+    return 'offline'
+  }
+  if (host?.status === '异常') {
+    return 'warning'
+  }
+  if (host?.status === '正常') {
+    return 'normal'
+  }
+  return 'unknown'
+}
+
+const isHostOnline = (host) => {
+  if (typeof host?.is_online === 'boolean') {
+    return host.is_online
+  }
+  const statusType = getHostStatusType(host)
+  return statusType === 'normal' || statusType === 'warning'
+}
+
+const getHostTone = (host) => {
+  const statusType = getHostStatusType(host)
+  if (statusType === 'offline') {
+    return 'abnormal'
+  }
+  if (statusType === 'warning' || Number(host?.avg_rtt || 0) >= WARNING_RTT_THRESHOLD) {
+    return 'warning'
+  }
+  if (statusType === 'normal') {
+    return 'normal'
+  }
+  return 'neutral'
+}
+
+const getHostStatusText = (host) => {
+  const statusType = getHostStatusType(host)
+  if (statusType === 'offline') {
+    return '离线'
+  }
+  if (statusType === 'warning') {
+    return '丢包告警'
+  }
+  return `${Number(host?.avg_rtt || 0).toFixed(1)}ms`
+}
+
+const compareHostsByStatus = (a, b) => {
+  const priority = {
+    offline: 4,
+    warning: 3,
+    normal: 2,
+    unknown: 1
+  }
+  const aPriority = priority[getHostStatusType(a)] || 0
+  const bPriority = priority[getHostStatusType(b)] || 0
+  if (aPriority !== bPriority) {
+    return bPriority - aPriority
+  }
+  return Number(b?.avg_rtt || 0) - Number(a?.avg_rtt || 0)
+}
+
 const geoHosts = computed(() =>
   hosts.value
     .filter((host) => hasValidCoordinates(host.longitude, host.latitude))
@@ -617,29 +681,26 @@ const provinceHostIndex = computed(() => {
       id: host.id,
       name: host.name,
       status: host.status,
+      status_type: host.status_type,
+      packet_loss: host.packet_loss,
       avg_rtt: host.avg_rtt,
       city: host.city,
       address: host.address
     })
     entry.avgRttTotal += host.avg_rtt
 
-    if (host.status === '异常') {
+    if (getHostStatusType(host) === 'offline') {
       entry.abnormalCount += 1
     } else {
       entry.normalCount += 1
-      if (host.avg_rtt >= WARNING_RTT_THRESHOLD) {
+      if (getHostStatusType(host) === 'warning' || host.avg_rtt >= WARNING_RTT_THRESHOLD) {
         entry.warningCount += 1
       }
     }
   })
 
   provinceMap.forEach((entry) => {
-    entry.hosts.sort((a, b) => {
-      if (a.status !== b.status) {
-        return a.status === '异常' ? -1 : 1
-      }
-      return Number(b.avg_rtt || 0) - Number(a.avg_rtt || 0)
-    })
+    entry.hosts.sort(compareHostsByStatus)
     entry.avgRtt = entry.hosts.length ? entry.avgRttTotal / entry.hosts.length : 0
     delete entry.avgRttTotal
   })
@@ -696,6 +757,8 @@ const mapPointClusters = computed(() => {
       id: host.id,
       name: host.name,
       status: host.status,
+      status_type: host.status_type,
+      packet_loss: host.packet_loss,
       avg_rtt: host.avg_rtt,
       country: host.country,
       address: host.address,
@@ -703,9 +766,9 @@ const mapPointClusters = computed(() => {
     })
     cluster.avgRttTotal += host.avg_rtt
 
-    if (host.status === '异常') {
+    if (getHostStatusType(host) === 'offline') {
       cluster.abnormalCount += 1
-    } else if (host.avg_rtt >= 100) {
+    } else if (getHostStatusType(host) === 'warning' || host.avg_rtt >= WARNING_RTT_THRESHOLD) {
       cluster.warningCount += 1
     }
   })
@@ -716,12 +779,7 @@ const mapPointClusters = computed(() => {
       const avgRtt = hostCount ? cluster.avgRttTotal / hostCount : 0
       const tone = cluster.abnormalCount > 0 ? 'abnormal' : cluster.warningCount > 0 || avgRtt >= 100 ? 'warning' : 'normal'
 
-      cluster.hosts.sort((a, b) => {
-        if (a.status !== b.status) {
-          return a.status === '异常' ? -1 : 1
-        }
-        return Number(b.avg_rtt || 0) - Number(a.avg_rtt || 0)
-      })
+      cluster.hosts.sort(compareHostsByStatus)
 
       return {
         id: cluster.id,
@@ -748,8 +806,11 @@ const overseasMapPointClusters = computed(() => mapPointClusters.value.filter((p
 
 const summary = computed(() => {
   const totalHosts = Number(datascreenPayload.value.total_hosts) || hosts.value.length
-  const onlineHosts = hosts.value.filter((host) => host.status === '正常').length
-  const abnormalHosts = hosts.value.filter((host) => host.status === '异常').length
+  const onlineHosts = hosts.value.filter(isHostOnline).length
+  const abnormalHosts = hosts.value.filter((host) => {
+    const statusType = getHostStatusType(host)
+    return statusType === 'warning' || statusType === 'offline'
+  }).length
   const avgRtt = Number(databoardStats.value.avg_rtt) || average(hosts.value.map((host) => Number(host.avg_rtt) || 0))
   const onlineRate = totalHosts > 0 ? (onlineHosts / totalHosts) * 100 : 0
 
@@ -842,7 +903,7 @@ const slowHosts = computed(() => {
         id: host.id,
         name: host.name,
         avg_rtt: Number(host.avg_rtt) || 0,
-        online_rate: host.status === '正常' ? 100 : 0,
+        online_rate: isHostOnline(host) ? 100 : 0,
         address: host.address
       }))
 
@@ -900,10 +961,10 @@ const metricCards = computed(() => [
   },
   {
     key: 'abnormalHosts',
-    label: '异常/离线',
+    label: '告警/离线',
     value: formatMetric(animatedMetrics.abnormalHosts),
     unit: '台',
-    note: summary.value.abnormalHosts > 0 ? '红色节点正在触发波纹告警' : '当前未发现异常节点',
+    note: summary.value.abnormalHosts > 0 ? '黄色代表可达告警，红色代表离线' : '当前未发现告警或离线节点',
     icon: WarningFilled,
     tone: 'tone-danger'
   },
@@ -1936,7 +1997,7 @@ const getToneMeta = (tone) => {
   }
   if (tone === 'warning') {
     return {
-      label: '高延迟',
+      label: '告警/高延迟',
       badgeStyle: 'background: rgba(250, 219, 20, 0.14); color: #fff0a6; border: 1px solid rgba(250, 219, 20, 0.3);'
     }
   }
@@ -1983,9 +2044,9 @@ const renderTooltipCard = ({ title, tone, stats = [], hosts = [], sectionTitle =
   const hostRows = hosts.length
     ? hosts
         .map((host) => {
-          const toneKey = host.status === '异常' ? 'abnormal' : Number(host.avg_rtt || 0) >= WARNING_RTT_THRESHOLD ? 'warning' : 'normal'
+          const toneKey = getHostTone(host)
           const hostTone = getToneMeta(toneKey)
-          const hostDetail = host.status === '异常' ? '异常' : `${Number(host.avg_rtt || 0).toFixed(1)}ms`
+          const hostDetail = getHostStatusText(host)
           const location = [host.city, host.address].filter(Boolean).join(' · ')
 
           return `
@@ -2157,7 +2218,7 @@ const buildProvinceTooltip = (params) => {
     stats: [
       { label: '主机数', value: `${provinceHosts.length} 台` },
       { label: '在线', value: `${normalCount} 台` },
-      { label: '高延迟', value: `${warningCount} 台` },
+      { label: '告警/高延迟', value: `${warningCount} 台` },
       { label: '异常', value: `${abnormalCount} 台` },
       { label: '平均 RTT', value: `${Number(avgRtt || 0).toFixed(1)}ms` }
     ],
@@ -2178,7 +2239,7 @@ const buildPointTooltip = (params) => {
       { label: '聚合主机', value: `${data.hostCount || hostsAtPoint.length || 0} 台` },
       { label: '平均 RTT', value: `${Number(data.avgRtt || 0).toFixed(1)}ms` },
       { label: '异常', value: `${data.abnormalCount || 0} 台` },
-      { label: '高延迟', value: `${data.warningCount || 0} 台` }
+      { label: '告警/高延迟', value: `${data.warningCount || 0} 台` }
     ],
     hosts: hostsAtPoint,
     sectionTitle: '点位主机',
@@ -2220,10 +2281,7 @@ const renderProvinceTooltip = (params) => {
 
   const hostList = provinceHosts
     .slice(0, 8)
-    .map((host) => {
-      const tone = host.status === '异常' ? '异常' : `${Number(host.avg_rtt || 0).toFixed(1)}ms`
-      return `• ${host.name} ${host.city ? `(${host.city})` : ''} - ${tone}`
-    })
+    .map((host) => `• ${host.name} ${host.city ? `(${host.city})` : ''} - ${getHostStatusText(host)}`)
     .join('<br/>')
 
   const extraCount = provinceHosts.length - Math.min(8, provinceHosts.length)
@@ -2244,7 +2302,7 @@ const renderPointTooltip = (params) => {
   const hostsAtPoint = data.hosts || []
   const hostList = hostsAtPoint
     .slice(0, 8)
-    .map((host) => `• ${host.name} - ${host.status === '异常' ? '异常' : `${Number(host.avg_rtt || 0).toFixed(1)}ms`}`)
+    .map((host) => `• ${host.name} - ${getHostStatusText(host)}`)
     .join('<br/>')
 
   const extraCount = hostsAtPoint.length - Math.min(8, hostsAtPoint.length)

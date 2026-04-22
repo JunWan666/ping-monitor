@@ -23,6 +23,7 @@
             >
               <el-option label="正常" value="正常" />
               <el-option label="异常" value="异常" />
+              <el-option label="离线" value="离线" />
               <el-option label="未知" value="未知" />
             </el-select>
             <el-select
@@ -110,9 +111,7 @@
         </el-table-column>
         <el-table-column label="状态" width="100" align="center" header-align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.status === '正常'" type="success">{{ row.status }}</el-tag>
-            <el-tag v-else-if="row.status === '异常'" type="danger">{{ row.status }}</el-tag>
-            <el-tag v-else type="info">{{ row.status }}</el-tag>
+            <el-tag :type="getStatusTagType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="丢包率" width="100" align="center" header-align="center">
@@ -933,6 +932,19 @@ const normalizeLocationStatus = (status) => {
     return status
   }
   return 'pending'
+}
+
+const getStatusTagType = (status) => {
+  if (status === '正常') {
+    return 'success'
+  }
+  if (status === '异常') {
+    return 'warning'
+  }
+  if (status === '离线') {
+    return 'danger'
+  }
+  return 'info'
 }
 
 const getPacketLossTagType = (packetLoss) => {

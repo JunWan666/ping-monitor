@@ -39,7 +39,7 @@
         <el-card shadow="hover">
           <div style="display: flex; justify-content: space-between; align-items: center">
             <div>
-              <div style="font-size: 14px; color: #909399">异常主机</div>
+              <div style="font-size: 14px; color: #909399">告警/离线</div>
               <div style="font-size: 28px; font-weight: bold; margin-top: 10px; color: #f56c6c">{{ abnormalHosts }}</div>
             </div>
             <el-icon :size="40" color="#f56c6c"><CircleCloseFilled /></el-icon>
@@ -102,6 +102,7 @@
             >
               <el-option label="正常" value="正常" />
               <el-option label="异常" value="异常" />
+              <el-option label="离线" value="离线" />
             </el-select>
             <el-button type="success" size="small" @click="pingAllHosts" :loading="pingAllLoading">
               <el-icon><Promotion /></el-icon> 立即Ping全部
@@ -172,9 +173,7 @@
             </div>
           </template>
           <template #default="{ row }">
-            <el-tag v-if="row.status === '正常'" type="success">{{ row.status }}</el-tag>
-            <el-tag v-else-if="row.status === '异常'" type="danger">{{ row.status }}</el-tag>
-            <el-tag v-else type="info">{{ row.status }}</el-tag>
+            <el-tag :type="getStatusTagType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="丢包率" width="120" align="center" header-align="center">
@@ -297,18 +296,34 @@ let refreshTimer = null
 let resizeHandler = null
 const lastLoadedAt = ref(0)
 
+const isHostOnline = (host) => {
+  if (typeof host?.is_online === 'boolean') {
+    return host.is_online
+  }
+  return host?.status === '正常' || host?.status === '异常'
+}
+
+const isHostProblem = (host) => host?.status === '异常' || host?.status === '离线'
+
+const getStatusTagType = (status) => {
+  if (status === '正常') return 'success'
+  if (status === '异常') return 'warning'
+  if (status === '离线') return 'danger'
+  return 'info'
+}
+
 const onlineRate = computed(() => {
   if (dashboard.total_hosts === 0) return 0
-  const online = dashboard.host_status.filter(h => h.status === '正常').length
+  const online = dashboard.host_status.filter(isHostOnline).length
   return Math.round((online / dashboard.total_hosts) * 100)
 })
 
 const onlineHosts = computed(() => {
-  return dashboard.host_status.filter(h => h.status === '正常').length
+  return dashboard.host_status.filter(isHostOnline).length
 })
 
 const abnormalHosts = computed(() => {
-  return dashboard.host_status.filter(h => h.status === '异常').length
+  return dashboard.host_status.filter(isHostProblem).length
 })
 
 // 排序函数
@@ -320,8 +335,8 @@ const sortHosts = (hosts) => {
     
     switch (sortColumn.value) {
       case 'status':
-        // 异常 > 正常 > 未知
-        const statusOrder = { '异常': 3, '正常': 2, '未知': 1 }
+        // 离线 > 异常 > 正常 > 未知
+        const statusOrder = { '离线': 4, '异常': 3, '正常': 2, '未知': 1 }
         aVal = statusOrder[a.status] || 0
         bVal = statusOrder[b.status] || 0
         break
@@ -490,7 +505,13 @@ const handleSort = (column) => {
 
 // 行样式处理
 const getRowClassName = ({ row }) => {
-  return row.status === '异常' ? 'error-row' : ''
+  if (row.status === '离线') {
+    return 'error-row'
+  }
+  if (row.status === '异常') {
+    return 'warning-row'
+  }
+  return ''
 }
 
 const loadData = async (options = {}) => {
@@ -884,5 +905,13 @@ onBeforeUnmount(() => {
 
 :deep(.error-row:hover > td) {
   background-color: #fde2e2 !important;
+}
+
+:deep(.warning-row) {
+  background-color: #fff8eb !important;
+}
+
+:deep(.warning-row:hover > td) {
+  background-color: #fff1d6 !important;
 }
 </style>

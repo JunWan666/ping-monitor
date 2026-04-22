@@ -6,11 +6,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from data_maintenance import DataMaintenance
 from database import Alert, Host, PingRecord, PingStatistics, SessionLocal, SystemConfig
+from host_status import ONLINE_PACKET_LOSS_THRESHOLD, is_host_reachable
 from notification import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -231,6 +232,8 @@ class ReportService:
         if raw_start < end:
             cls._merge_raw_rows(db, host_meta, host_stats, raw_start, end)
 
+        cls._override_host_availability_from_raw(db, host_meta, host_stats, start, end)
+
         host_alert_counts = {
             int(host_id): int(count)
             for host_id, count in (
@@ -387,7 +390,7 @@ class ReportService:
         for row in rows:
             entry = cls._ensure_host_entry(host_stats, host_meta, row.host_id)
             entry["check_count"] += 1
-            if float(row.packet_loss or 0) < entry["alert_threshold"]:
+            if is_host_reachable(row.packet_loss):
                 entry["online_count"] += 1
             entry["weighted_packet_loss"] += float(row.packet_loss or 0)
             if row.avg_rtt is not None:
@@ -412,6 +415,36 @@ class ReportService:
         }
         host_stats[host_id] = entry
         return entry
+
+    @classmethod
+    def _override_host_availability_from_raw(
+        cls,
+        db: Session,
+        host_meta: dict[int, dict],
+        host_stats: dict[int, dict],
+        start: datetime,
+        end: datetime,
+    ) -> None:
+        rows = (
+            db.query(
+                PingRecord.host_id,
+                func.count(PingRecord.id).label("check_count"),
+                func.sum(
+                    case(
+                        (PingRecord.packet_loss < ONLINE_PACKET_LOSS_THRESHOLD, 1),
+                        else_=0,
+                    )
+                ).label("online_count"),
+            )
+            .filter(PingRecord.created_at >= start, PingRecord.created_at < end)
+            .group_by(PingRecord.host_id)
+            .all()
+        )
+
+        for row in rows:
+            entry = cls._ensure_host_entry(host_stats, host_meta, row.host_id)
+            entry["check_count"] = int(row.check_count or 0)
+            entry["online_count"] = int(row.online_count or 0)
 
     @classmethod
     def _build_report_title(cls, report_type: str, start: datetime, end: datetime) -> str:

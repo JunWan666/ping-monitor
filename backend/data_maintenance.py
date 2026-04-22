@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from cache import cache_manager
 from database import Host, PingRecord, PingStatistics, SessionLocal, SystemConfig, SystemLog
+from host_status import ONLINE_PACKET_LOSS_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ class DataMaintenance:
                     PingRecord.host_id.label("host_id"),
                     bucket_expr.label("bucket_time"),
                     func.count(PingRecord.id).label("check_count"),
-                    func.sum(case((PingRecord.packet_loss < Host.alert_threshold, 1), else_=0)).label("online_count"),
+                    func.sum(case((PingRecord.packet_loss < ONLINE_PACKET_LOSS_THRESHOLD, 1), else_=0)).label("online_count"),
                     func.avg(PingRecord.packet_loss).label("avg_packet_loss"),
                     func.avg(PingRecord.avg_rtt).label("avg_rtt"),
                     func.min(PingRecord.min_rtt).label("min_rtt"),
