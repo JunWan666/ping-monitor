@@ -31,8 +31,8 @@ def _create_engine():
         settings.database_url,
         pool_pre_ping=True,
         pool_recycle=1800,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=20,
+        max_overflow=30,
     )
 
 
@@ -54,6 +54,14 @@ class Host(Base):
     enabled = Column(Boolean, default=True, nullable=False)
     alert_threshold = Column(Float, default=20.0, nullable=False)
     last_status = Column(String(50), nullable=True)
+    resolved_ip = Column(String(50), nullable=True)
+    country = Column(String(100), nullable=True)
+    province = Column(String(100), nullable=True)
+    city = Column(String(100), nullable=True)
+    isp = Column(String(200), nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    location_status = Column(String(20), default="pending", nullable=False)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
 
 
@@ -105,6 +113,7 @@ class SystemConfig(Base):
     cleanup_time = Column(String(10), default="03:00", nullable=False)
     aggregate_interval = Column(Integer, default=1, nullable=False)
     dashboard_chart_points = Column(Integer, default=12, nullable=False)
+    auto_refresh_location = Column(Boolean, default=False, nullable=False)
     report_webhook_url = Column(String(1000), nullable=True)
     report_webhook_secret = Column(String(255), nullable=True)
     daily_report_enabled = Column(Boolean, default=False, nullable=False)
@@ -162,6 +171,21 @@ class SystemLog(Base):
     created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
 
 
+class DataScreenConfig(Base):
+    __tablename__ = "datascreen_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    refresh_interval = Column(Integer, default=5, nullable=False)
+    enable_3d = Column(Boolean, default=True, nullable=False)
+    enable_animation = Column(Boolean, default=True, nullable=False)
+    map_view_angle = Column(Integer, default=45, nullable=False)
+    particle_count = Column(Integer, default=100, nullable=False)
+    show_flow_lines = Column(Boolean, default=True, nullable=False)
+    theme_color = Column(String(20), default="blue", nullable=False)
+    public_enabled = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_indexes()
@@ -187,6 +211,12 @@ def init_default_config() -> None:
         if not config:
             config = SystemConfig()
             db.add(config)
+            db.commit()
+
+        screen_config = db.query(DataScreenConfig).first()
+        if not screen_config:
+            screen_config = DataScreenConfig()
+            db.add(screen_config)
             db.commit()
     finally:
         db.close()

@@ -2,14 +2,14 @@
   <div>
     <el-card shadow="hover">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
           <span style="font-weight: bold">主机列表</span>
-          <div style="display: flex; align-items: center; gap: 10px">
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap">
             <el-input 
               v-model="searchKeyword" 
-              placeholder="搜索主机名称或地址" 
+              placeholder="搜索名称、地址、IP、描述、地区或运营商" 
               clearable
-              style="width: 280px"
+              style="width: 320px"
             >
               <template #prefix>
                 <el-icon><Search /></el-icon>
@@ -23,9 +23,35 @@
             >
               <el-option label="正常" value="正常" />
               <el-option label="异常" value="异常" />
+              <el-option label="未知" value="未知" />
             </el-select>
+            <el-select
+              v-model="enabledFilter"
+              placeholder="启用状态"
+              clearable
+              style="width: 120px"
+            >
+              <el-option label="已启用" value="enabled" />
+              <el-option label="已停用" value="disabled" />
+            </el-select>
+            <el-select
+              v-model="locationFilter"
+              placeholder="定位状态"
+              clearable
+              style="width: 120px"
+            >
+              <el-option label="已定位" value="success" />
+              <el-option label="获取失败" value="failed" />
+              <el-option label="获取中" value="pending" />
+            </el-select>
+            <el-button type="primary" @click="loadHosts">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
             <el-button type="danger" @click="batchDelete" :disabled="selectedHosts.length === 0" v-if="selectedHosts.length > 0">
               <el-icon><Delete /></el-icon> 批量删除 ({{ selectedHosts.length }})
+            </el-button>
+            <el-button type="info" @click="batchRefreshLocation" :disabled="selectedHosts.length === 0" v-if="selectedHosts.length > 0">
+              <el-icon><Refresh /></el-icon> 批量刷新位置 ({{ selectedHosts.length }})
             </el-button>
             <el-button type="warning" @click="exportHosts">
               <el-icon><Download /></el-icon> 导出
@@ -46,19 +72,39 @@
         <el-table-column prop="name" label="主机名称" width="150" align="center" header-align="center" />
         <el-table-column label="地址" width="200" align="center" header-align="center">
           <template #default="{ row }">
-            <span 
-              @click="copyAddress(row.address)" 
+            <span
+              @click="copyAddress(row.address)"
               style="cursor: pointer; color: #409eff; text-decoration: underline"
               :title="'点击复制: ' + row.address"
             >
               {{ row.address }}
             </span>
-            <el-icon 
-              @click="copyAddress(row.address)" 
+            <el-icon
+              @click="copyAddress(row.address)"
               style="margin-left: 5px; cursor: pointer; color: #409eff"
               :title="'复制地址'"
             >
               <CopyDocument />
+            </el-icon>
+          </template>
+        </el-table-column>
+        <el-table-column label="IP地址" width="180" align="center" header-align="center">
+          <template #default="{ row }">
+            <span
+              v-if="row.resolved_ip"
+              @click="copyAddress(row.resolved_ip)"
+              style="cursor: pointer; color: #409eff; text-decoration: underline"
+              :title="'点击复制: ' + row.resolved_ip"
+            >
+              {{ row.resolved_ip }}
+            </span>
+            <span v-else style="color: #909399">未解析</span>
+            <el-icon
+              @click="refreshIp(row.id, row.name)"
+              style="margin-left: 5px; cursor: pointer; color: #67c23a"
+              :title="'刷新IP地址'"
+            >
+              <Refresh />
             </el-icon>
           </template>
         </el-table-column>
@@ -69,7 +115,59 @@
             <el-tag v-else type="info">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="丢包率" width="100" align="center" header-align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.packet_loss !== null && row.packet_loss !== undefined" :type="getPacketLossTagType(row.packet_loss)">
+              {{ row.packet_loss }}%
+            </el-tag>
+            <span v-else style="color: #909399">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="平均延迟" width="110" align="center" header-align="center">
+          <template #default="{ row }">
+            <span v-if="row.avg_rtt !== null && row.avg_rtt !== undefined" :style="{ color: getRttColor(row.avg_rtt), fontWeight: '600' }">
+              {{ row.avg_rtt }}ms
+            </span>
+            <span v-else style="color: #909399">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最后检查" width="180" align="center" header-align="center">
+          <template #default="{ row }">
+            <span v-if="row.last_check">{{ new Date(row.last_check).toLocaleString() }}</span>
+            <span v-else style="color: #909399">暂无</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="description" label="描述" min-width="150" align="center" header-align="center" />
+        <el-table-column label="地理位置" width="200" align="center" header-align="center">
+          <template #default="{ row }">
+            <div v-if="row.location_status === 'success'" style="display: flex; align-items: center; justify-content: center; gap: 5px">
+              <el-icon style="color: #67c23a"><Location /></el-icon>
+              <span>{{ formatLocation(row) }}</span>
+              <el-icon
+                @click="refreshLocation(row.id, row.name)"
+                style="cursor: pointer; color: #409eff"
+                :title="'刷新地理位置'"
+              >
+                <Refresh />
+              </el-icon>
+            </div>
+            <div v-else-if="row.location_status === 'failed'" style="display: flex; align-items: center; justify-content: center; gap: 5px">
+              <el-icon style="color: #f56c6c"><WarningFilled /></el-icon>
+              <span style="color: #909399">获取失败</span>
+              <el-icon
+                @click="refreshLocation(row.id, row.name)"
+                style="cursor: pointer; color: #409eff"
+                :title="'重新获取'"
+              >
+                <Refresh />
+              </el-icon>
+            </div>
+            <div v-else style="display: flex; align-items: center; justify-content: center; gap: 5px">
+              <el-icon style="color: #909399"><Loading /></el-icon>
+              <span style="color: #909399">获取中...</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="告警阈值" width="120" align="center" header-align="center">
           <template #default="{ row }">
             {{ row.alert_threshold }}%
@@ -113,7 +211,7 @@
     <el-dialog 
       v-model="dialogVisible" 
       :title="dialogMode === 'add' ? '添加主机' : '编辑主机'"
-      width="500px"
+      width="720px"
     >
       <el-form :model="form" label-width="100px">
         <el-form-item label="主机名称">
@@ -129,6 +227,46 @@
           <el-input-number v-model="form.alert_threshold" :min="0" :max="100" />
           <span style="margin-left: 10px">%</span>
         </el-form-item>
+        <el-divider content-position="left">地理位置（可选）</el-divider>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="国家">
+              <el-input v-model="form.country" placeholder="例如：中国 / 美国" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="省份/州">
+              <el-input v-model="form.province" placeholder="例如：广东 / California" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="城市">
+              <el-input v-model="form.city" placeholder="例如：深圳 / Mountain View" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="运营商">
+              <el-input v-model="form.isp" placeholder="例如：中国电信 / Google" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="纬度">
+              <el-input-number v-model="form.latitude" :min="-90" :max="90" :step="0.0001" :precision="6" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="经度">
+              <el-input-number v-model="form.longitude" :min="-180" :max="180" :step="0.0001" :precision="6" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <div style="margin-top: -6px; color: #909399; font-size: 12px; line-height: 1.7">
+          不填写时，系统会根据 IP 自动补全；已手动填写的地区信息会优先保留，只补全空白字段。
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -150,16 +288,16 @@
             :closable="false"
             style="margin-bottom: 15px"
           >
-            <p>每行一个主机，格式：主机名称,地址,描述,告警阈值</p>
-            <p>示例：百度,www.baidu.com,百度搜索,20</p>
-            <p>注意：描述和告警阈值可以省略，省略时默认阈值为20%</p>
+            <p>每行一个主机，格式：主机名称,地址,描述,告警阈值,国家,省份/州,城市,运营商,纬度,经度</p>
+            <p>示例：百度,www.baidu.com,百度搜索,20,中国,北京,北京,中国电信,,</p>
+            <p>注意：从第 5 列开始均可省略，系统会自动补全缺失的地理位置</p>
           </el-alert>
           
           <el-input
             v-model="batchImportText"
             type="textarea"
             :rows="10"
-            placeholder="请输入主机信息，每行一个主机"
+            placeholder="请输入主机信息，每行一个主机，可选追加地理位置字段"
           />
         </el-tab-pane>
         
@@ -207,7 +345,17 @@
           </el-upload>
         </el-tab-pane>
       </el-tabs>
-      
+
+      <!-- 导入进度条 -->
+      <div v-if="importing" style="margin-top: 20px">
+        <el-progress
+          :percentage="importProgress"
+          :status="importProgress === 100 ? 'success' : undefined"
+        >
+          <span>{{ importProgressText }}</span>
+        </el-progress>
+      </div>
+
       <template #footer>
         <el-button @click="batchDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="submitBatchImport" :loading="importing">导入</el-button>
@@ -309,7 +457,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { UploadFilled, Download, Upload } from '@element-plus/icons-vue'
+import { UploadFilled, Download, Upload, Location, Refresh, WarningFilled, Loading } from '@element-plus/icons-vue'
 import api from '../api'
 
 const hosts = ref([])
@@ -320,6 +468,8 @@ const batchDialogVisible = ref(false)
 const pingDialogVisible = ref(false)
 const dialogMode = ref('add')
 const importing = ref(false)
+const importProgress = ref(0)
+const importProgressText = ref('')
 const pinging = ref(false)
 const batchImportText = ref('')
 const importTabActive = ref('text')
@@ -333,6 +483,8 @@ const pingLogContainer = ref(null)
 const pingEventSource = ref(null)
 const searchKeyword = ref('')
 const statusFilter = ref('')
+const enabledFilter = ref('')
+const locationFilter = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
 let xlsxModulePromise = null
@@ -349,25 +501,50 @@ const form = reactive({
   name: '',
   address: '',
   description: '',
-  alert_threshold: 20.0
+  alert_threshold: 20.0,
+  country: '',
+  province: '',
+  city: '',
+  isp: '',
+  latitude: null,
+  longitude: null
 })
 
 // 搜索和筛选后的所有主机
 const filteredAllHosts = computed(() => {
   let result = [...hostsWithStatus.value]
   
-  // 关键字搜索
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase()
-    result = result.filter(host => 
-      host.name.toLowerCase().includes(keyword) || 
-      host.address.toLowerCase().includes(keyword)
-    )
+    result = result.filter((host) => {
+      const searchFields = [
+        host.name,
+        host.address,
+        host.description,
+        host.resolved_ip,
+        host.country,
+        host.province,
+        host.city,
+        host.isp,
+        host.status
+      ]
+      return searchFields
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(keyword))
+    })
   }
   
-  // 状态筛选
   if (statusFilter.value) {
-    result = result.filter(host => host.status === statusFilter.value)
+    result = result.filter((host) => host.status === statusFilter.value)
+  }
+
+  if (enabledFilter.value) {
+    const enabledValue = enabledFilter.value === 'enabled'
+    result = result.filter((host) => Boolean(host.enabled) === enabledValue)
+  }
+
+  if (locationFilter.value) {
+    result = result.filter((host) => normalizeLocationStatus(host.location_status) === locationFilter.value)
   }
   
   return result
@@ -398,15 +575,26 @@ const loadHosts = async () => {
 
     hosts.value = hostList
     const statusMap = new Map()
-    dashboardData.host_status.forEach(hs => {
-      statusMap.set(hs.id, hs.status)
+    ;(dashboardData.host_status || []).forEach((hs) => {
+      statusMap.set(hs.id, hs)
     })
     
-    // 合并主机信息和状态
-    hostsWithStatus.value = hosts.value.map(host => ({
-      ...host,
-      status: statusMap.get(host.id) || '未知'
-    }))
+    hostsWithStatus.value = hosts.value.map((host) => {
+      const statusInfo = statusMap.get(host.id) || {}
+      return {
+        ...host,
+        status: statusInfo.status || host.last_status || '未知',
+        packet_loss: statusInfo.packet_loss ?? null,
+        avg_rtt: statusInfo.avg_rtt ?? null,
+        last_check: statusInfo.last_check ?? null,
+        resolved_ip: statusInfo.resolved_ip || host.resolved_ip,
+        location_status: statusInfo.location_status || host.location_status,
+        country: statusInfo.country || host.country,
+        province: statusInfo.province || host.province,
+        city: statusInfo.city || host.city,
+        isp: statusInfo.isp || host.isp
+      }
+    })
   } catch (error) {
     ElMessage.error('加载主机列表失败')
   }
@@ -438,6 +626,12 @@ const resetForm = () => {
   form.address = ''
   form.description = ''
   form.alert_threshold = 20.0
+  form.country = ''
+  form.province = ''
+  form.city = ''
+  form.isp = ''
+  form.latitude = null
+  form.longitude = null
 }
 
 const submitForm = async () => {
@@ -447,21 +641,24 @@ const submitForm = async () => {
   }
 
   try {
+    const payload = {
+      name: form.name,
+      address: form.address,
+      description: form.description,
+      alert_threshold: form.alert_threshold,
+      country: form.country || null,
+      province: form.province || null,
+      city: form.city || null,
+      isp: form.isp || null,
+      latitude: form.latitude ?? null,
+      longitude: form.longitude ?? null
+    }
+
     if (dialogMode.value === 'add') {
-      await api.createHost({
-        name: form.name,
-        address: form.address,
-        description: form.description,
-        alert_threshold: form.alert_threshold
-      })
+      await api.createHost(payload)
       ElMessage.success('添加成功')
     } else {
-      await api.updateHost(form.id, {
-        name: form.name,
-        address: form.address,
-        description: form.description,
-        alert_threshold: form.alert_threshold
-      })
+      await api.updateHost(form.id, payload)
       ElMessage.success('更新成功')
     }
     dialogVisible.value = false
@@ -643,6 +840,121 @@ const copyAddress = async (address) => {
   }
 }
 
+// 刷新单个主机地理位置
+const refreshLocation = async (hostId, hostName) => {
+  try {
+    const response = await api.refreshHostLocation(hostId)
+    if (response.location && response.location.status === 'success') {
+      ElMessage.success(`${hostName} 地理位置刷新成功`)
+      await loadHosts()
+    } else {
+      ElMessage.warning(`${hostName} 地理位置刷新失败: ${response.location?.error || '未知错误'}`)
+    }
+  } catch (error) {
+    console.error('刷新地理位置失败:', error)
+    ElMessage.error(`${hostName} 地理位置刷新失败`)
+  }
+}
+
+const refreshIp = async (hostId, hostName) => {
+  try {
+    const response = await api.refreshHostIp(hostId)
+    if (response.resolved_ip) {
+      ElMessage.success(`${hostName} IP地址刷新成功: ${response.resolved_ip}`)
+    } else {
+      ElMessage.warning(`${hostName} IP地址解析失败`)
+    }
+    await loadHosts()
+  } catch (error) {
+    console.error('刷新IP地址失败:', error)
+    ElMessage.error(`刷新IP地址失败: ${error.response?.data?.detail || error.message}`)
+  }
+}
+
+// 批量刷新地理位置
+const batchRefreshLocation = async () => {
+  if (selectedHosts.value.length === 0) {
+    ElMessage.warning('请先选择要刷新地理位置的主机')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要刷新选中的 ${selectedHosts.value.length} 个主机的地理位置吗？`,
+      '批量刷新地理位置',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+
+    let successCount = 0
+    let failCount = 0
+
+    for (const host of selectedHosts.value) {
+      try {
+        const response = await api.refreshHostLocation(host.id)
+        if (response.location && response.location.status === 'success') {
+          successCount++
+        } else {
+          failCount++
+        }
+      } catch (error) {
+        failCount++
+      }
+    }
+
+    await loadHosts()
+
+    if (failCount === 0) {
+      ElMessage.success(`成功刷新 ${successCount} 个主机的地理位置`)
+    } else {
+      ElMessage.warning(`刷新完成: 成功 ${successCount} 个，失败 ${failCount} 个`)
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量刷新地理位置失败:', error)
+    }
+  }
+}
+
+// 格式化地理位置显示
+const formatLocation = (host) => {
+  const parts = []
+  if (host.country) parts.push(host.country)
+  if (host.province) parts.push(host.province)
+  if (host.city) parts.push(host.city)
+  return parts.length > 0 ? parts.join(' ') : '未知'
+}
+
+const normalizeLocationStatus = (status) => {
+  if (status === 'success' || status === 'failed') {
+    return status
+  }
+  return 'pending'
+}
+
+const getPacketLossTagType = (packetLoss) => {
+  if (Number(packetLoss) >= 20) {
+    return 'danger'
+  }
+  if (Number(packetLoss) > 0) {
+    return 'warning'
+  }
+  return 'success'
+}
+
+const getRttColor = (avgRtt) => {
+  if (Number(avgRtt) >= 150) {
+    return '#f56c6c'
+  }
+  if (Number(avgRtt) >= 80) {
+    return '#e6a23c'
+  }
+  return '#67c23a'
+}
+
 const submitBatchImport = async () => {
   let hostsToImport = []
 
@@ -659,8 +971,31 @@ const submitBatchImport = async () => {
       if (parts.length < 2) {
         return { error: `第${index + 1}行：格式错误，至少需要主机名称和地址`, index: index + 1 }
       }
-      const [name, address, description = '', alert_threshold = '20'] = parts
-      return { name, address, description, alert_threshold: parseFloat(alert_threshold) || 20.0, index: index + 1 }
+      const [
+        name,
+        address,
+        description = '',
+        alert_threshold = '20',
+        country = '',
+        province = '',
+        city = '',
+        isp = '',
+        latitude = '',
+        longitude = ''
+      ] = parts
+      return {
+        name,
+        address,
+        description,
+        alert_threshold: parseFloat(alert_threshold) || 20.0,
+        country,
+        province,
+        city,
+        isp,
+        latitude: latitude === '' ? null : Number(latitude),
+        longitude: longitude === '' ? null : Number(longitude),
+        index: index + 1
+      }
     })
   } else {
     if (!excelData.value || excelData.value.length === 0) {
@@ -671,13 +1006,21 @@ const submitBatchImport = async () => {
   }
 
   importing.value = true
+  importProgress.value = 0
   let successCount = 0
   let duplicateCount = 0
   let failCount = 0
   const duplicateHosts = []
   const errors = []
 
-  for (const item of hostsToImport) {
+  const totalCount = hostsToImport.length
+  for (let i = 0; i < hostsToImport.length; i++) {
+    const item = hostsToImport[i]
+
+    // 更新进度
+    importProgress.value = Math.round(((i + 1) / totalCount) * 100)
+    importProgressText.value = `正在导入 ${i + 1}/${totalCount}`
+
     if (item.error) {
       failCount++
       errors.push(item.error)
@@ -689,7 +1032,13 @@ const submitBatchImport = async () => {
         name: item.name,
         address: item.address,
         description: item.description || '',
-        alert_threshold: item.alert_threshold || 20.0
+        alert_threshold: item.alert_threshold || 20.0,
+        country: item.country || null,
+        province: item.province || null,
+        city: item.city || null,
+        isp: item.isp || null,
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null
       })
       successCount++
     } catch (error) {
@@ -707,9 +1056,10 @@ const submitBatchImport = async () => {
   }
 
   importing.value = false
+  importProgress.value = 0
+  importProgressText.value = ''
 
   // 构建结果消息
-  const totalCount = hostsToImport.length
   let resultMessage = `导入完成！\n\n`
   resultMessage += `总计：${totalCount} 个主机\n`
   resultMessage += `成功导入：${successCount} 个\n`
@@ -772,6 +1122,11 @@ const downloadTemplate = async () => {
   ]
   
   // 创建工作簿
+  data[0].push('国家', '省份/州', '城市', '运营商', '纬度', '经度')
+  data[1].push('中国', '北京', '北京', '中国电信', '', '')
+  data[2].push('中国', '广东', '深圳', '腾讯云', '', '')
+  data[3].push('中国', '浙江', '杭州', '阿里云', '', '')
+
   const ws = XLSX.utils.aoa_to_sheet(data)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '主机列表')
@@ -795,12 +1150,20 @@ const exportHosts = async () => {
   ]
   
   // 添加主机数据
+  data[0].push('国家', '省份/州', '城市', '运营商', '纬度', '经度')
+
   hostsWithStatus.value.forEach(host => {
     data.push([
       host.name,
       host.address,
       host.description || '',
-      host.alert_threshold
+      host.alert_threshold,
+      host.country || '',
+      host.province || '',
+      host.city || '',
+      host.isp || '',
+      host.latitude ?? '',
+      host.longitude ?? ''
     ])
   })
   
@@ -810,7 +1173,7 @@ const exportHosts = async () => {
   // 自动设置列宽
   const colWidths = []
   // 遍历每一列
-  for (let col = 0; col < 4; col++) {
+  for (let col = 0; col < data[0].length; col++) {
     let maxWidth = 0
     // 遍历该列的所有行，找出最大宽度
     for (let row = 0; row < data.length; row++) {
@@ -864,6 +1227,10 @@ watch(importTabActive, (newVal) => {
   }
 })
 
+watch([searchKeyword, statusFilter, enabledFilter, locationFilter], () => {
+  currentPage.value = 1
+})
+
 const handleExceed = () => {
   ElMessage.warning('每次只能上传一个文件，请删除后再上传')
 }
@@ -887,7 +1254,18 @@ const handleFileChange = (file) => {
         const row = jsonData[i]
         if (!row || row.length === 0) continue
         
-        const [name, address, description = '', alert_threshold = 20] = row
+        const [
+          name,
+          address,
+          description = '',
+          alert_threshold = 20,
+          country = '',
+          province = '',
+          city = '',
+          isp = '',
+          latitude = '',
+          longitude = ''
+        ] = row
         
         if (!name || !address) {
           hosts.push({ error: `第${i + 1}行：缺少主机名称或地址`, index: i + 1 })
@@ -899,6 +1277,12 @@ const handleFileChange = (file) => {
           address: String(address).trim(),
           description: String(description || '').trim(),
           alert_threshold: parseFloat(alert_threshold) || 20.0,
+          country: String(country || '').trim(),
+          province: String(province || '').trim(),
+          city: String(city || '').trim(),
+          isp: String(isp || '').trim(),
+          latitude: latitude === '' || latitude == null ? null : Number(latitude),
+          longitude: longitude === '' || longitude == null ? null : Number(longitude),
           index: i + 1
         })
       }

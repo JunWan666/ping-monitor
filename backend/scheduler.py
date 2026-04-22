@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,10 +12,44 @@ from sqlalchemy.orm import Session
 
 from cache import cache_manager
 from database import Alert, Host, PingRecord, SessionLocal, SystemConfig, get_database_backend
+from ip_location_service import ip_location_service
 from notification_template import NotificationTemplate
 from ping_service import PingService
 
 logger = logging.getLogger(__name__)
+
+LOCATION_FIELDS = ("country", "province", "city", "isp", "latitude", "longitude")
+DISPLAY_LOCATION_FIELDS = ("country", "province", "city")
+
+
+def host_has_display_location(host: Host) -> bool:
+    return any(getattr(host, field, None) for field in DISPLAY_LOCATION_FIELDS)
+
+
+def host_has_any_location(host: Host) -> bool:
+    return host_has_display_location(host) or host.latitude is not None or host.longitude is not None
+
+
+def host_needs_location_completion(host: Host) -> bool:
+    return not host_has_display_location(host) or host.latitude is None or host.longitude is None
+
+
+def apply_location_result(host: Host, location: dict, *, overwrite_existing: bool) -> None:
+    if location.get("status") == "success":
+        for field in LOCATION_FIELDS:
+            new_value = location.get(field)
+            current_value = getattr(host, field, None)
+            should_write = overwrite_existing or current_value in (None, "")
+            if should_write and new_value is not None:
+                setattr(host, field, new_value)
+
+        host.location_status = "success" if host_has_any_location(host) else "failed"
+        return
+
+    if host_has_any_location(host):
+        host.location_status = "success"
+    else:
+        host.location_status = location.get("status", "failed")
 
 
 class MonitorScheduler:
@@ -39,6 +74,7 @@ class MonitorScheduler:
         self.weekly_report_time = "09:00"
         self.monthly_report_enabled = False
         self.monthly_report_time = "09:00"
+        self.auto_refresh_location = False
 
     def start(self) -> None:
         self.reload_config(initial=True)
@@ -63,6 +99,7 @@ class MonitorScheduler:
                 self.current_interval = config.check_interval
                 self.aggregate_interval = config.aggregate_interval
                 self.cleanup_time = config.cleanup_time or "03:00"
+                self.auto_refresh_location = bool(config.auto_refresh_location)
                 self.daily_report_enabled = bool(
                     config.daily_report_enabled and self._is_dingtalk_webhook(config.report_webhook_url)
                 )
@@ -79,6 +116,7 @@ class MonitorScheduler:
                 self.current_interval = 5
                 self.aggregate_interval = 1
                 self.cleanup_time = "03:00"
+                self.auto_refresh_location = False
                 self.daily_report_enabled = False
                 self.daily_report_time = "09:00"
                 self.weekly_report_enabled = False
@@ -150,11 +188,12 @@ class MonitorScheduler:
             logger.info(
                 (
                     "调度配置已刷新: check_interval=%s, aggregate_interval=%s, cleanup_time=%s, "
-                    "daily_report=%s@%s, weekly_report=%s@%s, monthly_report=%s@%s"
+                    "auto_refresh_location=%s, daily_report=%s@%s, weekly_report=%s@%s, monthly_report=%s@%s"
                 ),
                 self.current_interval,
                 self.aggregate_interval,
                 self.cleanup_time,
+                self.auto_refresh_location,
                 self.daily_report_enabled,
                 self.daily_report_time,
                 self.weekly_report_enabled,
@@ -217,6 +256,7 @@ class MonitorScheduler:
             packet_count = config.packet_count if config else 10
             packet_timeout = config.packet_timeout if config else 2
             notification_mode = config.notification_mode if config else "status_change"
+            auto_refresh_location = bool(config.auto_refresh_location) if config else False
             hosts = db.query(Host).filter(Host.enabled.is_(True)).all()
         finally:
             db.close()
@@ -244,6 +284,7 @@ class MonitorScheduler:
                     packet_count,
                     packet_timeout,
                     notification_mode,
+                    auto_refresh_location,
                 )
                 for host in hosts
             ]
@@ -278,6 +319,7 @@ class MonitorScheduler:
         packet_count: int,
         packet_timeout: int,
         notification_mode: str,
+        auto_refresh_location: bool,
     ) -> None:
         db = SessionLocal()
         try:
@@ -289,6 +331,7 @@ class MonitorScheduler:
                     packet_count=packet_count,
                     packet_timeout=packet_timeout,
                     notification_mode=notification_mode,
+                    auto_refresh_location=auto_refresh_location,
                 )
         finally:
             db.close()
@@ -301,8 +344,22 @@ class MonitorScheduler:
         packet_count: int,
         packet_timeout: int,
         notification_mode: str,
+        auto_refresh_location: bool,
     ) -> None:
         try:
+            # DNS解析域名为IP
+            import socket
+            try:
+                resolved_ip = socket.gethostbyname(host.address)
+                if host.resolved_ip != resolved_ip:
+                    host.resolved_ip = resolved_ip
+                    db.commit()
+            except socket.gaierror:
+                # 解析失败，保持原有IP或设为None
+                if host.resolved_ip is None:
+                    host.resolved_ip = host.address
+                    db.commit()
+
             result = self.ping_service.ping_host(
                 host.address,
                 count=packet_count,
@@ -342,6 +399,23 @@ class MonitorScheduler:
 
             if should_alert:
                 self._handle_host_alert(db, host, result, current_status, last_status)
+            if host.resolved_ip and (auto_refresh_location or host_needs_location_completion(host)):
+                try:
+                    location = asyncio.run(
+                        ip_location_service.get_location(
+                            host.resolved_ip,
+                            force_refresh=bool(auto_refresh_location),
+                        )
+                    )
+                    apply_location_result(
+                        host,
+                        location,
+                        overwrite_existing=bool(auto_refresh_location),
+                    )
+                    db.commit()
+                except Exception as geo_exc:
+                    db.rollback()
+                    logger.warning("涓绘満 %s 鍦扮悊浣嶇疆鍚屾澶辫触: %s", host.name, geo_exc)
         except Exception as exc:
             logger.error("监控主机 %s 失败: %s", host.name, exc)
 

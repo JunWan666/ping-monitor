@@ -96,7 +96,7 @@ const handleLogin = async () => {
       
       localStorage.setItem('token', result.access_token)
       ElMessage.success('登录成功')
-      router.push('/')
+      router.push('/admin')
     } catch (error) {
       ElMessage.error(error.response?.data?.detail || '登录失败')
     } finally {

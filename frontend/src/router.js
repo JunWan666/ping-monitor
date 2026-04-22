@@ -1,23 +1,42 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import api from './api'
+import { loadRouteWithRetry } from './lib/asyncLoader'
 
 const routes = [
   {
+    path: '/',
+    name: 'DataScreen',
+    component: loadRouteWithRetry(() => import('./components/DataScreen.vue')),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/datascreen-preview',
+    name: 'DataScreenPreview',
+    component: loadRouteWithRetry(() => import('./components/DataScreen.vue')),
+    meta: { requiresAuth: true, previewMode: true }
+  },
+  {
+    path: '/admin/login',
+    name: 'AdminLogin',
+    component: loadRouteWithRetry(() => import('./components/AdminLogin.vue')),
+    meta: { requiresAuth: false }
+  },
+  {
     path: '/login',
     name: 'Login',
-    component: () => import('./components/Login.vue'),
+    component: loadRouteWithRetry(() => import('./components/Login.vue')),
     meta: { requiresAuth: false }
   },
   {
     path: '/init',
     name: 'InitAdmin',
-    component: () => import('./components/InitAdmin.vue'),
+    component: loadRouteWithRetry(() => import('./components/InitAdmin.vue')),
     meta: { requiresAuth: false }
   },
   {
-    path: '/',
+    path: '/admin',
     name: 'Main',
-    component: () => import('./components/Main.vue'),
+    component: loadRouteWithRetry(() => import('./components/Main.vue')),
     meta: { requiresAuth: true }
   }
 ]
@@ -27,39 +46,47 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫
-router.beforeEach(async (to, from, next) => {
+const resolveAdminEntry = async () => {
+  try {
+    const result = await api.checkAdmin()
+    return result.has_admin ? '/admin/login' : '/init'
+  } catch (error) {
+    return '/admin/login'
+  }
+}
+
+const resolvePublicDataScreenEntry = async (hasToken) => {
+  try {
+    const result = await api.getPublicDataScreenStatus()
+    if (result.enabled) {
+      return true
+    }
+  } catch (error) {
+    return hasToken ? '/admin' : '/login'
+  }
+
+  return hasToken ? '/admin' : '/login'
+}
+
+router.beforeEach(async (to) => {
   const token = localStorage.getItem('token')
-  
-  // 如果访问登录页或初始化页
-  if (to.path === '/login' || to.path === '/init') {
-    // 如果已登录，跳转首页
+
+  if (to.path === '/') {
+    return resolvePublicDataScreenEntry(Boolean(token))
+  }
+
+  if (to.path === '/login' || to.path === '/init' || to.path === '/admin/login') {
     if (token) {
-      next('/')
-      return
+      return '/admin'
     }
-    // 未登录，允许访问
-    next()
-    return
+    return true
   }
-  
-  // 访问其他页面（需要认证）
-  if (!token) {
-    // 检查是否存在管理员
-    try {
-      const result = await api.checkAdmin()
-      if (result.has_admin) {
-        next('/login')
-      } else {
-        next('/init')
-      }
-    } catch (error) {
-      next('/login')
-    }
-    return
+
+  if (to.meta.requiresAuth && !token) {
+    return resolveAdminEntry()
   }
-  
-  next()
+
+  return true
 })
 
 export default router

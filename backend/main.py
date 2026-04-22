@@ -4,15 +4,19 @@ import asyncio
 import json
 import logging
 import os
+import re
+import socket
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+import requests
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from analytics_service import (
@@ -22,11 +26,12 @@ from analytics_service import (
     get_ping_logs_page,
 )
 from app_settings import settings
-from auth import create_access_token, decode_access_token, get_current_user, get_password_hash, verify_password
+from auth import create_access_token, decode_access_token, get_current_user, get_optional_current_user, get_password_hash, verify_password
 from cache import cache_manager
 from data_maintenance import DataMaintenance
 from database import (
     Alert,
+    DataScreenConfig,
     Host,
     PingRecord,
     PingStatistics,
@@ -39,6 +44,7 @@ from database import (
     init_db,
     init_default_config,
 )
+from ip_location_service import ip_location_service
 from notification import notifier
 from notification_template import NotificationTemplate
 from ping_service import PingService
@@ -50,6 +56,25 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+DEFAULT_CONTROL_CENTER = {
+    "name": "北京市",
+    "country": "中国",
+    "province": "北京市",
+    "city": "北京市",
+    "isp": "默认监控中心",
+    "longitude": 116.4074,
+    "latitude": 39.9042,
+    "ip": None,
+    "source": "default",
+}
+CONTROL_CENTER_CACHE_TTL = 60 * 30
+PUBLIC_IP_CACHE_TTL = 60 * 10
+PUBLIC_IP_SOURCES = (
+    {"name": "ipip", "url": "https://myip.ipip.net/", "type": "text"},
+    {"name": "ipify", "url": "https://api.ipify.org?format=json", "type": "json", "field": "ip"},
+    {"name": "jsonip", "url": "https://ipv4.jsonip.com", "type": "json", "field": "ip"},
+)
 
 app = FastAPI(title="Ping 监控系统", version="2.0.0")
 
@@ -67,6 +92,12 @@ class HostCreate(BaseModel):
     address: str
     description: Optional[str] = None
     alert_threshold: float = 20.0
+    country: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    isp: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class HostUpdate(BaseModel):
@@ -75,6 +106,12 @@ class HostUpdate(BaseModel):
     description: Optional[str] = None
     enabled: Optional[bool] = None
     alert_threshold: Optional[float] = None
+    country: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    isp: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class HostResponse(BaseModel):
@@ -84,6 +121,14 @@ class HostResponse(BaseModel):
     description: Optional[str]
     enabled: bool
     alert_threshold: float
+    resolved_ip: Optional[str]
+    country: Optional[str]
+    province: Optional[str]
+    city: Optional[str]
+    isp: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    location_status: str
     created_at: datetime
 
     class Config:
@@ -117,6 +162,7 @@ class SystemConfigUpdate(BaseModel):
     cleanup_time: Optional[str] = None
     aggregate_interval: Optional[int] = None
     dashboard_chart_points: Optional[int] = None
+    auto_refresh_location: Optional[bool] = None
     report_webhook_url: Optional[str] = None
     report_webhook_secret: Optional[str] = None
     daily_report_enabled: Optional[bool] = None
@@ -140,6 +186,7 @@ class SystemConfigResponse(BaseModel):
     cleanup_time: str
     aggregate_interval: int
     dashboard_chart_points: int
+    auto_refresh_location: bool
     report_webhook_url: Optional[str]
     report_webhook_secret: Optional[str]
     daily_report_enabled: bool
@@ -187,9 +234,136 @@ def get_or_create_system_config(db: Session) -> SystemConfig:
     return config
 
 
+def get_or_create_datascreen_config(db: Session) -> DataScreenConfig:
+    config = db.query(DataScreenConfig).first()
+    if config:
+        return config
+
+    config = DataScreenConfig()
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def build_datascreen_payload(db: Session, screen_config: DataScreenConfig) -> dict:
+    payload = get_dashboard_payload(db)
+    payload["screen_config"] = {
+        "refresh_interval": screen_config.refresh_interval,
+        "enable_3d": screen_config.enable_3d,
+        "enable_animation": screen_config.enable_animation,
+        "map_view_angle": screen_config.map_view_angle,
+        "particle_count": screen_config.particle_count,
+        "show_flow_lines": screen_config.show_flow_lines,
+        "theme_color": screen_config.theme_color,
+        "public_enabled": screen_config.public_enabled,
+    }
+    payload["control_center"] = get_control_center_payload()
+    return payload
+
+
+def get_runtime_public_ip() -> str | None:
+    cache_key = cache_manager.build_key("runtime_public_ip")
+    cached_ip = cache_manager.get_json(cache_key)
+    if isinstance(cached_ip, str) and ip_location_service.is_valid_ip(cached_ip) and not ip_location_service.is_private_ip(cached_ip):
+        return cached_ip
+
+    for source in PUBLIC_IP_SOURCES:
+        try:
+            response = requests.get(source["url"], timeout=5)
+            response.raise_for_status()
+            if source["type"] == "json":
+                payload = response.json()
+                candidate_ip = str(payload.get(source["field"], "")).strip()
+            else:
+                match = re.search(r"((?:\d{1,3}\.){3}\d{1,3})", response.text)
+                candidate_ip = match.group(1).strip() if match else ""
+
+            if candidate_ip and ip_location_service.is_valid_ip(candidate_ip) and not ip_location_service.is_private_ip(candidate_ip):
+                cache_manager.set_json(cache_key, candidate_ip, PUBLIC_IP_CACHE_TTL)
+                return candidate_ip
+        except Exception as exc:
+            logger.warning("获取运行机器公网 IP 失败(%s): %s", source["name"], exc)
+
+    return None
+
+
+def get_control_center_payload() -> dict:
+    cache_key = cache_manager.build_key("datascreen_control_center")
+    cached_payload = cache_manager.get_json(cache_key)
+    if isinstance(cached_payload, dict):
+        return cached_payload
+
+    control_center = DEFAULT_CONTROL_CENTER.copy()
+    public_ip = get_runtime_public_ip()
+    if not public_ip:
+        cache_manager.set_json(cache_key, control_center, CONTROL_CENTER_CACHE_TTL)
+        return control_center
+
+    merged_location = None
+    sources = []
+    location_sources = (
+        {
+            "name": "baidu-qifu",
+            "url": f"https://qifu.baidu.com/api/v1/ip-portrait/brief-info?ip={public_ip}",
+            "headers": ip_location_service.BAIDU_REQUEST_HEADERS,
+            "parser": ip_location_service.parse_baidu_qifu,
+        },
+        {
+            "name": "ip2location.io",
+            "url": f"https://api.ip2location.io/?ip={public_ip}&format=json",
+            "headers": None,
+            "parser": ip_location_service.parse_ip2location,
+        },
+    )
+
+    for source in location_sources:
+        try:
+            response = requests.get(source["url"], headers=source["headers"], timeout=5)
+            response.raise_for_status()
+            payload = response.json()
+            parsed = source["parser"](payload)
+            normalized = ip_location_service._normalize_result(parsed)
+            if not normalized:
+                continue
+            merged_location = ip_location_service._merge_result(merged_location, normalized)
+            sources.append(source["name"])
+        except Exception as exc:
+            logger.warning("获取监控中心地理位置失败(%s): %s", source["name"], exc)
+
+    if merged_location:
+        location_name = " / ".join(
+            [part for part in [merged_location.get("province"), merged_location.get("city")] if part]
+        ) or "监控中心"
+        control_center.update(
+            {
+                "name": location_name,
+                "country": merged_location.get("country") or control_center["country"],
+                "province": merged_location.get("province") or control_center["province"],
+                "city": merged_location.get("city") or control_center["city"],
+                "isp": merged_location.get("isp") or control_center["isp"],
+                "longitude": merged_location.get("longitude") if merged_location.get("longitude") is not None else control_center["longitude"],
+                "latitude": merged_location.get("latitude") if merged_location.get("latitude") is not None else control_center["latitude"],
+                "ip": public_ip,
+                "source": " + ".join(sources) if sources else "default",
+            }
+        )
+    else:
+        control_center["ip"] = public_ip
+
+    cache_manager.set_json(cache_key, control_center, CONTROL_CENTER_CACHE_TTL)
+    return control_center
+
+
+def ensure_public_datascreen_enabled(screen_config: DataScreenConfig) -> None:
+    if not screen_config.public_enabled:
+        raise HTTPException(status_code=403, detail="可视化大屏当前未对游客开放")
+
+
 def invalidate_runtime_cache() -> None:
     cache_manager.invalidate_namespace("dashboard")
     cache_manager.invalidate_namespace("databoard")
+    cache_manager.invalidate_namespace("datascreen_payload")
 
 
 def is_valid_time_text(value: str) -> bool:
@@ -221,6 +395,149 @@ def get_runtime_ping_settings(db: Session) -> tuple[int, int]:
     return config.packet_count, config.packet_timeout
 
 
+LOCATION_FIELDS = ("country", "province", "city", "isp", "latitude", "longitude")
+DISPLAY_LOCATION_FIELDS = ("country", "province", "city")
+
+
+def resolve_host_ip(address: str) -> str:
+    try:
+        return socket.gethostbyname(address)
+    except socket.gaierror:
+        return address
+
+
+def host_has_display_location(host: Host) -> bool:
+    return any(getattr(host, field, None) for field in DISPLAY_LOCATION_FIELDS)
+
+
+def host_has_any_location(host: Host) -> bool:
+    return host_has_display_location(host) or host.latitude is not None or host.longitude is not None
+
+
+def host_needs_location_completion(host: Host) -> bool:
+    return not host_has_display_location(host) or host.latitude is None or host.longitude is None
+
+
+def apply_manual_location_fields(host: Host, payload: dict) -> None:
+    for field in LOCATION_FIELDS:
+        if field in payload:
+            setattr(host, field, payload.get(field))
+
+    if host_has_any_location(host):
+        host.location_status = "success"
+    elif not getattr(host, "location_status", None):
+        host.location_status = "pending"
+
+
+async def sync_host_location_from_ip(
+    host: Host,
+    *,
+    force_refresh: bool = False,
+    overwrite_existing: bool = False,
+) -> dict:
+    if not host.resolved_ip:
+        host.location_status = "failed"
+        return {
+            "status": "failed",
+            "error": "IP 地址为空",
+        }
+
+    location = await ip_location_service.get_location(host.resolved_ip, force_refresh=force_refresh)
+
+    if location.get("status") == "success":
+        for field in LOCATION_FIELDS:
+            new_value = location.get(field)
+            current_value = getattr(host, field, None)
+            should_write = overwrite_existing or current_value in (None, "")
+            if should_write and new_value is not None:
+                setattr(host, field, new_value)
+
+        host.location_status = "success" if host_has_any_location(host) else "failed"
+        return location
+
+    if host_has_any_location(host):
+        host.location_status = "success"
+    else:
+        host.location_status = location.get("status", "failed")
+    return location
+
+
+def get_location_sync_policy(config: SystemConfig, host: Host) -> tuple[bool, bool] | None:
+    auto_refresh = bool(getattr(config, "auto_refresh_location", False))
+    if auto_refresh:
+        return True, True
+    if host_needs_location_completion(host):
+        return False, False
+    return None
+
+
+def ensure_host_resolved_ip(db: Session, host: Host) -> str | None:
+    resolved_ip = resolve_host_ip(host.address)
+    if host.resolved_ip != resolved_ip:
+        host.resolved_ip = resolved_ip
+        db.commit()
+        db.refresh(host)
+    return host.resolved_ip
+
+
+async def maybe_sync_host_location_after_ping(
+    db: Session,
+    host: Host,
+    *,
+    config: SystemConfig | None = None,
+) -> dict | None:
+    config = config or get_or_create_system_config(db)
+    policy = get_location_sync_policy(config, host)
+    resolved_ip = ensure_host_resolved_ip(db, host)
+    if not resolved_ip or policy is None:
+        return None
+
+    force_refresh, overwrite_existing = policy
+    try:
+        location = await sync_host_location_from_ip(
+            host,
+            force_refresh=force_refresh,
+            overwrite_existing=overwrite_existing,
+        )
+        db.commit()
+        db.refresh(host)
+        return location
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Ping 后同步主机 %s 的地理位置失败: %s", host.name, exc)
+        return None
+
+
+def maybe_sync_host_location_after_ping_sync(
+    db: Session,
+    host: Host,
+    *,
+    config: SystemConfig | None = None,
+) -> dict | None:
+    config = config or get_or_create_system_config(db)
+    policy = get_location_sync_policy(config, host)
+    resolved_ip = ensure_host_resolved_ip(db, host)
+    if not resolved_ip or policy is None:
+        return None
+
+    force_refresh, overwrite_existing = policy
+    try:
+        location = asyncio.run(
+            sync_host_location_from_ip(
+                host,
+                force_refresh=force_refresh,
+                overwrite_existing=overwrite_existing,
+            )
+        )
+        db.commit()
+        db.refresh(host)
+        return location
+    except Exception as exc:
+        db.rollback()
+        logger.warning("后台 Ping 后同步主机 %s 的地理位置失败: %s", host.name, exc)
+        return None
+
+
 def persist_ping_record(db: Session, host_id: int, result: dict) -> PingRecord:
     record = PingRecord(
         host_id=host_id,
@@ -238,11 +555,18 @@ def persist_ping_record(db: Session, host_id: int, result: dict) -> PingRecord:
     return record
 
 
-def run_ping_task(host_id: int, host_address: str, packet_count: int, packet_timeout: int) -> None:
+def run_ping_task(host_id: int, packet_count: int, packet_timeout: int) -> None:
     db = SessionLocal()
     try:
-        result = PingService.ping_host(host_address, count=packet_count, timeout=packet_timeout)
+        host = db.query(Host).filter(Host.id == host_id).first()
+        if not host:
+            logger.warning("后台 Ping 任务跳过，主机不存在: %s", host_id)
+            return
+
+        result = PingService.ping_host(host.address, count=packet_count, timeout=packet_timeout)
         persist_ping_record(db, host_id, result)
+        config = get_or_create_system_config(db)
+        maybe_sync_host_location_after_ping_sync(db, host, config=config)
         invalidate_runtime_cache()
     finally:
         db.close()
@@ -385,7 +709,7 @@ async def update_password(
 
 
 @app.get("/api/hosts", response_model=List[HostResponse])
-async def get_hosts(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_hosts(current_user: Optional[User] = Depends(get_optional_current_user), db: Session = Depends(get_db)):
     return db.query(Host).order_by(Host.id.asc()).all()
 
 
@@ -395,7 +719,21 @@ async def create_host(host: HostCreate, current_user: User = Depends(get_current
     if existing:
         raise HTTPException(status_code=400, detail="主机名称已存在")
 
-    db_host = Host(**host.dict())
+    db_host = Host(
+        name=host.name,
+        address=host.address,
+        description=host.description,
+        alert_threshold=host.alert_threshold,
+    )
+
+    # 自动解析IP地址
+    apply_manual_location_fields(db_host, host.dict())
+    db_host.resolved_ip = resolve_host_ip(db_host.address)
+
+    # 自动获取地理位置
+    if db_host.resolved_ip and (not host_has_any_location(db_host) or host_needs_location_completion(db_host)):
+        await sync_host_location_from_ip(db_host, overwrite_existing=False)
+
     db.add(db_host)
     db.commit()
     db.refresh(db_host)
@@ -436,8 +774,20 @@ async def update_host(
         if existing:
             raise HTTPException(status_code=400, detail="主机名称已存在")
 
+    address_changed = "address" in update_data and update_data["address"] != host.address
+    location_fields_updated = any(field in update_data for field in LOCATION_FIELDS)
+
     for key, value in update_data.items():
         setattr(host, key, value)
+
+    if location_fields_updated:
+        host.location_status = "success" if host_has_any_location(host) else "pending"
+
+    if address_changed:
+        host.resolved_ip = resolve_host_ip(host.address)
+
+    if host.resolved_ip and (address_changed or location_fields_updated or host_needs_location_completion(host)):
+        await sync_host_location_from_ip(host, overwrite_existing=False)
 
     db.commit()
     db.refresh(host)
@@ -479,6 +829,105 @@ async def delete_host(host_id: int, current_user: User = Depends(get_current_use
     return {"message": "删除成功"}
 
 
+@app.post("/api/hosts/{host_id}/refresh-location")
+async def refresh_host_location(
+    host_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """手动刷新主机地理位置"""
+    host = db.query(Host).filter(Host.id == host_id).first()
+    if not host:
+        raise HTTPException(status_code=404, detail="主机不存在")
+
+    # 解析域名为IP地址
+    address = host.address
+    logger.info(f"开始刷新主机 {host.name} ({address}) 的地理位置")
+
+    try:
+        # 尝试解析域名
+        ip_address = resolve_host_ip(address)
+        logger.info(f"域名 {address} 解析为 IP: {ip_address}")
+    except Exception as e:
+        # 如果解析失败，假设已经是IP地址
+        logger.warning(f"域名解析失败: {e}，假设 {address} 已经是IP地址")
+        ip_address = address
+
+    host.resolved_ip = ip_address
+
+    # 获取地理位置
+    logger.info(f"正在获取 {ip_address} 的地理位置...")
+    location = await sync_host_location_from_ip(
+        host,
+        force_refresh=True,
+        overwrite_existing=True,
+    )
+    logger.info(f"地理位置获取结果: {location}")
+
+    # 更新主机信息
+
+    db.commit()
+    db.refresh(host)
+
+    invalidate_runtime_cache()
+
+    return {
+        "message": "地理位置刷新成功",
+        "location": {
+            "country": host.country,
+            "province": host.province,
+            "city": host.city,
+            "isp": host.isp,
+            "status": host.location_status,
+            "error": location.get("error"),
+        }
+    }
+
+
+@app.post("/api/hosts/{host_id}/refresh-ip")
+async def refresh_host_ip(
+    host_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """手动刷新主机IP地址"""
+    host = db.query(Host).filter(Host.id == host_id).first()
+    if not host:
+        raise HTTPException(status_code=404, detail="主机不存在")
+
+    logger.info(f"开始刷新主机 {host.name} ({host.address}) 的IP地址")
+
+    # DNS解析域名为IP
+    try:
+        resolved_ip = resolve_host_ip(host.address)
+        host.resolved_ip = resolved_ip
+        config = get_or_create_system_config(db)
+        if host.resolved_ip and (config.auto_refresh_location or host_needs_location_completion(host)):
+            await sync_host_location_from_ip(
+                host,
+                force_refresh=bool(config.auto_refresh_location),
+                overwrite_existing=bool(config.auto_refresh_location),
+            )
+        db.commit()
+        db.refresh(host)
+
+        invalidate_runtime_cache()
+
+        logger.info(f"成功解析 {host.address} 为 IP: {resolved_ip}")
+        return {
+            "message": "IP地址刷新成功",
+            "resolved_ip": resolved_ip,
+            "location_status": host.location_status,
+        }
+    except Exception as e:
+        logger.error(f"解析 {host.address} 失败: {e}")
+        return {
+            "message": "IP地址解析失败",
+            "error": str(e),
+            "resolved_ip": None
+        }
+
+
 @app.post("/api/ping/{host_id}")
 async def ping_now(
     host_id: int,
@@ -494,7 +943,7 @@ async def ping_now(
     packet_count, packet_timeout = get_runtime_ping_settings(db)
 
     if background and background_tasks:
-        background_tasks.add_task(run_ping_task, host.id, host.address, packet_count, packet_timeout)
+        background_tasks.add_task(run_ping_task, host.id, packet_count, packet_timeout)
         return {
             "message": "Ping 任务已启动",
             "host": host.name,
@@ -503,8 +952,16 @@ async def ping_now(
 
     result = PingService.ping_host(host.address, count=packet_count, timeout=packet_timeout)
     persist_ping_record(db, host.id, result)
+    config = get_or_create_system_config(db)
+    await maybe_sync_host_location_after_ping(db, host, config=config)
     invalidate_runtime_cache()
-    return {"host": host.name, "address": host.address, **result}
+    return {
+        "host": host.name,
+        "address": host.address,
+        "resolved_ip": host.resolved_ip,
+        "location_status": host.location_status,
+        **result,
+    }
 
 
 @app.get("/api/ping-stream/{host_id}")
@@ -548,6 +1005,10 @@ async def ping_stream(host_id: int, token: str, db: Session = Depends(get_db)):
                         "avg_rtt": summary_event["avg_rtt"],
                     },
                 )
+                stream_host = stream_db.query(Host).filter(Host.id == host_id).first()
+                if stream_host:
+                    config = get_or_create_system_config(stream_db)
+                    await maybe_sync_host_location_after_ping(stream_db, stream_host, config=config)
                 invalidate_runtime_cache()
         except Exception as exc:
             logger.error("流式 Ping 失败: %s", exc)
@@ -574,7 +1035,7 @@ async def ping_all(background_tasks: BackgroundTasks, current_user: User = Depen
 
     packet_count, packet_timeout = get_runtime_ping_settings(db)
     for host in hosts:
-        background_tasks.add_task(run_ping_task, host.id, host.address, packet_count, packet_timeout)
+        background_tasks.add_task(run_ping_task, host.id, packet_count, packet_timeout)
 
     return {
         "message": f"已启动 {len(hosts)} 个主机的 Ping 任务",
@@ -624,11 +1085,32 @@ async def get_alerts(
     hours: int = 24,
     page: int = 1,
     page_size: int = 20,
-    current_user: User = Depends(get_current_user),
+    keyword: Optional[str] = None,
+    alert_type: Optional[str] = None,
+    sent_status: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     since = datetime.now() - timedelta(hours=hours)
     query = db.query(Alert).filter(Alert.created_at >= since)
+
+    if keyword:
+        search = f"%{keyword.strip()}%"
+        query = query.filter(
+            or_(
+                Alert.host_name.ilike(search),
+                Alert.message.ilike(search),
+            )
+        )
+
+    if alert_type:
+        query = query.filter(Alert.alert_type == alert_type)
+
+    if sent_status == "sent":
+        query = query.filter(Alert.is_sent.is_(True))
+    elif sent_status == "unsent":
+        query = query.filter(Alert.is_sent.is_(False))
+
     total = query.count()
     items = (
         query.order_by(Alert.created_at.desc(), Alert.id.desc())
@@ -640,7 +1122,7 @@ async def get_alerts(
 
 
 @app.get("/api/dashboard")
-async def get_dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_dashboard(current_user: Optional[User] = Depends(get_optional_current_user), db: Session = Depends(get_db)):
     return cache_get_or_set(
         "dashboard",
         ["summary"],
@@ -654,7 +1136,7 @@ async def get_databoard_stats(
     time_range: str,
     sort_by: str = "avg_packet_loss",
     sort_order: str = "desc",
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     return cache_get_or_set(
@@ -816,16 +1298,32 @@ async def send_report(
 async def get_system_logs(
     log_type: Optional[str] = None,
     module: Optional[str] = None,
+    keyword: Optional[str] = None,
+    hours: Optional[int] = None,
     page: int = 1,
     page_size: int = 50,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     query = db.query(SystemLog)
+
+    if hours:
+        since = datetime.now() - timedelta(hours=hours)
+        query = query.filter(SystemLog.created_at >= since)
+
     if log_type:
         query = query.filter(SystemLog.log_type == log_type)
     if module:
         query = query.filter(SystemLog.module == module)
+    if keyword:
+        search = f"%{keyword.strip()}%"
+        query = query.filter(
+            or_(
+                SystemLog.message.ilike(search),
+                SystemLog.details.ilike(search),
+                SystemLog.module.ilike(search),
+            )
+        )
 
     total = query.count()
     items = (
@@ -917,6 +1415,137 @@ async def trigger_data_cleanup(
         days = config.data_retention_days
     background_tasks.add_task(do_data_cleanup, days)
     return {"message": f"数据清理任务已启动（保留 {days} 天）"}
+
+
+# ==================== 游客专用 API（无需认证） ====================
+
+@app.get("/api/public/datascreen/status")
+async def get_public_datascreen_status(db: Session = Depends(get_db)):
+    screen_config = get_or_create_datascreen_config(db)
+    return {"enabled": screen_config.public_enabled}
+
+
+@app.get("/api/public/datascreen")
+async def get_public_datascreen(db: Session = Depends(get_db)):
+    screen_config = get_or_create_datascreen_config(db)
+    ensure_public_datascreen_enabled(screen_config)
+
+    return cache_get_or_set(
+        "datascreen_payload",
+        ["data"],
+        screen_config.refresh_interval,
+        lambda: build_datascreen_payload(db, screen_config),
+    )
+
+
+@app.get("/api/public/alerts")
+async def get_public_alerts(hours: int = 24, limit: int = 50, db: Session = Depends(get_db)):
+    screen_config = get_or_create_datascreen_config(db)
+    ensure_public_datascreen_enabled(screen_config)
+
+    since = datetime.now() - timedelta(hours=hours)
+    items = (
+        db.query(Alert)
+        .filter(Alert.created_at >= since)
+        .order_by(Alert.created_at.desc(), Alert.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return {"items": items, "total": len(items)}
+
+
+@app.get("/api/datascreen/preview")
+async def get_datascreen_preview(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    screen_config = get_or_create_datascreen_config(db)
+    return cache_get_or_set(
+        "datascreen_payload",
+        ["data"],
+        screen_config.refresh_interval,
+        lambda: build_datascreen_payload(db, screen_config),
+    )
+
+
+# ==================== 可视化配置管理接口 ====================
+
+class DataScreenConfigUpdate(BaseModel):
+    refresh_interval: Optional[int] = None
+    enable_3d: Optional[bool] = None
+    enable_animation: Optional[bool] = None
+    map_view_angle: Optional[int] = None
+    particle_count: Optional[int] = None
+    show_flow_lines: Optional[bool] = None
+    theme_color: Optional[str] = None
+    public_enabled: Optional[bool] = None
+
+
+class DataScreenConfigResponse(BaseModel):
+    id: int
+    refresh_interval: int
+    enable_3d: bool
+    enable_animation: bool
+    map_view_angle: int
+    particle_count: int
+    show_flow_lines: bool
+    theme_color: str
+    public_enabled: bool
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+@app.get("/api/datascreen/config", response_model=DataScreenConfigResponse)
+async def get_datascreen_config(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return get_or_create_datascreen_config(db)
+
+
+@app.put("/api/datascreen/config", response_model=DataScreenConfigResponse)
+async def update_datascreen_config(
+    config_update: DataScreenConfigUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = get_or_create_datascreen_config(db)
+
+    if config_update.refresh_interval is not None:
+        if config_update.refresh_interval < 1 or config_update.refresh_interval > 60:
+            raise HTTPException(status_code=400, detail="刷新间隔必须在 1-60 秒之间")
+        config.refresh_interval = config_update.refresh_interval
+
+    if config_update.enable_3d is not None:
+        config.enable_3d = config_update.enable_3d
+
+    if config_update.enable_animation is not None:
+        config.enable_animation = config_update.enable_animation
+
+    if config_update.map_view_angle is not None:
+        if config_update.map_view_angle < 0 or config_update.map_view_angle > 90:
+            raise HTTPException(status_code=400, detail="地图视角必须在 0-90 度之间")
+        config.map_view_angle = config_update.map_view_angle
+
+    if config_update.particle_count is not None:
+        if config_update.particle_count < 0 or config_update.particle_count > 1000:
+            raise HTTPException(status_code=400, detail="粒子数量必须在 0-1000 之间")
+        config.particle_count = config_update.particle_count
+
+    if config_update.show_flow_lines is not None:
+        config.show_flow_lines = config_update.show_flow_lines
+
+    if config_update.theme_color is not None:
+        if config_update.theme_color not in ["blue", "green", "purple", "red", "orange"]:
+            raise HTTPException(status_code=400, detail="主题色必须是 blue/green/purple/red/orange 之一")
+        config.theme_color = config_update.theme_color
+
+    if config_update.public_enabled is not None:
+        config.public_enabled = config_update.public_enabled
+
+    config.updated_at = datetime.now()
+    db.commit()
+    db.refresh(config)
+
+    cache_manager.invalidate_namespace("datascreen_payload")
+
+    return config
 
 
 frontend_dist = settings.frontend_dist

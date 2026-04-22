@@ -44,6 +44,19 @@
                   </div>
                 </div>
               </el-form-item>
+              <el-form-item label="地理位置自动刷新">
+                <div style="display: flex; flex-direction: column; width: 100%">
+                  <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                    <el-switch v-model="config.auto_refresh_location" />
+                    <span style="color: #606266">
+                      {{ config.auto_refresh_location ? '已开启：每次 Ping / 监控都尝试刷新位置' : '已关闭：仅在位置信息为空时自动补全' }}
+                    </span>
+                  </div>
+                  <div style="color: #909399; font-size: 12px; margin-top: 8px">
+                    开启后，每次监控或手动 Ping 都会尝试刷新地理位置；关闭后保留已有位置，只对空白位置自动补全。
+                  </div>
+                </div>
+              </el-form-item>
             </el-form>
           </el-card>
         </el-col>
@@ -108,222 +121,217 @@
         </el-col>
       </el-row>
 
-      <el-card shadow="hover" style="margin-bottom: 20px">
-        <template #header>
-          <span style="font-weight: bold">告警通知配置</span>
-        </template>
-        <el-form :model="config" label-width="150px" style="max-width: 600px">
-          <el-form-item label="告警平台">
-            <el-select v-model="notificationPlatform" placeholder="选择告警平台" style="width: 100%">
-              <el-option label="不启用" value="none" />
-              <el-option label="Server酱" value="serverchan" />
-              <el-option label="钉钉机器人" value="dingtalk" />
-              <el-option label="企业微信机器人" value="weixin" />
-            </el-select>
-          </el-form-item>
-          
-          <el-form-item label="通知模式">
-            <el-radio-group v-model="config.notification_mode">
-              <el-radio label="status_change">状态转换时通知</el-radio>
-              <el-radio label="every_time">每次异常都通知</el-radio>
-            </el-radio-group>
-            <div style="color: #909399; font-size: 12px; margin-top: 5px">
-              状态转换：仅在正常↔异常转换时通知；每次异常：每次检测到异常都发送通知
-            </div>
-          </el-form-item>
+      <el-row :gutter="20" class="settings-dual-card-row">
+        <el-col :xs="24" :lg="12">
+          <el-card shadow="hover" class="settings-dual-card">
+            <template #header>
+              <span style="font-weight: bold">告警通知配置</span>
+            </template>
+            <el-form :model="config" label-width="150px" class="settings-dual-form">
+              <el-form-item label="告警平台">
+                <el-select v-model="notificationPlatform" placeholder="选择告警平台" style="width: 100%">
+                  <el-option label="不启用" value="none" />
+                  <el-option label="Server酱" value="serverchan" />
+                  <el-option label="钉钉机器人" value="dingtalk" />
+                  <el-option label="企业微信机器人" value="weixin" />
+                </el-select>
+              </el-form-item>
+              
+              <el-form-item label="通知模式">
+                <el-radio-group v-model="config.notification_mode">
+                  <el-radio label="status_change">状态转换时通知</el-radio>
+                  <el-radio label="every_time">每次异常都通知</el-radio>
+                </el-radio-group>
+                <div style="color: #909399; font-size: 12px; margin-top: 5px">
+                  状态转换：仅在正常↔异常转换时通知；每次异常：每次检测到异常都发送通知
+                </div>
+              </el-form-item>
 
-          <!-- Server酱配置 -->
-          <template v-if="notificationPlatform === 'serverchan'">
-            <el-form-item label="Server酱密钥">
-              <el-input 
-                v-model="config.serverchan_key" 
-                placeholder="请输入Server酱SendKey" 
-                clearable
-              />
-              <div style="color: #909399; font-size: 12px; margin-top: 5px">
-                获取地址: <a href="https://sct.ftqq.com" target="_blank">https://sct.ftqq.com</a>
-              </div>
-            </el-form-item>
-          </template>
+              <!-- Server酱配置 -->
+              <template v-if="notificationPlatform === 'serverchan'">
+                <el-form-item label="Server酱密钥">
+                  <el-input 
+                    v-model="config.serverchan_key" 
+                    placeholder="请输入Server酱SendKey" 
+                    clearable
+                  />
+                  <div style="color: #909399; font-size: 12px; margin-top: 5px">
+                    获取地址: <a href="https://sct.ftqq.com" target="_blank">https://sct.ftqq.com</a>
+                  </div>
+                </el-form-item>
+              </template>
 
-          <!-- 钉钉配置 -->
-          <template v-if="notificationPlatform === 'dingtalk'">
-            <el-form-item label="Webhook地址">
-              <el-input 
-                v-model="config.webhook_url" 
-                placeholder="告警钉钉机器人 Webhook URL" 
-                clearable
-              />
-            </el-form-item>
-            <el-form-item label="加签密钥">
-              <el-input 
-                v-model="config.webhook_secret" 
-                placeholder="告警机器人加签密钥(可选)" 
-                clearable
-              />
-              <div style="color: #909399; font-size: 12px; margin-top: 5px">
-                安全设置为“加签”时填写，以SEC开头
-              </div>
-            </el-form-item>
-          </template>
+              <!-- 钉钉配置 -->
+              <template v-if="notificationPlatform === 'dingtalk'">
+                <el-form-item label="Webhook地址">
+                  <el-input 
+                    v-model="config.webhook_url" 
+                    placeholder="告警钉钉机器人 Webhook URL" 
+                    clearable
+                  />
+                </el-form-item>
+                <el-form-item label="加签密钥">
+                  <el-input 
+                    v-model="config.webhook_secret" 
+                    placeholder="告警机器人加签密钥(可选)" 
+                    clearable
+                  />
+                  <div style="color: #909399; font-size: 12px; margin-top: 5px">
+                    安全设置为“加签”时填写，以SEC开头
+                  </div>
+                </el-form-item>
+              </template>
 
-          <!-- 企业微信配置 -->
-          <template v-if="notificationPlatform === 'weixin'">
-            <el-form-item label="Webhook地址">
-              <el-input 
-                v-model="config.webhook_url" 
-                placeholder="企业微信机器人 Webhook URL" 
-                clearable
-              />
-            </el-form-item>
-          </template>
+              <!-- 企业微信配置 -->
+              <template v-if="notificationPlatform === 'weixin'">
+                <el-form-item label="Webhook地址">
+                  <el-input 
+                    v-model="config.webhook_url" 
+                    placeholder="企业微信机器人 Webhook URL" 
+                    clearable
+                  />
+                </el-form-item>
+              </template>
 
-          <!-- 测试按钮 -->
-          <el-form-item v-if="notificationPlatform !== 'none'">
-            <el-button 
-              type="success" 
-              @click="testNotification" 
-              :loading="testingNotification"
-              :disabled="!canTestNotification"
-            >
-              <el-icon><Bell /></el-icon> 测试告警通知
-            </el-button>
-          </el-form-item>
-
-          <el-form-item>
-            <el-button type="primary" @click="saveConfig" :loading="saving">
-              <el-icon><Select /></el-icon> 保存配置
-            </el-button>
-            <el-button @click="loadConfig">
-              <el-icon><Refresh /></el-icon> 重置
-            </el-button>
-          </el-form-item>
-        </el-form>
-      </el-card>
-
-      <el-card shadow="hover">
-        <template #header>
-          <span style="font-weight: bold">报表通知配置（钉钉）</span>
-        </template>
-        <el-form :model="config" label-width="150px" style="max-width: 700px">
-          <div
-            style="
-              margin: 0 0 20px 150px;
-              padding: 12px 14px;
-              background: #f5f7fa;
-              border-radius: 8px;
-              color: #606266;
-              font-size: 12px;
-              line-height: 1.7;
-            "
-          >
-            报表机器人与告警机器人完全分离，适合把日报、周报、月报发到单独群里。日报统计上一自然日并对比前一日，周报统计上一自然周并对比再前一周，月报统计上一自然月并对比再前一月。
-          </div>
-
-          <el-form-item label="报表Webhook地址">
-            <el-input
-              v-model="config.report_webhook_url"
-              placeholder="报表专用钉钉机器人 Webhook URL"
-              clearable
-            />
-          </el-form-item>
-
-          <el-form-item label="报表加签密钥">
-            <el-input
-              v-model="config.report_webhook_secret"
-              placeholder="报表机器人加签密钥(可选)"
-              clearable
-            />
-            <div style="color: #909399; font-size: 12px; margin-top: 5px">
-              建议新建一个专门收报表的钉钉机器人，避免和实时告警混在一起
-            </div>
-          </el-form-item>
-
-          <el-form-item label="日报">
-            <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
-              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
-                <el-switch v-model="config.daily_report_enabled" />
-                <span style="color: #606266">每日发送</span>
-                <el-time-select
-                  v-model="config.daily_report_time"
-                  start="00:00"
-                  step="00:30"
-                  end="23:30"
-                  placeholder="发送时间"
-                  style="width: 150px"
-                  :disabled="!config.daily_report_enabled"
-                />
-                <el-button
-                  link
-                  type="primary"
-                  @click="sendReport('daily')"
-                  :loading="sendingReportType === 'daily'"
-                  :disabled="!canSendDingTalkReport"
+              <!-- 测试按钮 -->
+              <el-form-item v-if="notificationPlatform !== 'none'">
+                <el-button 
+                  type="success" 
+                  @click="testNotification" 
+                  :loading="testingNotification"
+                  :disabled="!canTestNotification"
                 >
-                  立即发送
+                  <el-icon><Bell /></el-icon> 测试告警通知
                 </el-button>
-              </div>
-              <div style="color: #909399; font-size: 12px">默认发送昨日数据，对比前一日</div>
-            </div>
-          </el-form-item>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-col>
 
-          <el-form-item label="周报">
-            <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
-              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
-                <el-switch v-model="config.weekly_report_enabled" />
-                <span style="color: #606266">每周一发送</span>
-                <el-time-select
-                  v-model="config.weekly_report_time"
-                  start="00:00"
-                  step="00:30"
-                  end="23:30"
-                  placeholder="发送时间"
-                  style="width: 150px"
-                  :disabled="!config.weekly_report_enabled"
-                />
-                <el-button
-                  link
-                  type="primary"
-                  @click="sendReport('weekly')"
-                  :loading="sendingReportType === 'weekly'"
-                  :disabled="!canSendDingTalkReport"
-                >
-                  立即发送
-                </el-button>
-              </div>
-              <div style="color: #909399; font-size: 12px">固定汇总上周数据，对比再前一周</div>
+        <el-col :xs="24" :lg="12">
+          <el-card shadow="hover" class="settings-dual-card">
+            <template #header>
+              <span style="font-weight: bold">报表通知配置（钉钉）</span>
+            </template>
+            <div class="report-config-intro">
+              报表机器人与告警机器人完全分离，适合把日报、周报、月报发到单独群里。日报统计上一自然日并对比前一日，周报统计上一自然周并对比再前一周，月报统计上一自然月并对比再前一月。
             </div>
-          </el-form-item>
+            <el-form :model="config" label-width="150px" class="settings-dual-form">
+              <el-form-item label="报表Webhook地址">
+                <el-input
+                  v-model="config.report_webhook_url"
+                  placeholder="报表专用钉钉机器人 Webhook URL"
+                  clearable
+                />
+              </el-form-item>
 
-          <el-form-item label="月报">
-            <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
-              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
-                <el-switch v-model="config.monthly_report_enabled" />
-                <span style="color: #606266">每月 1 日发送</span>
-                <el-time-select
-                  v-model="config.monthly_report_time"
-                  start="00:00"
-                  step="00:30"
-                  end="23:30"
-                  placeholder="发送时间"
-                  style="width: 150px"
-                  :disabled="!config.monthly_report_enabled"
+              <el-form-item label="报表加签密钥">
+                <el-input
+                  v-model="config.report_webhook_secret"
+                  placeholder="报表机器人加签密钥(可选)"
+                  clearable
                 />
-                <el-button
-                  link
-                  type="primary"
-                  @click="sendReport('monthly')"
-                  :loading="sendingReportType === 'monthly'"
-                  :disabled="!canSendDingTalkReport"
-                >
-                  立即发送
-                </el-button>
-              </div>
-              <div style="color: #909399; font-size: 12px">固定汇总上月数据，对比再前一月</div>
-            </div>
-          </el-form-item>
-        </el-form>
-      </el-card>
+                <div style="color: #909399; font-size: 12px; margin-top: 5px">
+                  建议新建一个专门收报表的钉钉机器人，避免和实时告警混在一起
+                </div>
+              </el-form-item>
+
+              <el-form-item label="日报">
+                <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
+                  <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                    <el-switch v-model="config.daily_report_enabled" />
+                    <span style="color: #606266">每日发送</span>
+                    <el-time-select
+                      v-model="config.daily_report_time"
+                      start="00:00"
+                      step="00:30"
+                      end="23:30"
+                      placeholder="发送时间"
+                      style="width: 150px"
+                      :disabled="!config.daily_report_enabled"
+                    />
+                    <el-button
+                      link
+                      type="primary"
+                      @click="sendReport('daily')"
+                      :loading="sendingReportType === 'daily'"
+                      :disabled="!canSendDingTalkReport"
+                    >
+                      立即发送
+                    </el-button>
+                  </div>
+                  <div style="color: #909399; font-size: 12px">默认发送昨日数据，对比前一日</div>
+                </div>
+              </el-form-item>
+
+              <el-form-item label="周报">
+                <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
+                  <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                    <el-switch v-model="config.weekly_report_enabled" />
+                    <span style="color: #606266">每周一发送</span>
+                    <el-time-select
+                      v-model="config.weekly_report_time"
+                      start="00:00"
+                      step="00:30"
+                      end="23:30"
+                      placeholder="发送时间"
+                      style="width: 150px"
+                      :disabled="!config.weekly_report_enabled"
+                    />
+                    <el-button
+                      link
+                      type="primary"
+                      @click="sendReport('weekly')"
+                      :loading="sendingReportType === 'weekly'"
+                      :disabled="!canSendDingTalkReport"
+                    >
+                      立即发送
+                    </el-button>
+                  </div>
+                  <div style="color: #909399; font-size: 12px">固定汇总上周数据，对比再前一周</div>
+                </div>
+              </el-form-item>
+
+              <el-form-item label="月报">
+                <div style="display: flex; flex-direction: column; width: 100%; gap: 8px">
+                  <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+                    <el-switch v-model="config.monthly_report_enabled" />
+                    <span style="color: #606266">每月 1 日发送</span>
+                    <el-time-select
+                      v-model="config.monthly_report_time"
+                      start="00:00"
+                      step="00:30"
+                      end="23:30"
+                      placeholder="发送时间"
+                      style="width: 150px"
+                      :disabled="!config.monthly_report_enabled"
+                    />
+                    <el-button
+                      link
+                      type="primary"
+                      @click="sendReport('monthly')"
+                      :loading="sendingReportType === 'monthly'"
+                      :disabled="!canSendDingTalkReport"
+                    >
+                      立即发送
+                    </el-button>
+                  </div>
+                  <div style="color: #909399; font-size: 12px">固定汇总上月数据，对比再前一月</div>
+                </div>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <div class="settings-dual-actions">
+        <el-button type="primary" @click="saveConfig" :loading="saving">
+          <el-icon><Select /></el-icon> 保存配置
+        </el-button>
+        <el-button @click="loadConfig">
+          <el-icon><Refresh /></el-icon> 重置
+        </el-button>
+      </div>
     </div>
 
     <!-- Ping日志 -->
@@ -467,6 +475,7 @@ const config = reactive({
   cleanup_time: '03:00',
   aggregate_interval: 1,
   dashboard_chart_points: 12,
+  auto_refresh_location: false,
   daily_report_enabled: false,
   daily_report_time: '09:00',
   weekly_report_enabled: false,
@@ -527,6 +536,7 @@ const saveConfig = async () => {
       cleanup_time: config.cleanup_time,
       aggregate_interval: config.aggregate_interval,
       dashboard_chart_points: config.dashboard_chart_points,
+      auto_refresh_location: config.auto_refresh_location,
       report_webhook_url: config.report_webhook_url,
       report_webhook_secret: config.report_webhook_secret,
       daily_report_enabled: config.daily_report_enabled,
@@ -673,3 +683,53 @@ onMounted(() => {
   }
 })
 </script>
+
+<style scoped>
+.settings-dual-card-row {
+  margin-bottom: 20px;
+}
+
+.settings-dual-card {
+  height: 100%;
+}
+
+.settings-dual-form {
+  max-width: 100%;
+}
+
+.report-config-intro {
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  background: #f5f7fa;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.settings-dual-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1439px) {
+  .settings-dual-card-row {
+    margin-bottom: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .settings-dual-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .settings-dual-actions :deep(.el-button) {
+    flex: 1 1 auto;
+    margin-left: 0;
+  }
+}
+</style>

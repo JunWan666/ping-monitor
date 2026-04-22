@@ -13,6 +13,10 @@
           active-text-color="#ffd04b"
           @select="handleMenuSelect"
         >
+          <el-menu-item index="datascreen">
+            <el-icon><DataAnalysis /></el-icon>
+            <span>可视化大屏</span>
+          </el-menu-item>
           <el-menu-item index="dashboard">
             <el-icon><Monitor /></el-icon>
             <span>仪表盘</span>
@@ -37,6 +41,9 @@
             <el-menu-item index="settings-basic">
               <span>基本设置</span>
             </el-menu-item>
+            <el-menu-item index="settings-datascreen">
+              <span>可视化设置</span>
+            </el-menu-item>
             <el-menu-item index="settings-logs">
               <span>Ping日志</span>
             </el-menu-item>
@@ -57,7 +64,12 @@
           <el-button type="danger" size="small" @click="handleLogout">退出登录</el-button>
         </el-header>
         <el-main style="overflow-y: auto">
-          <KeepAlive :max="6">
+          <iframe
+            v-if="activeMenu === 'datascreen'"
+            src="/datascreen-preview"
+            style="width: 100%; height: 100%; border: none;"
+          ></iframe>
+          <KeepAlive :max="6" v-else>
             <component
               :is="currentComponent"
               :key="currentComponentKey"
@@ -70,27 +82,31 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { defineAsyncPage } from '../lib/asyncLoader'
 
-const Dashboard = defineAsyncComponent(() => import('./Dashboard.vue'))
-const DataBoard = defineAsyncComponent(() => import('./DataBoard.vue'))
-const HostManage = defineAsyncComponent(() => import('./HostManage.vue'))
-const AlertList = defineAsyncComponent(() => import('./AlertList.vue'))
-const Settings = defineAsyncComponent(() => import('./Settings.vue'))
-const UserProfile = defineAsyncComponent(() => import('./UserProfile.vue'))
-const SystemLogs = defineAsyncComponent(() => import('./SystemLogs.vue'))
+const Dashboard = defineAsyncPage(() => import('./Dashboard.vue'))
+const DataBoard = defineAsyncPage(() => import('./DataBoard.vue'))
+const HostManage = defineAsyncPage(() => import('./HostManage.vue'))
+const AlertList = defineAsyncPage(() => import('./AlertList.vue'))
+const Settings = defineAsyncPage(() => import('./Settings.vue'))
+const DataScreenSettings = defineAsyncPage(() => import('./DataScreenSettings.vue'))
+const UserProfile = defineAsyncPage(() => import('./UserProfile.vue'))
+const SystemLogs = defineAsyncPage(() => import('./SystemLogs.vue'))
 
 const router = useRouter()
 const activeMenu = ref('dashboard')
 
 const menuTitles = {
+  datascreen: '可视化大屏',
   dashboard: '监控仪表盘',
   databoard: '数据看板',
   hosts: '主机管理',
   alerts: '告警记录',
   'settings-basic': '系统设置 - 基本设置',
+  'settings-datascreen': '系统设置 - 可视化设置',
   'settings-logs': '系统设置 - Ping日志',
   'settings-system-logs': '系统设置 - 系统日志',
   'settings-profile': '系统设置 - 修改密码'
@@ -99,8 +115,16 @@ const menuTitles = {
 const menuTitle = ref(menuTitles.dashboard)
 
 const currentComponent = computed(() => {
+  if (activeMenu.value === 'datascreen') {
+    return null // 使用iframe显示
+  }
+
   if (activeMenu.value === 'settings-profile') {
     return UserProfile
+  }
+
+  if (activeMenu.value === 'settings-datascreen') {
+    return DataScreenSettings
   }
 
   if (activeMenu.value === 'settings-system-logs') {
@@ -139,9 +163,20 @@ const currentComponentProps = computed(() => {
   return {}
 })
 
-const handleMenuSelect = (key) => {
+const openMenu = (key) => {
   activeMenu.value = key
   menuTitle.value = menuTitles[key]
+}
+
+const handleMenuSelect = (key) => {
+  openMenu(key)
+}
+
+const handleNavigateEvent = (event) => {
+  const targetMenu = event?.detail?.menu
+  if (targetMenu && menuTitles[targetMenu]) {
+    openMenu(targetMenu)
+  }
 }
 
 const handleLogout = async () => {
@@ -160,6 +195,14 @@ const handleLogout = async () => {
     // 用户取消
   }
 }
+
+onMounted(() => {
+  window.addEventListener('ping-monitor:navigate', handleNavigateEvent)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('ping-monitor:navigate', handleNavigateEvent)
+})
 </script>
 
 <style scoped>

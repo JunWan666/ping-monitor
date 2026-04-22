@@ -86,7 +86,7 @@
           <div style="display: flex; align-items: center; gap: 10px">
             <el-input 
               v-model="searchKeyword" 
-              placeholder="搜索主机名称或地址" 
+              placeholder="搜索主机名称、地址、IP 或地区" 
               clearable
               style="width: 280px"
             >
@@ -109,6 +109,9 @@
             <el-button type="primary" size="small" @click="loadData" :loading="loading">
               <el-icon><Refresh /></el-icon> 刷新
             </el-button>
+            <el-button size="small" @click="goToHostManage">
+              主机管理
+            </el-button>
           </div>
         </div>
       </template>
@@ -122,19 +125,39 @@
         <el-table-column prop="name" label="主机名称" width="150" align="center" header-align="center" />
         <el-table-column label="地址" width="200" align="center" header-align="center">
           <template #default="{ row }">
-            <span 
-              @click="copyAddress(row.address)" 
+            <span
+              @click="copyAddress(row.address)"
               style="cursor: pointer; color: #409eff; text-decoration: underline"
               :title="'点击复制: ' + row.address"
             >
               {{ row.address }}
             </span>
-            <el-icon 
-              @click="copyAddress(row.address)" 
+            <el-icon
+              @click="copyAddress(row.address)"
               style="margin-left: 5px; cursor: pointer; color: #409eff"
               :title="'复制地址'"
             >
               <CopyDocument />
+            </el-icon>
+          </template>
+        </el-table-column>
+        <el-table-column label="IP地址" width="180" align="center" header-align="center">
+          <template #default="{ row }">
+            <span
+              v-if="row.resolved_ip"
+              @click="copyAddress(row.resolved_ip)"
+              style="cursor: pointer; color: #409eff; text-decoration: underline"
+              :title="'点击复制: ' + row.resolved_ip"
+            >
+              {{ row.resolved_ip }}
+            </span>
+            <span v-else style="color: #909399">未解析</span>
+            <el-icon
+              @click="refreshIp(row.id, row.name)"
+              style="margin-left: 5px; cursor: pointer; color: #67c23a"
+              :title="'刷新IP地址'"
+            >
+              <Refresh />
             </el-icon>
           </template>
         </el-table-column>
@@ -184,16 +207,36 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column label="地理位置" width="200" align="center" header-align="center">
+          <template #default="{ row }">
+            <div v-if="row.location_status === 'success'" style="display: flex; align-items: center; justify-content: center; gap: 5px">
+              <el-icon style="color: #67c23a"><Location /></el-icon>
+              <span>{{ formatLocation(row) }}</span>
+            </div>
+            <div v-else-if="row.location_status === 'failed'" style="display: flex; align-items: center; justify-content: center; gap: 5px">
+              <el-icon style="color: #f56c6c"><WarningFilled /></el-icon>
+              <span style="color: #909399">获取失败</span>
+            </div>
+            <div v-else style="display: flex; align-items: center; justify-content: center; gap: 5px">
+              <el-icon style="color: #909399"><Loading /></el-icon>
+              <span style="color: #909399">获取中</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="最后检查" min-width="180" align="center" header-align="center">
           <template #default="{ row }">
             <span v-if="row.last_check">{{ formatTime(row.last_check) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" align="center" header-align="center">
+        <el-table-column label="操作" width="290" align="center" header-align="center">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="viewChart(row)">查看图表</el-button>
-            <el-button type="success" size="small" @click="pingHost(row)">立即Ping</el-button>
+            <div style="display: flex; justify-content: center; gap: 6px; flex-wrap: wrap">
+              <el-button type="primary" size="small" @click="viewChart(row)">图表</el-button>
+              <el-button type="success" size="small" @click="pingHost(row)">Ping</el-button>
+              <el-button type="warning" size="small" @click="refreshIp(row.id, row.name)">刷新IP</el-button>
+              <el-button type="info" size="small" @click="refreshLocation(row.id, row.name)">刷新位置</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -223,6 +266,7 @@
 <script setup>
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Refresh, Location, WarningFilled, Loading } from '@element-plus/icons-vue'
 import api from '../api'
 import { echarts } from '../lib/echarts'
 
@@ -308,10 +352,19 @@ const filteredAllHosts = computed(() => {
   // 关键字搜索
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase()
-    result = result.filter(host => 
-      host.name.toLowerCase().includes(keyword) || 
-      host.address.toLowerCase().includes(keyword)
-    )
+    result = result.filter(host => {
+      const locationText = [host.country, host.province, host.city, host.isp]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      return (
+        host.name.toLowerCase().includes(keyword) ||
+        host.address.toLowerCase().includes(keyword) ||
+        String(host.resolved_ip || '').toLowerCase().includes(keyword) ||
+        locationText.includes(keyword)
+      )
+    })
   }
   
   // 状态筛选
@@ -645,14 +698,52 @@ const copyAddress = async (address) => {
     textarea.style.opacity = '0'
     document.body.appendChild(textarea)
     textarea.select()
-    try {
-      document.execCommand('copy')
-      ElMessage.success(`复制成功: ${address}`)
-    } catch (err) {
-      ElMessage.error('复制失败，请手动复制')
-    }
+    document.execCommand('copy')
     document.body.removeChild(textarea)
+    ElMessage.success(`复制成功: ${address}`)
   }
+}
+
+const refreshIp = async (hostId, hostName) => {
+  try {
+    const response = await api.refreshHostIp(hostId)
+    if (response.resolved_ip) {
+      ElMessage.success(`${hostName} IP地址刷新成功: ${response.resolved_ip}`)
+    } else {
+      ElMessage.warning(`${hostName} IP地址解析失败`)
+    }
+    await loadData()
+  } catch (error) {
+    console.error('刷新IP地址失败:', error)
+    ElMessage.error(`刷新IP地址失败: ${error.response?.data?.detail || error.message}`)
+  }
+}
+
+const refreshLocation = async (hostId, hostName) => {
+  try {
+    const response = await api.refreshHostLocation(hostId)
+    if (response.location?.status === 'success') {
+      ElMessage.success(`${hostName} 地理位置刷新成功`)
+    } else {
+      ElMessage.warning(`${hostName} 地理位置刷新失败`)
+    }
+    await loadData()
+  } catch (error) {
+    console.error('刷新地理位置失败:', error)
+    ElMessage.error(`${hostName} 地理位置刷新失败`)
+  }
+}
+
+const goToHostManage = () => {
+  window.dispatchEvent(new CustomEvent('ping-monitor:navigate', { detail: { menu: 'hosts' } }))
+}
+
+const formatLocation = (host) => {
+  const parts = []
+  if (host.country) parts.push(host.country)
+  if (host.province) parts.push(host.province)
+  if (host.city) parts.push(host.city)
+  return parts.length > 0 ? parts.join(' ') : '未知'
 }
 
 const viewChart = async (host) => {
