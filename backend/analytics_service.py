@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from data_maintenance import DataMaintenance
@@ -141,78 +141,51 @@ def get_dashboard_payload(db: Session):
     one_hour_ago = datetime.now() - timedelta(hours=1)
     recent_alerts = db.query(func.count(Alert.id)).filter(Alert.created_at >= one_hour_ago).scalar() or 0
 
-    latest_record_subquery = (
-        db.query(
-            PingRecord.host_id.label("host_id"),
-            PingRecord.packet_loss.label("packet_loss"),
-            PingRecord.avg_rtt.label("avg_rtt"),
-            PingRecord.created_at.label("created_at"),
-            func.row_number()
-            .over(
-                partition_by=PingRecord.host_id,
-                order_by=(PingRecord.created_at.desc(), PingRecord.id.desc()),
-            )
-            .label("row_num"),
-        )
-        .subquery()
-    )
-
-    rows = (
-        db.query(
-            Host.id,
-            Host.name,
-            Host.address,
-            Host.enabled,
-            Host.alert_threshold,
-            Host.resolved_ip,
-            Host.country,
-            Host.province,
-            Host.city,
-            Host.isp,
-            Host.latitude,
-            Host.longitude,
-            Host.location_status,
-            latest_record_subquery.c.packet_loss,
-            latest_record_subquery.c.avg_rtt,
-            latest_record_subquery.c.created_at.label("last_check"),
-        )
-        .outerjoin(
-            latest_record_subquery,
-            and_(
-                Host.id == latest_record_subquery.c.host_id,
-                latest_record_subquery.c.row_num == 1,
-            ),
-        )
-        .order_by(Host.id.asc())
-        .all()
+    hosts = db.query(Host).order_by(Host.id.asc()).all()
+    latest_record_map = _get_latest_records_for_hosts(
+        db,
+        [
+            host.id
+            for host in hosts
+            if host.last_check is None or host.last_packet_loss is None
+        ],
     )
 
     host_status = []
-    for row in rows:
-        status_type = get_host_status_type(row.packet_loss, row.alert_threshold)
-        status = get_host_status_label(row.packet_loss, row.alert_threshold)
+    for host in hosts:
+        fallback_record = latest_record_map.get(host.id)
+        packet_loss = host.last_packet_loss
+        avg_rtt = host.last_avg_rtt
+        last_check = host.last_check
+        if fallback_record is not None:
+            packet_loss = fallback_record.packet_loss
+            avg_rtt = fallback_record.avg_rtt
+            last_check = fallback_record.created_at
+
+        status_type = get_host_status_type(packet_loss, host.alert_threshold)
+        status = get_host_status_label(packet_loss, host.alert_threshold)
 
         host_status.append(
             {
-                "id": row.id,
-                "name": row.name,
-                "address": row.address,
-                "enabled": row.enabled,
+                "id": host.id,
+                "name": host.name,
+                "address": host.address,
+                "enabled": host.enabled,
                 "status": status,
                 "status_type": status_type,
-                "is_online": is_host_reachable(row.packet_loss),
-                "is_alerting": is_host_alerting(row.packet_loss, row.alert_threshold),
-                "packet_loss": row.packet_loss,
-                "avg_rtt": row.avg_rtt,
-                "last_check": row.last_check,
-                "resolved_ip": row.resolved_ip,
-                "country": row.country,
-                "province": row.province,
-                "city": row.city,
-                "isp": row.isp,
-                "latitude": row.latitude,
-                "longitude": row.longitude,
-                "location_status": row.location_status,
+                "is_online": is_host_reachable(packet_loss),
+                "is_alerting": is_host_alerting(packet_loss, host.alert_threshold),
+                "packet_loss": packet_loss,
+                "avg_rtt": avg_rtt,
+                "last_check": last_check,
+                "resolved_ip": host.resolved_ip,
+                "country": host.country,
+                "province": host.province,
+                "city": host.city,
+                "isp": host.isp,
+                "latitude": host.latitude,
+                "longitude": host.longitude,
+                "location_status": host.location_status,
             }
         )
 
@@ -222,6 +195,28 @@ def get_dashboard_payload(db: Session):
         "recent_alerts": recent_alerts,
         "host_status": host_status,
     }
+
+
+def _get_latest_records_for_hosts(db: Session, host_ids: List[int]) -> Dict[int, PingRecord]:
+    if not host_ids:
+        return {}
+
+    latest_record_ids = (
+        db.query(
+            PingRecord.host_id.label("host_id"),
+            func.max(PingRecord.id).label("record_id"),
+        )
+        .filter(PingRecord.host_id.in_(host_ids))
+        .group_by(PingRecord.host_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(PingRecord)
+        .join(latest_record_ids, PingRecord.id == latest_record_ids.c.record_id)
+        .all()
+    )
+    return {row.host_id: row for row in rows}
 
 
 def get_databoard_stats_payload(
@@ -272,19 +267,13 @@ def get_databoard_stats_payload(
             .all()
         )
         if stat_rows:
-            online_count_overrides = _build_online_count_overrides(
-                db=db,
-                host_ids=list(host_dict.keys()),
-                since=since,
-                bucket="day" if stat_type == "daily" else "hour",
-            )
             return _build_databoard_from_aggregated(
                 hosts=hosts,
                 stat_rows=stat_rows,
                 time_range=time_range,
                 sort_by=sort_by,
                 sort_order=sort_order,
-                online_count_overrides=online_count_overrides,
+                online_count_overrides={},
             )
 
     record_rows = (

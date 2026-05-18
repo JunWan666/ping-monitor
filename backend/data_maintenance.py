@@ -17,6 +17,59 @@ logger = logging.getLogger(__name__)
 
 class DataMaintenance:
     @staticmethod
+    def backfill_host_latest_metrics() -> None:
+        db = SessionLocal()
+        try:
+            missing_host_ids = [
+                row[0]
+                for row in (
+                    db.query(Host.id)
+                    .filter((Host.last_check.is_(None)) | (Host.last_packet_loss.is_(None)))
+                    .all()
+                )
+            ]
+            if not missing_host_ids:
+                return
+
+            latest_record_ids = (
+                db.query(
+                    PingRecord.host_id.label("host_id"),
+                    func.max(PingRecord.id).label("record_id"),
+                )
+                .filter(PingRecord.host_id.in_(missing_host_ids))
+                .group_by(PingRecord.host_id)
+                .subquery()
+            )
+
+            rows = (
+                db.query(Host, PingRecord)
+                .join(latest_record_ids, Host.id == latest_record_ids.c.host_id)
+                .join(PingRecord, PingRecord.id == latest_record_ids.c.record_id)
+                .filter((Host.last_check.is_(None)) | (Host.last_packet_loss.is_(None)))
+                .all()
+            )
+
+            updated_count = 0
+            for host, record in rows:
+                host.last_packet_loss = record.packet_loss
+                host.last_avg_rtt = record.avg_rtt
+                host.last_check = record.created_at
+                if host.last_status is None:
+                    host.last_status = "abnormal" if record.packet_loss >= host.alert_threshold else "normal"
+                updated_count += 1
+
+            if updated_count:
+                db.commit()
+                cache_manager.invalidate_namespace("dashboard")
+                cache_manager.invalidate_namespace("datascreen_payload")
+                logger.info("Backfilled latest ping metrics for %s hosts", updated_count)
+        except Exception as exc:
+            logger.error("Backfill latest host metrics failed: %s", exc)
+            db.rollback()
+        finally:
+            db.close()
+
+    @staticmethod
     def log_system_event(
         db: Session,
         log_type: str,

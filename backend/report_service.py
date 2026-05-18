@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from app_settings import settings
 from data_maintenance import DataMaintenance
 from database import Alert, Host, PingRecord, PingStatistics, SessionLocal, SystemConfig
 from host_status import ONLINE_PACKET_LOSS_THRESHOLD, is_host_reachable
@@ -61,6 +62,9 @@ class ReportService:
         report_type = cls._normalize_report_type(report_type)
         config = cls._get_or_create_config(db)
         label = REPORT_LABELS[report_type]
+
+        if settings.disable_notifications:
+            raise RuntimeError("Notifications are disabled by DISABLE_NOTIFICATIONS")
 
         if not cls._is_dingtalk_webhook(config.report_webhook_url):
             raise ValueError("请先在报表配置中填写报表专用钉钉机器人 Webhook 地址")

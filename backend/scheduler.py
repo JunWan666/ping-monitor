@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session
 
+from app_settings import settings
 from cache import cache_manager
 from database import Alert, Host, PingRecord, SessionLocal, SystemConfig, get_database_backend
 from ip_location_service import ip_location_service
@@ -366,6 +367,7 @@ class MonitorScheduler:
                 timeout=packet_timeout,
             )
 
+            checked_at = datetime.now()
             record = PingRecord(
                 host_id=host.id,
                 packet_sent=result["packet_sent"],
@@ -374,10 +376,9 @@ class MonitorScheduler:
                 min_rtt=result["min_rtt"],
                 max_rtt=result["max_rtt"],
                 avg_rtt=result["avg_rtt"],
-                created_at=datetime.now(),
+                created_at=checked_at,
             )
             db.add(record)
-            db.commit()
 
             current_status = "normal"
             if result["status"] == "unreachable" or result["packet_loss"] >= host.alert_threshold:
@@ -394,6 +395,9 @@ class MonitorScheduler:
             elif notification_mode == "every_time" and current_status == "abnormal":
                 should_alert = True
 
+            host.last_packet_loss = result["packet_loss"]
+            host.last_avg_rtt = result["avg_rtt"]
+            host.last_check = checked_at
             host.last_status = current_status
             db.commit()
 
@@ -497,6 +501,10 @@ class MonitorScheduler:
         thread.start()
 
     def _do_send_notification(self, alert_id: int, message: str, alert_type: str, title: str | None = None) -> None:
+        if settings.disable_notifications:
+            logger.info("Notifications disabled by DISABLE_NOTIFICATIONS, skip alert notification")
+            return
+
         db = SessionLocal()
         try:
             from notification import notifier

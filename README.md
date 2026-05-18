@@ -1,6 +1,37 @@
-# Ping 监控系统
+<div align="center">
 
-基于 `FastAPI + Vue 3 + Element Plus + ECharts` 的主机连通性监控系统，支持 `Ping` 检测、告警通知、地理位置解析、可视化大屏和 Docker 部署。
+# Ping Monitor
+
+基于 `FastAPI + Vue 3 + Element Plus + ECharts` 的主机连通性监控系统
+
+支持 `Ping` 检测、告警通知、地理位置解析、可视化大屏、数据看板和 Docker 双架构部署。
+
+<p>
+  <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11" />
+  <img src="https://img.shields.io/badge/FastAPI-0.104-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/Element_Plus-409EFF?style=for-the-badge&logo=element&logoColor=white" alt="Element Plus" />
+  <img src="https://img.shields.io/badge/ECharts-AA344D?style=for-the-badge&logo=apacheecharts&logoColor=white" alt="ECharts" />
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/MySQL-8.4-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL" />
+  <img src="https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker multi arch" />
+  <img src="https://img.shields.io/badge/Release-v1.6.0-2EA44F?style=for-the-badge" alt="Release v1.6.0" />
+</p>
+
+<p>
+  <a href="#快速开始">快速开始</a>
+  ·
+  <a href="#功能概览">功能概览</a>
+  ·
+  <a href="#docker-发布">Docker 发布</a>
+  ·
+  <a href="#更新日志">更新日志</a>
+</p>
+
+</div>
 
 ## 项目亮点
 
@@ -84,6 +115,7 @@ ping-monitor/
 已发布镜像：
 
 - `tannic666/ping-monitor:latest`
+- `tannic666/ping-monitor:v1.6.0`
 - `tannic666/ping-monitor:v1.5.0`
 
 镜像平台：
@@ -137,14 +169,14 @@ docker compose -f docker/docker-compose.yml up -d --build
 如果要使用预构建镜像，可先设置环境变量：
 
 ```bash
-export PING_MONITOR_IMAGE=tannic666/ping-monitor:v1.5.0
+export PING_MONITOR_IMAGE=tannic666/ping-monitor:v1.6.0
 docker compose -f docker/docker-compose.yml up -d
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:PING_MONITOR_IMAGE="tannic666/ping-monitor:v1.5.0"
+$env:PING_MONITOR_IMAGE="tannic666/ping-monitor:v1.6.0"
 docker compose -f docker/docker-compose.yml up -d
 ```
 
@@ -192,8 +224,18 @@ npm run dev
 | `CACHE_TTL_DASHBOARD` | 仪表盘缓存秒数 | `15` |
 | `CACHE_TTL_DATABOARD` | 数据看板缓存秒数 | `45` |
 | `CACHE_TTL_HOST_DETAIL` | 主机详情缓存秒数 | `30` |
+| `DISABLE_NOTIFICATIONS` | 禁用所有通知发送，适合本地复刻线上数据 | `false` |
+| `DISABLE_SCHEDULER` | 禁用后台定时监控与维护任务，适合本地调试 | `false` |
 
 项目根目录可通过 `.env` 管理本地启动参数。
+
+### 本地复刻线上数据
+
+仓库提供了本地同步脚本，方便把线上 MySQL 数据导入本地复刻问题；脚本会自动清空本地通知配置，并写入 `DISABLE_NOTIFICATIONS=true`、`DISABLE_SCHEDULER=true`，避免本地调试时误发钉钉或报表通知。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync-prod-to-local.ps1
+```
 
 ## 使用说明
 
@@ -262,7 +304,7 @@ npm run dev
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -f docker/Dockerfile \
-  -t tannic666/ping-monitor:v1.5.0 \
+  -t tannic666/ping-monitor:v1.6.0 \
   -t tannic666/ping-monitor:latest \
   --provenance=false \
   --sbom=false \
@@ -271,6 +313,17 @@ docker buildx build \
 ```
 
 ## 更新日志
+
+### v1.6.0 (2026-05-18)
+
+- 发布 `tannic666/ping-monitor:v1.6.0` 双架构镜像，支持 `linux/amd64` 与 `linux/arm64`。
+- 仪表盘与主机管理改为优先读取 `hosts` 表上的最新 Ping 指标，避免每次从百万级明细表回查最新记录。
+- Ping 写入链路同步维护 `last_packet_loss`、`last_avg_rtt`、`last_check`，旧库启动时会自动回填历史最新状态。
+- 数据看板在命中 `ping_statistics` 聚合数据后不再额外回扫原始 `ping_records`，大幅降低 1d/7d 等统计接口耗时。
+- 新增 `ping_records(host_id, id)` 复合索引，优化旧数据回填和最新记录兜底查询。
+- 新增 `DISABLE_NOTIFICATIONS` 与 `DISABLE_SCHEDULER` 本地安全开关，方便复刻线上数据时禁用钉钉通知和定时任务。
+- 新增 `scripts/sync-prod-to-local.ps1`，支持一键导出线上 MySQL 数据、导入本地并清空本地通知配置。
+- Docker Compose 默认补充本地安全开关透传，并收紧 MySQL/Redis 本地端口绑定配置。
 
 ### v1.5.0 (2026-04-22)
 

@@ -9,6 +9,8 @@ from urllib.parse import quote_plus
 
 import requests
 
+from app_settings import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +31,9 @@ class NotificationService:
         self.webhook_secret = webhook_secret or None
 
     def send_serverchan(self, title: str, message: str, alert_type: str = "info") -> bool:
+        if settings.disable_notifications:
+            logger.info("Notifications disabled by DISABLE_NOTIFICATIONS, skip ServerChan send")
+            return False
         if not self.serverchan_key:
             return False
 
@@ -49,6 +54,9 @@ class NotificationService:
             return False
 
     def send_webhook(self, message: str, alert_type: str = "info", title: str | None = None) -> bool:
+        if settings.disable_notifications:
+            logger.info("Notifications disabled by DISABLE_NOTIFICATIONS, skip webhook send")
+            return False
         if not self.webhook_url:
             return False
 

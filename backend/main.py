@@ -538,7 +538,18 @@ def maybe_sync_host_location_after_ping_sync(
         return None
 
 
-def persist_ping_record(db: Session, host_id: int, result: dict) -> PingRecord:
+def update_host_latest_metrics(host: Host, result: dict, checked_at: datetime) -> None:
+    host.last_packet_loss = result["packet_loss"]
+    host.last_avg_rtt = result["avg_rtt"]
+    host.last_check = checked_at
+    if result.get("status") == "unreachable" or result["packet_loss"] >= host.alert_threshold:
+        host.last_status = "abnormal"
+    else:
+        host.last_status = "normal"
+
+
+def persist_ping_record(db: Session, host_id: int, result: dict, host: Host | None = None) -> PingRecord:
+    checked_at = datetime.now()
     record = PingRecord(
         host_id=host_id,
         packet_sent=result["packet_sent"],
@@ -547,9 +558,11 @@ def persist_ping_record(db: Session, host_id: int, result: dict) -> PingRecord:
         min_rtt=result["min_rtt"],
         max_rtt=result["max_rtt"],
         avg_rtt=result["avg_rtt"],
-        created_at=datetime.now(),
+        created_at=checked_at,
     )
     db.add(record)
+    if host is not None:
+        update_host_latest_metrics(host, result, checked_at)
     db.commit()
     db.refresh(record)
     return record
@@ -564,7 +577,7 @@ def run_ping_task(host_id: int, packet_count: int, packet_timeout: int) -> None:
             return
 
         result = PingService.ping_host(host.address, count=packet_count, timeout=packet_timeout)
-        persist_ping_record(db, host_id, result)
+        persist_ping_record(db, host_id, result, host=host)
         config = get_or_create_system_config(db)
         maybe_sync_host_location_after_ping_sync(db, host, config=config)
         invalidate_runtime_cache()
@@ -580,8 +593,12 @@ async def startup_event():
 
     DatabaseMigration.run_migrations()
     init_default_config()
+    DataMaintenance.backfill_host_latest_metrics()
     cache_manager.ensure_connection()
-    scheduler.start()
+    if settings.disable_scheduler:
+        logger.info("Scheduler disabled by DISABLE_SCHEDULER")
+    else:
+        scheduler.start()
     logger.info(
         "应用启动完成，数据库后端: %s，Redis缓存: %s",
         get_database_backend(),
@@ -951,7 +968,7 @@ async def ping_now(
         }
 
     result = PingService.ping_host(host.address, count=packet_count, timeout=packet_timeout)
-    persist_ping_record(db, host.id, result)
+    persist_ping_record(db, host.id, result, host=host)
     config = get_or_create_system_config(db)
     await maybe_sync_host_location_after_ping(db, host, config=config)
     invalidate_runtime_cache()
@@ -993,6 +1010,7 @@ async def ping_stream(host_id: int, token: str, db: Session = Depends(get_db)):
                 await asyncio.sleep(0.05)
 
             if summary_event:
+                stream_host = stream_db.query(Host).filter(Host.id == host_id).first()
                 persist_ping_record(
                     stream_db,
                     host.id,
@@ -1004,8 +1022,8 @@ async def ping_stream(host_id: int, token: str, db: Session = Depends(get_db)):
                         "max_rtt": summary_event["max_rtt"],
                         "avg_rtt": summary_event["avg_rtt"],
                     },
+                    host=stream_host,
                 )
-                stream_host = stream_db.query(Host).filter(Host.id == host_id).first()
                 if stream_host:
                     config = get_or_create_system_config(stream_db)
                     await maybe_sync_host_location_after_ping(stream_db, stream_host, config=config)

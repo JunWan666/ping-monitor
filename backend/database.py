@@ -54,6 +54,9 @@ class Host(Base):
     enabled = Column(Boolean, default=True, nullable=False)
     alert_threshold = Column(Float, default=20.0, nullable=False)
     last_status = Column(String(50), nullable=True)
+    last_packet_loss = Column(Float, nullable=True)
+    last_avg_rtt = Column(Float, nullable=True)
+    last_check = Column(DateTime, nullable=True)
     resolved_ip = Column(String(50), nullable=True)
     country = Column(String(100), nullable=True)
     province = Column(String(100), nullable=True)
@@ -70,6 +73,7 @@ class PingRecord(Base):
     __table_args__ = (
         Index("ix_ping_records_host_created_at", "host_id", "created_at"),
         Index("ix_ping_records_created_host", "created_at", "host_id"),
+        Index("ix_ping_records_host_id_id", "host_id", "id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)

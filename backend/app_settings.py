@@ -33,6 +33,8 @@ class AppSettings:
 
         self.redis_url = os.getenv("REDIS_URL", "").strip() or None
         self.enable_cache = _get_bool("ENABLE_CACHE", True)
+        self.disable_notifications = _get_bool("DISABLE_NOTIFICATIONS", False)
+        self.disable_scheduler = _get_bool("DISABLE_SCHEDULER", False)
 
         self.cache_ttl_dashboard = _get_int("CACHE_TTL_DASHBOARD", 15)
         self.cache_ttl_databoard = _get_int("CACHE_TTL_DATABOARD", 45)

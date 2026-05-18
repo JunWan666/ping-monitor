@@ -19,6 +19,8 @@ services:
       - TZ=Asia/Shanghai
       - DATABASE_URL=mysql+pymysql://root:CHANGE_ME_IN_DOT_ENV@ping-monitor-mysql:3306/ping_monitor?charset=utf8mb4
       - REDIS_URL=redis://ping-monitor-redis:6379/0
+      - DISABLE_NOTIFICATIONS=${DISABLE_NOTIFICATIONS:-false}
+      - DISABLE_SCHEDULER=${DISABLE_SCHEDULER:-false}
     networks:
       - ping-network
     depends_on:
@@ -29,7 +31,7 @@ services:
     image: mysql:8.4
     container_name: ping-monitor-mysql
     ports:
-      - "3307:3306"
+      - "127.0.0.1:3307:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     restart: unless-stopped
@@ -49,7 +51,7 @@ services:
     image: redis:7-alpine
     container_name: ping-monitor-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
     networks:
       - ping-network
