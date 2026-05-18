@@ -1,36 +1,30 @@
 <div align="center">
-
-# Ping Monitor
-
-基于 `FastAPI + Vue 3 + Element Plus + ECharts` 的主机连通性监控系统
-
-支持 `Ping` 检测、告警通知、地理位置解析、可视化大屏、数据看板和 Docker 双架构部署。
-
-<p>
-  <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11" />
-  <img src="https://img.shields.io/badge/FastAPI-0.104-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue 3" />
-  <img src="https://img.shields.io/badge/Element_Plus-409EFF?style=for-the-badge&logo=element&logoColor=white" alt="Element Plus" />
-  <img src="https://img.shields.io/badge/ECharts-AA344D?style=for-the-badge&logo=apacheecharts&logoColor=white" alt="ECharts" />
-</p>
-
-<p>
-  <img src="https://img.shields.io/badge/MySQL-8.4-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL" />
-  <img src="https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis" />
-  <img src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker multi arch" />
-  <img src="https://img.shields.io/badge/Release-v1.6.0-2EA44F?style=for-the-badge" alt="Release v1.6.0" />
-</p>
-
-<p>
-  <a href="#快速开始">快速开始</a>
-  ·
-  <a href="#功能概览">功能概览</a>
-  ·
-  <a href="#docker-发布">Docker 发布</a>
-  ·
-  <a href="#更新日志">更新日志</a>
-</p>
-
+  <img src="./frontend/public/favicon.svg" alt="Ping Monitor" width="120" />
+  <h1>Ping Monitor</h1>
+  <p>基于 FastAPI + Vue 3 + Element Plus + ECharts 的主机连通性监控系统</p>
+  <p>支持 Ping 检测、告警通知、地理位置解析、可视化大屏、数据看板和 Docker 双架构部署。</p>
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11" />
+    <img src="https://img.shields.io/badge/FastAPI-0.104-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+    <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue 3" />
+    <img src="https://img.shields.io/badge/Element_Plus-409EFF?style=for-the-badge&logo=element&logoColor=white" alt="Element Plus" />
+    <img src="https://img.shields.io/badge/ECharts-AA344D?style=for-the-badge&logo=apacheecharts&logoColor=white" alt="ECharts" />
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL 8.4" />
+    <img src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis 7" />
+    <img src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker amd64 arm64" />
+    <img src="https://img.shields.io/badge/Release-v1.6.0-2EA44F?style=flat-square" alt="Release v1.6.0" />
+  </p>
+  <p>
+    <a href="#快速开始">快速开始</a>
+    ·
+    <a href="#功能概览">功能概览</a>
+    ·
+    <a href="#docker-发布">Docker 发布</a>
+    ·
+    <a href="#更新日志">更新日志</a>
+  </p>
 </div>
 
 ## 项目亮点
