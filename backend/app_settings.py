@@ -22,9 +22,27 @@ def _get_int(name: str, default: int) -> int:
         return default
 
 
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name and name not in os.environ:
+            os.environ[name] = value
+
+
 class AppSettings:
     def __init__(self) -> None:
         self.project_root = Path(__file__).resolve().parent.parent
+        _load_env_file(self.project_root / ".env")
+
         self.data_dir = self.project_root / "data"
         self.data_dir.mkdir(exist_ok=True)
 

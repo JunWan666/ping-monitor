@@ -50,6 +50,9 @@
             <el-menu-item index="settings-system-logs">
               <span>系统日志</span>
             </el-menu-item>
+            <el-menu-item index="settings-backup">
+              <span>数据备份</span>
+            </el-menu-item>
             <el-menu-item index="settings-profile">
               <span>修改密码</span>
             </el-menu-item>
@@ -64,8 +67,21 @@
           <el-button type="danger" size="small" @click="handleLogout">退出登录</el-button>
         </el-header>
         <el-main style="overflow-y: auto">
+          <el-card v-if="componentError" shadow="never" class="page-error-card">
+            <el-alert
+              title="页面加载失败"
+              :description="componentError"
+              type="error"
+              show-icon
+              :closable="false"
+            />
+            <div class="page-error-actions">
+              <el-button type="primary" @click="reloadPage">刷新页面</el-button>
+              <el-button @click="openMenu('dashboard')">回到仪表盘</el-button>
+            </div>
+          </el-card>
           <iframe
-            v-if="activeMenu === 'datascreen'"
+            v-else-if="activeMenu === 'datascreen'"
             src="/datascreen-preview"
             style="width: 100%; height: 100%; border: none;"
           ></iframe>
@@ -82,9 +98,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onErrorCaptured, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import api from '../api'
 import { defineAsyncPage } from '../lib/asyncLoader'
 
 const Dashboard = defineAsyncPage(() => import('./Dashboard.vue'))
@@ -95,9 +112,11 @@ const Settings = defineAsyncPage(() => import('./Settings.vue'))
 const DataScreenSettings = defineAsyncPage(() => import('./DataScreenSettings.vue'))
 const UserProfile = defineAsyncPage(() => import('./UserProfile.vue'))
 const SystemLogs = defineAsyncPage(() => import('./SystemLogs.vue'))
+const DatabaseBackup = defineAsyncPage(() => import('./DatabaseBackup.vue'))
 
 const router = useRouter()
 const activeMenu = ref('dashboard')
+const componentError = ref('')
 
 const menuTitles = {
   datascreen: '可视化大屏',
@@ -109,6 +128,7 @@ const menuTitles = {
   'settings-datascreen': '系统设置 - 可视化设置',
   'settings-logs': '系统设置 - Ping日志',
   'settings-system-logs': '系统设置 - 系统日志',
+  'settings-backup': '系统设置 - 数据备份',
   'settings-profile': '系统设置 - 修改密码'
 }
 
@@ -129,6 +149,10 @@ const currentComponent = computed(() => {
 
   if (activeMenu.value === 'settings-system-logs') {
     return SystemLogs
+  }
+
+  if (activeMenu.value === 'settings-backup') {
+    return DatabaseBackup
   }
 
   if (activeMenu.value.startsWith('settings')) {
@@ -164,6 +188,7 @@ const currentComponentProps = computed(() => {
 })
 
 const openMenu = (key) => {
+  componentError.value = ''
   activeMenu.value = key
   menuTitle.value = menuTitles[key]
 }
@@ -176,6 +201,18 @@ const handleNavigateEvent = (event) => {
   const targetMenu = event?.detail?.menu
   if (targetMenu && menuTitles[targetMenu]) {
     openMenu(targetMenu)
+  }
+}
+
+const reloadPage = () => {
+  window.location.reload()
+}
+
+const validateSession = async () => {
+  try {
+    await api.getCurrentUser()
+  } catch (error) {
+    // api.js 会统一处理登录失效跳转
   }
 }
 
@@ -197,16 +234,34 @@ const handleLogout = async () => {
 }
 
 onMounted(() => {
+  validateSession()
   window.addEventListener('ping-monitor:navigate', handleNavigateEvent)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('ping-monitor:navigate', handleNavigateEvent)
 })
+
+onErrorCaptured((error) => {
+  console.error('菜单页面渲染失败:', error)
+  componentError.value = error?.message || '当前菜单页面渲染异常，请刷新页面后重试。'
+  return false
+})
 </script>
 
 <style scoped>
 .el-menu-vertical {
   border-right: none;
+}
+
+.page-error-card {
+  max-width: 720px;
+  margin: 40px auto;
+}
+
+.page-error-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
 }
 </style>

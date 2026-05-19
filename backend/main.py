@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 import json
 import logging
 import os
 import re
 import socket
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import requests
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +30,7 @@ from app_settings import settings
 from auth import create_access_token, decode_access_token, get_current_user, get_optional_current_user, get_password_hash, verify_password
 from cache import cache_manager
 from data_maintenance import DataMaintenance
+from database_backup import import_database_backup_sql, iter_database_backup_sql
 from database import (
     Alert,
     DataScreenConfig,
@@ -75,6 +77,10 @@ PUBLIC_IP_SOURCES = (
     {"name": "ipify", "url": "https://api.ipify.org?format=json", "type": "json", "field": "ip"},
     {"name": "jsonip", "url": "https://ipv4.jsonip.com", "type": "json", "field": "ip"},
 )
+DATABASE_BACKUP_MAX_BYTES = 512 * 1024 * 1024
+DATABASE_BACKUP_LOG_LIMIT = 200
+DATABASE_IMPORT_JOB_TTL = timedelta(hours=6)
+database_import_jobs: dict[str, dict[str, Any]] = {}
 
 app = FastAPI(title="Ping 监控系统", version="2.0.0")
 
@@ -220,6 +226,175 @@ class UserPasswordUpdate(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+def append_database_import_log(job: dict[str, Any], message: str) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    logs = job.setdefault("logs", [])
+    logs.append(f"[{timestamp}] {message}")
+    if len(logs) > DATABASE_BACKUP_LOG_LIMIT:
+        del logs[:-DATABASE_BACKUP_LOG_LIMIT]
+
+
+def update_database_import_job(job_id: str, **changes: Any) -> None:
+    job = database_import_jobs.get(job_id)
+    if not job:
+        return
+
+    message = changes.get("message")
+    if message:
+        append_database_import_log(job, str(message))
+
+    job.update(changes)
+    job["updated_at"] = datetime.now().isoformat(timespec="seconds")
+
+
+def cleanup_database_import_jobs() -> None:
+    cutoff = datetime.now() - DATABASE_IMPORT_JOB_TTL
+    for job_id, job in list(database_import_jobs.items()):
+        if job.get("status") not in {"completed", "failed"}:
+            continue
+
+        try:
+            updated_at = datetime.fromisoformat(job.get("updated_at") or job.get("created_at") or "")
+        except ValueError:
+            updated_at = datetime.now()
+
+        if updated_at < cutoff:
+            database_import_jobs.pop(job_id, None)
+
+
+def get_latest_active_database_import_job() -> dict[str, Any] | None:
+    active_jobs = [
+        job
+        for job in database_import_jobs.values()
+        if job.get("status") in {"queued", "running"}
+    ]
+    if not active_jobs:
+        return None
+
+    def get_job_updated_at(job: dict[str, Any]) -> datetime:
+        try:
+            return datetime.fromisoformat(job.get("updated_at") or job.get("created_at") or "")
+        except ValueError:
+            return datetime.min
+
+    return max(active_jobs, key=get_job_updated_at)
+
+
+def calculate_database_import_progress(payload: dict[str, Any]) -> int:
+    stage = payload.get("stage")
+    total = payload.get("total_statements") or 0
+
+    if stage == "validating":
+        return 3
+    if stage == "parsing":
+        parsed = payload.get("parsed_statements") or 0
+        if total:
+            return min(25, 5 + int(parsed / total * 20))
+        return 10
+    if stage == "executing":
+        executed = payload.get("executed_statements") or 0
+        skipped = payload.get("skipped_statements") or 0
+        if total:
+            return min(90, 25 + int((executed + skipped) / total * 65))
+        return 30
+    if stage == "verifying":
+        return 95
+    if stage == "completed":
+        return 100
+    return 0
+
+
+def run_database_import_job(job_id: str, sql_text: str, filename: str, username: str) -> None:
+    import_db: Session | None = SessionLocal()
+    post_import_db: Session | None = None
+    scheduler_was_running = scheduler.scheduler.running
+
+    def on_progress(payload: dict[str, Any]) -> None:
+        update_database_import_job(
+            job_id,
+            **payload,
+            progress=calculate_database_import_progress(payload),
+        )
+
+    update_database_import_job(
+        job_id,
+        status="running",
+        stage="preparing",
+        progress=1,
+        message=f"准备导入 {filename}",
+    )
+
+    if scheduler_was_running:
+        scheduler.scheduler.pause()
+        update_database_import_job(job_id, message="已暂停定时任务")
+
+    try:
+        result = import_database_backup_sql(import_db, sql_text, progress_callback=on_progress)
+        import_db.close()
+        import_db = None
+
+        update_database_import_job(
+            job_id,
+            stage="post_import",
+            progress=96,
+            message="正在刷新运行配置",
+        )
+        init_default_config()
+        DataMaintenance.backfill_host_latest_metrics()
+
+        post_import_db = SessionLocal()
+        config = get_or_create_system_config(post_import_db)
+        notifier.configure(
+            serverchan_key=config.serverchan_key,
+            webhook_url=config.webhook_url,
+            webhook_secret=config.webhook_secret,
+        )
+        if not settings.disable_scheduler:
+            scheduler.reload_config()
+        invalidate_runtime_cache()
+
+        DataMaintenance.log_system_event(
+            post_import_db,
+            log_type="info",
+            module="database_backup",
+            message=f"用户 {username} 导入数据库备份",
+            details={
+                "filename": filename,
+                "executed_statements": result["executed_statements"],
+                "skipped_statements": result["skipped_statements"],
+                "table_counts": result["table_counts"],
+            },
+        )
+
+        update_database_import_job(
+            job_id,
+            status="completed",
+            stage="completed",
+            progress=100,
+            result={"message": "数据库备份导入完成", **result},
+            message="导入完成",
+        )
+    except Exception as exc:
+        logger.exception("Database backup import failed: %s", exc)
+        update_database_import_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            error=str(exc),
+            message=f"导入失败：{exc}",
+        )
+    finally:
+        try:
+            if scheduler_was_running and scheduler.scheduler.running:
+                scheduler.scheduler.resume()
+                update_database_import_job(job_id, message="已恢复定时任务")
+        finally:
+            if import_db is not None:
+                import_db.close()
+            if post_import_db is not None:
+                post_import_db.close()
 
 
 def get_or_create_system_config(db: Session) -> SystemConfig:
@@ -1310,6 +1485,88 @@ async def send_report(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return result
+
+
+@app.get("/api/database/export")
+async def export_database_backup(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"ping_monitor_backup_{timestamp}.sql"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+    return StreamingResponse(
+        iter_database_backup_sql(db),
+        media_type="application/sql; charset=utf-8",
+        headers=headers,
+    )
+
+
+@app.post("/api/database/import")
+async def import_database_backup(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    cleanup_database_import_jobs()
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(".sql"):
+        raise HTTPException(status_code=400, detail="请上传 .sql 备份文件")
+
+    content = await file.read(DATABASE_BACKUP_MAX_BYTES + 1)
+    if len(content) > DATABASE_BACKUP_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="SQL 备份文件不能超过 512MB")
+
+    try:
+        sql_text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="SQL 备份文件必须使用 UTF-8 编码") from exc
+
+    job_id = uuid.uuid4().hex
+    database_import_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "progress": 0,
+        "filename": filename,
+        "username": current_user.username,
+        "logs": [],
+        "result": None,
+        "error": None,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    append_database_import_log(database_import_jobs[job_id], f"已创建导入任务：{filename}")
+    background_tasks.add_task(run_database_import_job, job_id, sql_text, filename, current_user.username)
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "数据库备份导入任务已开始",
+    }
+
+
+@app.get("/api/database/import/latest")
+async def get_latest_database_import_status():
+    cleanup_database_import_jobs()
+
+    job = get_latest_active_database_import_job()
+    if not job:
+        raise HTTPException(status_code=404, detail="当前没有正在导入的任务")
+    return job
+
+
+@app.get("/api/database/import/{job_id}")
+async def get_database_import_status(job_id: str):
+    cleanup_database_import_jobs()
+
+    job = database_import_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="导入任务不存在")
+    return job
 
 
 @app.get("/api/system-logs")

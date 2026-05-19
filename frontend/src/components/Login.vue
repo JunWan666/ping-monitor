@@ -1,6 +1,14 @@
 <template>
   <div class="login-container">
     <el-card class="login-card">
+      <el-alert
+        v-if="importSummary"
+        :title="importSummary"
+        type="success"
+        show-icon
+        :closable="true"
+        class="login-import-alert"
+      />
       <template #header>
         <div class="card-header">
           <h2>Ping监控系统</h2>
@@ -53,6 +61,7 @@ import api from '../api'
 const router = useRouter()
 const formRef = ref(null)
 const loading = ref(false)
+const importSummary = ref('')
 
 const form = reactive({
   username: '',
@@ -106,6 +115,10 @@ const handleLogin = async () => {
 }
 
 onMounted(() => {
+  importSummary.value = sessionStorage.getItem('ping-monitor-import-summary') || ''
+  if (importSummary.value) {
+    sessionStorage.removeItem('ping-monitor-import-summary')
+  }
   checkInit()
 })
 </script>
@@ -121,6 +134,11 @@ onMounted(() => {
 
 .login-card {
   width: 400px;
+}
+
+.login-import-alert {
+  margin-bottom: 16px;
+  white-space: pre-line;
 }
 
 .card-header {

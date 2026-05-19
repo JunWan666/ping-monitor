@@ -53,6 +53,15 @@ services:
       - ping-network
 
   ping-monitor:
+    image: ${PING_MONITOR_IMAGE:-ping-monitor:local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_EXTRA_INDEX_URL: ${PIP_EXTRA_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
     depends_on:
       mysql:
         condition: service_healthy
@@ -73,3 +82,6 @@ services:
 volumes:
   mysql_data:
   redis_data:
+
+networks:
+  ping-network:

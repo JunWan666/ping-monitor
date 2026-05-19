@@ -14,6 +14,7 @@ declare module 'vue' {
     AdminLogin: typeof import('./components/AdminLogin.vue')['default']
     AlertList: typeof import('./components/AlertList.vue')['default']
     Dashboard: typeof import('./components/Dashboard.vue')['default']
+    DatabaseBackup: typeof import('./components/DatabaseBackup.vue')['default']
     DataBoard: typeof import('./components/DataBoard.vue')['default']
     DataScreen: typeof import('./components/DataScreen.vue')['default']
     DataScreenSettings: typeof import('./components/DataScreenSettings.vue')['default']

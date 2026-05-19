@@ -14,6 +14,13 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    if (config.data instanceof FormData) {
+      if (typeof config.headers?.delete === 'function') {
+        config.headers.delete('Content-Type')
+      } else if (config.headers) {
+        delete config.headers['Content-Type']
+      }
+    }
     return config
   },
   (error) => Promise.reject(error)
@@ -28,7 +35,11 @@ apiClient.interceptors.response.use(
         localStorage.removeItem('token')
         const currentPath = window.location.pathname
         if (currentPath !== '/login' && currentPath !== '/init') {
-          window.location.href = '/login'
+          try {
+            window.top.location.href = '/login'
+          } catch {
+            window.location.href = '/login'
+          }
         }
       }
     }
@@ -129,6 +140,14 @@ export default {
   updateConfig: (data) => apiClient.put('/config', data),
   testNotification: (type) => apiClient.post(`/test-notification/${type}`),
   sendReport: (reportType) => apiClient.post(`/reports/${reportType}/send`),
+  exportDatabaseBackup: () => apiClient.get('/database/export', { responseType: 'blob', timeout: 0 }),
+  importDatabaseBackup: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiClient.post('/database/import', formData, { timeout: 0 })
+  },
+  getLatestDatabaseImportStatus: () => apiClient.get('/database/import/latest', { timeout: 0 }),
+  getDatabaseImportStatus: (jobId) => apiClient.get(`/database/import/${jobId}`, { timeout: 0 }),
 
   getSystemLogs: (logType, module, page = 1, pageSize = 50, keyword = null, hours = null) => {
     const params = { page, page_size: pageSize }
