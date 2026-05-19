@@ -424,6 +424,7 @@ def get_or_create_datascreen_config(db: Session) -> DataScreenConfig:
 def build_datascreen_payload(db: Session, screen_config: DataScreenConfig) -> dict:
     payload = get_dashboard_payload(db)
     payload["screen_config"] = {
+        "brand_name": screen_config.brand_name,
         "refresh_interval": screen_config.refresh_interval,
         "enable_3d": screen_config.enable_3d,
         "enable_animation": screen_config.enable_animation,
@@ -626,6 +627,10 @@ async def sync_host_location_from_ip(
             should_write = overwrite_existing or current_value in (None, "")
             if should_write and new_value is not None:
                 setattr(host, field, new_value)
+
+        if overwrite_existing and (location.get("latitude") is None or location.get("longitude") is None):
+            host.latitude = None
+            host.longitude = None
 
         host.location_status = "success" if host_has_any_location(host) else "failed"
         return location
@@ -1743,6 +1748,7 @@ async def get_datascreen_preview(current_user: User = Depends(get_current_user),
 # ==================== 可视化配置管理接口 ====================
 
 class DataScreenConfigUpdate(BaseModel):
+    brand_name: Optional[str] = None
     refresh_interval: Optional[int] = None
     enable_3d: Optional[bool] = None
     enable_animation: Optional[bool] = None
@@ -1755,6 +1761,7 @@ class DataScreenConfigUpdate(BaseModel):
 
 class DataScreenConfigResponse(BaseModel):
     id: int
+    brand_name: str
     refresh_interval: int
     enable_3d: bool
     enable_animation: bool
@@ -1781,6 +1788,12 @@ async def update_datascreen_config(
     db: Session = Depends(get_db),
 ):
     config = get_or_create_datascreen_config(db)
+
+    if config_update.brand_name is not None:
+        brand_name = config_update.brand_name.strip()
+        if len(brand_name) > 60:
+            raise HTTPException(status_code=400, detail="大屏名称不能超过 60 个字符")
+        config.brand_name = brand_name
 
     if config_update.refresh_interval is not None:
         if config_update.refresh_interval < 1 or config_update.refresh_interval > 60:

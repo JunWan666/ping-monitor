@@ -48,19 +48,22 @@ class DatabaseMigration:
     
     @staticmethod
     def get_sqlalchemy_type_sql(column_type):
-        """将SQLAlchemy类型转换为SQLite SQL类型"""
+        """将SQLAlchemy类型转换为当前数据库可执行的 SQL 类型"""
         type_str = str(column_type)
+        upper_type = type_str.upper()
         
         # 处理常见类型
-        if 'INTEGER' in type_str:
+        if 'INTEGER' in upper_type:
             return 'INTEGER'
-        elif 'VARCHAR' in type_str or 'TEXT' in type_str or 'STRING' in type_str:
+        elif 'VARCHAR' in upper_type:
+            return type_str
+        elif 'TEXT' in upper_type or 'STRING' in upper_type:
             return 'TEXT'
-        elif 'FLOAT' in type_str or 'NUMERIC' in type_str:
+        elif 'FLOAT' in upper_type or 'NUMERIC' in upper_type:
             return 'REAL'
-        elif 'BOOLEAN' in type_str:
+        elif 'BOOLEAN' in upper_type:
             return 'INTEGER'
-        elif 'DATETIME' in type_str:
+        elif 'DATETIME' in upper_type:
             return 'DATETIME'
         else:
             return 'TEXT'  # 默认使用TEXT

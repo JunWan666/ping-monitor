@@ -27,7 +27,7 @@
 
       <div class="header-center header-center-main">
         <div class="header-kicker">CPOLAR / DIGITAL TWIN</div>
-        <h1 class="screen-title">your-service 网络监控可视化大屏</h1>
+        <h1 class="screen-title">{{ screenTitle }}</h1>
         <div class="header-meta">
           <span class="meta-chip">刷新间隔 {{ screenConfig.refresh_interval }}s</span>
           <span class="meta-chip">{{ screenConfig.enable_3d ? '3D 模式' : '平面模式' }}</span>
@@ -65,7 +65,19 @@
             <span>{{ metric.value }}</span>
             <em>{{ metric.unit }}</em>
           </div>
-          <div class="metric-note">{{ metric.note }}</div>
+          <div v-if="metric.details" class="metric-detail-row">
+            <span
+              v-for="detail in metric.details"
+              :key="detail.label"
+              class="metric-detail"
+              :class="detail.tone"
+            >
+              <i></i>
+              <span>{{ detail.label }}</span>
+              <strong>{{ detail.value }}</strong>
+            </span>
+          </div>
+          <div v-if="metric.note" class="metric-note">{{ metric.note }}</div>
         </div>
       </article>
     </section>
@@ -264,11 +276,11 @@ import * as echarts from 'echarts'
 import {
   Bell,
   CircleCheckFilled,
+  DataAnalysis,
   FullScreen,
   Monitor,
   Setting,
-  Timer,
-  WarningFilled
+  Timer
 } from '@element-plus/icons-vue'
 import api from '../api'
 
@@ -369,6 +381,7 @@ const themePalettes = {
 }
 
 const defaultScreenConfig = {
+  brand_name: '',
   refresh_interval: 10,
   enable_3d: true,
   enable_animation: true,
@@ -419,6 +432,7 @@ const trendChartRef = ref(null)
 const mapChartRef = ref(null)
 const ispChartRef = ref(null)
 const provinceCenters = ref(new Map())
+const provinceFeatureIndex = ref(new Map())
 const worldRegionNames = ref([])
 const isFullscreen = ref(false)
 
@@ -432,6 +446,7 @@ let resizeHandler = null
 let chinaMapPromise = null
 let worldMapPromise = null
 let pinnedMapTooltip = null
+let selectedMapProvinceName = null
 let mapClickHandler = null
 let mapBlankClickHandler = null
 let mapRoamHandler = null
@@ -439,6 +454,18 @@ let fullscreenChangeHandler = null
 const metricFrames = new Map()
 const CALLOUT_PROVINCE_LABELS = new Set()
 const PROVINCE_CALLOUT_TARGETS = {}
+const SELECTED_PROVINCE_REGION_STYLE = {
+  itemStyle: {
+    areaColor: 'rgba(250, 219, 20, 0.62)',
+    borderColor: 'rgba(255, 246, 176, 0.98)',
+    borderWidth: 2,
+    shadowBlur: 28,
+    shadowColor: 'rgba(250, 219, 20, 0.46)'
+  },
+  label: {
+    show: false
+  }
+}
 const mapRoamState = reactive({
   china: {
     zoom: 1
@@ -457,6 +484,10 @@ const animatedMetrics = reactive({
 })
 
 const palette = computed(() => themePalettes[screenConfig.theme_color] || themePalettes.blue)
+const screenTitle = computed(() => {
+  const brandName = normalizeLocation(screenConfig.brand_name)
+  return brandName ? `${brandName} 网络监控可视化大屏` : '网络监控可视化大屏'
+})
 
 const themeStyle = computed(() => ({
   '--screen-bg': palette.value.background,
@@ -551,17 +582,25 @@ const compareHostsByStatus = (a, b) => {
 
 const geoHosts = computed(() =>
   hosts.value
-    .filter((host) => hasValidCoordinates(host.longitude, host.latitude))
-    .map((host) => ({
-      ...host,
-      longitude: Number(host.longitude),
-      latitude: Number(host.latitude),
-      avg_rtt: Number(host.avg_rtt) || 0,
-      country: normalizeCountry(host.country),
-      province: normalizeLocation(host.province, '未定位区域'),
-      city: normalizeLocation(host.city, ''),
-      isp: normalizeIsp(host.isp)
-    }))
+    .map((host) => {
+      const coordinates = resolveHostMapCoordinates(host)
+      if (!coordinates) {
+        return null
+      }
+
+      return {
+        ...host,
+        longitude: coordinates.longitude,
+        latitude: coordinates.latitude,
+        map_coordinate_source: coordinates.source,
+        avg_rtt: Number(host.avg_rtt) || 0,
+        country: normalizeCountry(host.country),
+        province: normalizeLocation(host.province, '未定位区域'),
+        city: normalizeLocation(host.city, ''),
+        isp: normalizeIsp(host.isp)
+      }
+    })
+    .filter(Boolean)
 )
 
 const domesticGeoHosts = computed(() => geoHosts.value.filter((host) => isChinaHost(host)))
@@ -807,16 +846,20 @@ const overseasMapPointClusters = computed(() => mapPointClusters.value.filter((p
 const summary = computed(() => {
   const totalHosts = Number(datascreenPayload.value.total_hosts) || hosts.value.length
   const onlineHosts = hosts.value.filter(isHostOnline).length
-  const abnormalHosts = hosts.value.filter((host) => {
+  const offlineHosts = hosts.value.filter((host) => getHostStatusType(host) === 'offline').length
+  const warningHosts = hosts.value.filter((host) => {
     const statusType = getHostStatusType(host)
-    return statusType === 'warning' || statusType === 'offline'
+    return statusType !== 'offline' && (statusType === 'warning' || Number(host.avg_rtt || 0) >= WARNING_RTT_THRESHOLD)
   }).length
+  const abnormalHosts = warningHosts + offlineHosts
   const avgRtt = Number(databoardStats.value.avg_rtt) || average(hosts.value.map((host) => Number(host.avg_rtt) || 0))
   const onlineRate = totalHosts > 0 ? (onlineHosts / totalHosts) * 100 : 0
 
   return {
     totalHosts,
     onlineHosts,
+    warningHosts,
+    offlineHosts,
     abnormalHosts,
     avgRtt,
     onlineRate,
@@ -964,9 +1007,13 @@ const metricCards = computed(() => [
     label: '告警/离线',
     value: formatMetric(animatedMetrics.abnormalHosts),
     unit: '台',
-    note: summary.value.abnormalHosts > 0 ? '黄色代表可达告警，红色代表离线' : '当前未发现告警或离线节点',
-    icon: WarningFilled,
-    tone: 'tone-danger'
+    note: summary.value.abnormalHosts > 0 ? '' : '当前未发现告警或离线节点',
+    details: [
+      { label: '告警', value: `${summary.value.warningHosts} 台`, tone: 'warning' },
+      { label: '离线', value: `${summary.value.offlineHosts} 台`, tone: 'danger' }
+    ],
+    icon: DataAnalysis,
+    tone: 'tone-alert'
   },
   {
     key: 'avgRtt',
@@ -1058,6 +1105,7 @@ const setMapView = async (view) => {
 }
 
 const normalizeScreenConfig = (payload = {}) => ({
+  brand_name: normalizeLocation(payload.brand_name, defaultScreenConfig.brand_name),
   refresh_interval: clamp(Number(payload.refresh_interval) || defaultScreenConfig.refresh_interval, 1, 60),
   enable_3d: payload.enable_3d ?? defaultScreenConfig.enable_3d,
   enable_animation: payload.enable_animation ?? defaultScreenConfig.enable_animation,
@@ -1093,15 +1141,24 @@ const loadChinaMap = async () => {
       })
       .then((geoJson) => {
         echarts.registerMap(CHINA_MAP_NAME, geoJson)
-        provinceCenters.value = new Map(
-          (geoJson.features || [])
-            .map((feature) => {
-              const props = feature.properties || {}
-              const center = props.centroid || props.center
-              return props.name && Array.isArray(center) ? [props.name, center] : null
-            })
-            .filter(Boolean)
-        )
+        const centerEntries = []
+        const featureEntries = []
+
+        ;(geoJson.features || []).forEach((feature) => {
+          const props = feature.properties || {}
+          const center = props.centroid || props.center
+          if (!props.name) {
+            return
+          }
+
+          if (Array.isArray(center)) {
+            centerEntries.push([props.name, center])
+          }
+          featureEntries.push([normalizeProvince(props.name), feature])
+        })
+
+        provinceCenters.value = new Map(centerEntries)
+        provinceFeatureIndex.value = new Map(featureEntries)
       })
   }
 
@@ -1429,7 +1486,7 @@ const renderMapChart = () => {
       tooltip: {
         trigger: 'item',
         triggerOn: 'mousemove|click',
-        enterable: true,
+        enterable: false,
         confine: true,
         appendToBody: true,
         alwaysShowContent: false,
@@ -1445,7 +1502,7 @@ const renderMapChart = () => {
         },
         position: getTooltipPosition,
         formatter: (params) => {
-          if (params.data?.tooltipType === 'province') {
+          if (isPinnedProvinceTooltip(params)) {
             return buildProvinceTooltip({
               ...params,
               name: params.data?.name || params.name,
@@ -1454,27 +1511,18 @@ const renderMapChart = () => {
           }
 
           if (params.data?.tooltipType === 'control-center') {
-            return buildControlCenterTooltip()
+            return ''
           }
 
           if (params.seriesType === 'map') {
-            return isChinaView
-              ? buildProvinceTooltip(params)
-              : renderTooltipCard({
-                  title: `${params.name} 区域`,
-                  tone: 'idle',
-                  stats: [{ label: '当前视图', value: '全球' }],
-                  hosts: [],
-                  sectionTitle: '提示',
-                  emptyText: '全球视图以国内外节点飞线与主机点位为主。'
-                })
+            return ''
           }
 
           if (params.seriesType === 'lines') {
-            return '监控中心数据流'
+            return ''
           }
 
-          return buildPointTooltip(params)
+          return hasHostPointTooltip(params) ? buildPointTooltip(params) : ''
         }
       },
       geo: {
@@ -1483,6 +1531,7 @@ const renderMapChart = () => {
         silent: false,
         layoutCenter: activeGeoCenter,
         layoutSize: activeLayoutSize,
+        regions: isChinaView ? getSelectedProvinceRegions() : [],
         ...roamOption,
         itemStyle: {
           areaColor: isChinaView ? 'rgba(7, 20, 41, 0.26)' : 'rgba(11, 24, 44, 0.22)',
@@ -1519,7 +1568,9 @@ const renderMapChart = () => {
           coordinateSystem: 'geo',
           geoIndex: 0,
           silent: !isChinaView,
+          selectedMode: false,
           zlevel: 1,
+          regions: isChinaView ? getSelectedProvinceRegions() : [],
           label: {
             show: false
           },
@@ -2097,6 +2148,95 @@ const getTooltipPosition = (point, params, dom, rect, size) => {
   return [left, top]
 }
 
+const getProvinceTooltipHosts = (params) => {
+  if (!params) {
+    return []
+  }
+
+  const provinceName = params.data?.name || params.name
+  const provinceEntry = provinceHostIndex.value.get(normalizeProvince(provinceName))
+  return provinceEntry?.hosts || params.data?.hosts || []
+}
+
+const isProvinceTooltipTarget = (params) => {
+  if (!params || params.componentType !== 'series') {
+    return false
+  }
+
+  return currentMapView.value === 'china' && (params.seriesType === 'map' || params.data?.tooltipType === 'province')
+}
+
+const isPinnedProvinceTooltip = (params) => {
+  if (!pinnedMapTooltip || pinnedMapTooltip.kind !== 'province' || !isProvinceTooltipTarget(params)) {
+    return false
+  }
+
+  const paramsProvinceName = params.data?.name || params.name
+  const isSameProvince = pinnedMapTooltip.dataIndex != null
+    ? pinnedMapTooltip.dataIndex === params.dataIndex
+    : normalizeProvince(pinnedMapTooltip.name) === normalizeProvince(paramsProvinceName)
+
+  return (
+    pinnedMapTooltip.seriesIndex === params.seriesIndex &&
+    isSameProvince &&
+    getProvinceTooltipHosts(params).length > 0
+  )
+}
+
+const hasHostPointTooltip = (params) => {
+  const hostsAtPoint = params?.data?.hosts || []
+  return params?.componentType === 'series' && params.data?.tooltipType !== 'province' && hostsAtPoint.length > 0
+}
+
+const resolveProvinceRegionName = (provinceName) => {
+  const normalizedName = normalizeProvince(provinceName)
+  if (!normalizedName) {
+    return provinceName
+  }
+
+  const matchedRegion = Array.from(provinceCenters.value.keys()).find(
+    (name) => normalizeProvince(name) === normalizedName
+  )
+  return matchedRegion || provinceName
+}
+
+const getSelectedProvinceRegions = () => {
+  if (!selectedMapProvinceName) {
+    return []
+  }
+
+  return [
+    {
+      name: resolveProvinceRegionName(selectedMapProvinceName),
+      ...SELECTED_PROVINCE_REGION_STYLE
+    }
+  ]
+}
+
+const syncSelectedProvinceRegion = () => {
+  if (!mapChartInstance) {
+    return
+  }
+
+  const regions = getSelectedProvinceRegions()
+  mapChartInstance.setOption(
+    {
+      geo: [
+        {
+          regions
+        }
+      ],
+      series: [
+        {},
+        {
+          regions
+        }
+      ]
+    },
+    false
+  )
+}
+
 const syncPinnedMapTooltip = () => {
   if (!mapChartInstance) {
     return
@@ -2106,6 +2246,7 @@ const syncPinnedMapTooltip = () => {
     {
       tooltip: {
         triggerOn: pinnedMapTooltip ? 'click' : 'mousemove|click',
+        enterable: Boolean(pinnedMapTooltip),
         alwaysShowContent: Boolean(pinnedMapTooltip),
         hideDelay: pinnedMapTooltip ? 0 : 140
       }
@@ -2117,7 +2258,9 @@ const syncPinnedMapTooltip = () => {
     mapChartInstance.dispatchAction({
       type: 'showTip',
       seriesIndex: pinnedMapTooltip.seriesIndex,
-      dataIndex: pinnedMapTooltip.dataIndex,
+      ...(pinnedMapTooltip.dataIndex != null
+        ? { dataIndex: pinnedMapTooltip.dataIndex }
+        : { name: resolveProvinceRegionName(pinnedMapTooltip.name) }),
       position: pinnedMapTooltip.position
     })
   } else {
@@ -2126,7 +2269,14 @@ const syncPinnedMapTooltip = () => {
 }
 
 const clearPinnedMapTooltip = (silent = false) => {
+  const hadSelectedProvince = Boolean(selectedMapProvinceName)
+
   pinnedMapTooltip = null
+  selectedMapProvinceName = null
+
+  if (hadSelectedProvince) {
+    syncSelectedProvinceRegion()
+  }
 
   if (!silent) {
     syncPinnedMapTooltip()
@@ -2151,27 +2301,62 @@ const bindMapChartInteractions = () => {
   }
 
   mapClickHandler = (params) => {
-    if (params?.componentType !== 'series' || params.seriesType === 'lines') {
+    if (isProvinceTooltipTarget(params)) {
+      const provinceHosts = getProvinceTooltipHosts(params)
+      if (!provinceHosts.length) {
+        clearPinnedMapTooltip()
+        return
+      }
+
+      const provinceName = params.data?.name || params.name
+      const nextTooltip = {
+        kind: 'province',
+        seriesIndex: params.seriesIndex,
+        dataIndex: params.dataIndex,
+        name: provinceName,
+        position: [params.event?.offsetX || 0, params.event?.offsetY || 0]
+      }
+
+      if (
+        pinnedMapTooltip?.kind === 'province' &&
+        normalizeProvince(pinnedMapTooltip.name) === normalizeProvince(provinceName)
+      ) {
+        clearPinnedMapTooltip()
+        return
+      }
+
+      selectedMapProvinceName = provinceName
+      pinnedMapTooltip = nextTooltip
+      syncSelectedProvinceRegion()
+      syncPinnedMapTooltip()
       return
     }
 
-    const nextTooltip = {
-      seriesIndex: params.seriesIndex,
-      dataIndex: params.dataIndex,
-      position: [params.event?.offsetX || 0, params.event?.offsetY || 0]
-    }
+    if (hasHostPointTooltip(params)) {
+      const nextTooltip = {
+        kind: 'host',
+        seriesIndex: params.seriesIndex,
+        dataIndex: params.dataIndex,
+        position: [params.event?.offsetX || 0, params.event?.offsetY || 0]
+      }
 
-    if (
-      pinnedMapTooltip &&
-      pinnedMapTooltip.seriesIndex === nextTooltip.seriesIndex &&
-      pinnedMapTooltip.dataIndex === nextTooltip.dataIndex
-    ) {
-      clearPinnedMapTooltip()
+      if (
+        pinnedMapTooltip?.kind === 'host' &&
+        pinnedMapTooltip.seriesIndex === nextTooltip.seriesIndex &&
+        pinnedMapTooltip.dataIndex === nextTooltip.dataIndex
+      ) {
+        clearPinnedMapTooltip()
+        return
+      }
+
+      selectedMapProvinceName = null
+      syncSelectedProvinceRegion()
+      pinnedMapTooltip = nextTooltip
+      syncPinnedMapTooltip()
       return
     }
 
-    pinnedMapTooltip = nextTooltip
-    syncPinnedMapTooltip()
+    clearPinnedMapTooltip()
   }
 
   mapBlankClickHandler = (event) => {
@@ -2501,6 +2686,109 @@ const isChinaCoordinate = (longitude, latitude) => {
   const lng = Number(longitude)
   const lat = Number(latitude)
   return Number.isFinite(lng) && Number.isFinite(lat) && lng >= 73 && lng <= 135 && lat >= 18 && lat <= 54
+}
+
+const getProvinceCenterByName = (provinceName) => {
+  const normalizedName = normalizeProvince(provinceName)
+  if (!normalizedName) {
+    return null
+  }
+
+  const matchedEntry = Array.from(provinceCenters.value.entries()).find(
+    ([name]) => normalizeProvince(name) === normalizedName
+  )
+  const center = matchedEntry?.[1]
+  return Array.isArray(center) && center.length >= 2 ? [Number(center[0]), Number(center[1])] : null
+}
+
+const isPointInRing = ([longitude, latitude], ring = []) => {
+  let inside = false
+
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const pointI = ring[i]
+    const pointJ = ring[j]
+    if (!Array.isArray(pointI) || !Array.isArray(pointJ)) {
+      continue
+    }
+
+    const xi = Number(pointI[0])
+    const yi = Number(pointI[1])
+    const xj = Number(pointJ[0])
+    const yj = Number(pointJ[1])
+    if (![xi, yi, xj, yj].every(Number.isFinite)) {
+      continue
+    }
+
+    const intersects = ((yi > latitude) !== (yj > latitude)) &&
+      longitude < ((xj - xi) * (latitude - yi)) / (yj - yi || Number.EPSILON) + xi
+    if (intersects) {
+      inside = !inside
+    }
+  }
+
+  return inside
+}
+
+const isPointInPolygon = (point, polygon = []) => {
+  if (!Array.isArray(polygon[0]) || !isPointInRing(point, polygon[0])) {
+    return false
+  }
+
+  return !polygon.slice(1).some((hole) => isPointInRing(point, hole))
+}
+
+const isPointInFeature = (point, feature) => {
+  const geometry = feature?.geometry
+  if (!geometry) {
+    return false
+  }
+
+  if (geometry.type === 'Polygon') {
+    return isPointInPolygon(point, geometry.coordinates)
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.some((polygon) => isPointInPolygon(point, polygon))
+  }
+
+  return false
+}
+
+const resolveHostMapCoordinates = (host) => {
+  const country = normalizeCountry(host?.country)
+  const province = normalizeProvince(host?.province)
+  const hasCoordinates = hasValidCoordinates(host?.longitude, host?.latitude)
+  const longitude = Number(host?.longitude)
+  const latitude = Number(host?.latitude)
+  const isDomestic = country === '中国' || Boolean(province)
+  const provinceCenter = getProvinceCenterByName(province)
+
+  if (!isDomestic) {
+    return hasCoordinates ? { longitude, latitude, source: 'raw' } : null
+  }
+
+  if (!province) {
+    return hasCoordinates ? { longitude, latitude, source: 'raw' } : null
+  }
+
+  if (hasCoordinates) {
+    const feature = provinceFeatureIndex.value.get(province)
+    if (!feature || isPointInFeature([longitude, latitude], feature)) {
+      return { longitude, latitude, source: 'raw' }
+    }
+
+    if (provinceCenter) {
+      return { longitude: provinceCenter[0], latitude: provinceCenter[1], source: 'province-center' }
+    }
+
+    return { longitude, latitude, source: 'raw' }
+  }
+
+  if (provinceCenter) {
+    return { longitude: provinceCenter[0], latitude: provinceCenter[1], source: 'province-center' }
+  }
+
+  return null
 }
 
 const isChinaHost = (host) => normalizeCountry(host?.country) === '中国' || isChinaCoordinate(host?.longitude, host?.latitude)
@@ -2938,6 +3226,12 @@ onUnmounted(() => {
   color: var(--danger);
 }
 
+.metric-card.tone-alert .metric-icon {
+  color: var(--warning);
+  background: linear-gradient(135deg, rgba(250, 219, 20, 0.14), rgba(255, 77, 79, 0.13));
+  box-shadow: inset 0 0 0 1px rgba(250, 219, 20, 0.12), 0 0 18px rgba(255, 77, 79, 0.12);
+}
+
 .metric-card.tone-warning .metric-icon {
   color: var(--warning);
 }
@@ -2960,6 +3254,63 @@ onUnmounted(() => {
   font-style: normal;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.metric-detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.metric-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.metric-detail i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.metric-detail strong {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.metric-detail.warning {
+  color: #fff0a6;
+  border-color: rgba(250, 219, 20, 0.2);
+  background: rgba(250, 219, 20, 0.08);
+}
+
+.metric-detail.warning i {
+  background: var(--warning);
+  box-shadow: 0 0 10px var(--warning);
+}
+
+.metric-detail.danger {
+  color: #ffd7d8;
+  border-color: rgba(255, 77, 79, 0.22);
+  background: rgba(255, 77, 79, 0.08);
+}
+
+.metric-detail.danger i {
+  background: var(--danger);
+  box-shadow: 0 0 10px var(--danger);
 }
 
 .metric-note {

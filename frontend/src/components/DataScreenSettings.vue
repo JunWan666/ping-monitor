@@ -18,6 +18,17 @@
       <el-form :model="config" label-width="140px">
         <el-divider content-position="left">基础设置</el-divider>
 
+        <el-form-item label="大屏名称">
+          <el-input
+            v-model="config.brand_name"
+            maxlength="60"
+            show-word-limit
+            placeholder="例如 your-service"
+            style="max-width: 360px"
+          />
+          <span class="form-tip">用于展示“名称 网络监控可视化大屏”</span>
+        </el-form-item>
+
         <el-form-item label="公开访问开关">
           <el-switch v-model="config.public_enabled" />
           <span class="form-tip">
@@ -107,6 +118,7 @@ import { View } from '@element-plus/icons-vue'
 import api from '../api'
 
 const defaultConfig = {
+  brand_name: '',
   refresh_interval: 5,
   enable_3d: true,
   enable_animation: true,
@@ -121,6 +133,7 @@ const config = ref({ ...defaultConfig })
 const saving = ref(false)
 
 const normalizeConfig = (payload = {}) => ({
+  brand_name: payload.brand_name ?? defaultConfig.brand_name,
   refresh_interval: payload.refresh_interval ?? defaultConfig.refresh_interval,
   enable_3d: payload.enable_3d ?? defaultConfig.enable_3d,
   enable_animation: payload.enable_animation ?? defaultConfig.enable_animation,

@@ -179,6 +179,7 @@ class DataScreenConfig(Base):
     __tablename__ = "datascreen_config"
 
     id = Column(Integer, primary_key=True, index=True)
+    brand_name = Column(String(120), default="", nullable=False)
     refresh_interval = Column(Integer, default=5, nullable=False)
     enable_3d = Column(Boolean, default=True, nullable=False)
     enable_animation = Column(Boolean, default=True, nullable=False)
