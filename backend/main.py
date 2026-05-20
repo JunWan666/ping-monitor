@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import socket
+import tempfile
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
@@ -80,7 +81,10 @@ PUBLIC_IP_SOURCES = (
 DATABASE_BACKUP_MAX_BYTES = 512 * 1024 * 1024
 DATABASE_BACKUP_LOG_LIMIT = 200
 DATABASE_IMPORT_JOB_TTL = timedelta(hours=6)
+DATABASE_EXPORT_JOB_TTL = timedelta(hours=6)
+DATABASE_EXPORT_DIR = os.path.join(tempfile.gettempdir(), "ping-monitor-exports")
 database_import_jobs: dict[str, dict[str, Any]] = {}
+database_export_jobs: dict[str, dict[str, Any]] = {}
 
 app = FastAPI(title="Ping 监控系统", version="2.0.0")
 
@@ -395,6 +399,161 @@ def run_database_import_job(job_id: str, sql_text: str, filename: str, username:
                 import_db.close()
             if post_import_db is not None:
                 post_import_db.close()
+
+
+def append_database_export_log(job: dict[str, Any], message: str) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    logs = job.setdefault("logs", [])
+    logs.append(f"[{timestamp}] {message}")
+    if len(logs) > DATABASE_BACKUP_LOG_LIMIT:
+        del logs[:-DATABASE_BACKUP_LOG_LIMIT]
+
+
+def update_database_export_job(job_id: str, **changes: Any) -> None:
+    job = database_export_jobs.get(job_id)
+    if not job:
+        return
+
+    message = changes.get("message")
+    if message:
+        append_database_export_log(job, str(message))
+
+    job.update(changes)
+    job["updated_at"] = datetime.now().isoformat(timespec="seconds")
+
+
+def cleanup_database_export_jobs() -> None:
+    cutoff = datetime.now() - DATABASE_EXPORT_JOB_TTL
+    for job_id, job in list(database_export_jobs.items()):
+        if job.get("status") not in {"completed", "failed"}:
+            continue
+
+        try:
+            updated_at = datetime.fromisoformat(job.get("updated_at") or job.get("created_at") or "")
+        except ValueError:
+            updated_at = datetime.now()
+
+        if updated_at >= cutoff:
+            continue
+
+        file_path = job.get("file_path")
+        if file_path:
+            try:
+                os.remove(file_path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logger.warning("Failed to remove database export file %s: %s", file_path, exc)
+        database_export_jobs.pop(job_id, None)
+
+
+def get_latest_active_database_export_job() -> dict[str, Any] | None:
+    active_jobs = [
+        job
+        for job in database_export_jobs.values()
+        if job.get("status") in {"queued", "running"}
+    ]
+    if not active_jobs:
+        return None
+
+    def get_job_updated_at(job: dict[str, Any]) -> datetime:
+        try:
+            return datetime.fromisoformat(job.get("updated_at") or job.get("created_at") or "")
+        except ValueError:
+            return datetime.min
+
+    return max(active_jobs, key=get_job_updated_at)
+
+
+def calculate_database_export_progress(payload: dict[str, Any]) -> int:
+    stage = payload.get("stage")
+    total_tables = payload.get("total_tables") or 0
+
+    if stage == "preparing":
+        return 1
+    if stage == "counting":
+        counted_tables = payload.get("counted_tables") or 0
+        if total_tables:
+            return min(15, 3 + int(counted_tables / total_tables * 12))
+        return 5
+    if stage == "writing":
+        exported_rows = payload.get("exported_rows") or 0
+        total_rows = payload.get("total_rows") or 0
+        if total_rows:
+            return min(98, 15 + int(exported_rows / total_rows * 83))
+
+        table_index = payload.get("table_index") or 0
+        if total_tables:
+            return min(98, 15 + int(table_index / total_tables * 83))
+        return 20
+    if stage == "completed":
+        return 100
+    return 0
+
+
+def run_database_export_job(job_id: str, filename: str, username: str) -> None:
+    export_db: Session | None = SessionLocal()
+    file_path = os.path.join(DATABASE_EXPORT_DIR, f"{job_id}.sql")
+
+    def on_progress(payload: dict[str, Any]) -> None:
+        update_database_export_job(
+            job_id,
+            **payload,
+            progress=calculate_database_export_progress(payload),
+        )
+
+    update_database_export_job(
+        job_id,
+        status="running",
+        stage="preparing",
+        progress=1,
+        message=f"准备导出 {filename}",
+    )
+
+    try:
+        os.makedirs(DATABASE_EXPORT_DIR, exist_ok=True)
+        total_bytes = 0
+
+        with open(file_path, "w", encoding="utf-8", newline="") as export_file:
+            for chunk in iter_database_backup_sql(export_db, progress_callback=on_progress):
+                export_file.write(chunk)
+                total_bytes += len(chunk.encode("utf-8"))
+
+        file_size = os.path.getsize(file_path)
+        update_database_export_job(
+            job_id,
+            status="completed",
+            stage="completed",
+            progress=100,
+            file_path=file_path,
+            file_size=file_size,
+            result={
+                "message": "数据库备份导出完成",
+                "filename": filename,
+                "file_size": file_size,
+                "written_bytes": total_bytes,
+            },
+            message=f"导出完成，文件大小 {file_size / 1024 / 1024:.2f} MB",
+        )
+        logger.info("User %s exported database backup %s", username, filename)
+    except Exception as exc:
+        logger.exception("Database backup export failed: %s", exc)
+        try:
+            os.remove(file_path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("Failed to remove incomplete database export file: %s", file_path)
+        update_database_export_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            error=str(exc),
+            message=f"导出失败：{exc}",
+        )
+    finally:
+        if export_db is not None:
+            export_db.close()
 
 
 def get_or_create_system_config(db: Session) -> SystemConfig:
@@ -1493,7 +1652,7 @@ async def send_report(
 
 
 @app.get("/api/database/export")
-async def export_database_backup(
+async def stream_database_backup(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1506,6 +1665,83 @@ async def export_database_backup(
         iter_database_backup_sql(db),
         media_type="application/sql; charset=utf-8",
         headers=headers,
+    )
+
+
+@app.post("/api/database/export")
+async def create_database_export_job(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
+    cleanup_database_export_jobs()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"ping_monitor_backup_{timestamp}.sql"
+    job_id = uuid.uuid4().hex
+    database_export_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "progress": 0,
+        "filename": filename,
+        "username": current_user.username,
+        "logs": [],
+        "result": None,
+        "error": None,
+        "file_path": None,
+        "file_size": 0,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    append_database_export_log(database_export_jobs[job_id], f"已创建导出任务：{filename}")
+    background_tasks.add_task(run_database_export_job, job_id, filename, current_user.username)
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "filename": filename,
+        "message": "数据库备份导出任务已开始",
+    }
+
+
+@app.get("/api/database/export/latest")
+async def get_latest_database_export_status(current_user: User = Depends(get_current_user)):
+    cleanup_database_export_jobs()
+
+    job = get_latest_active_database_export_job()
+    if not job:
+        raise HTTPException(status_code=404, detail="当前没有正在导出的任务")
+    return job
+
+
+@app.get("/api/database/export/{job_id}")
+async def get_database_export_status(job_id: str, current_user: User = Depends(get_current_user)):
+    cleanup_database_export_jobs()
+
+    job = database_export_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="导出任务不存在")
+    return job
+
+
+@app.get("/api/database/export/{job_id}/download")
+async def download_database_export(job_id: str, current_user: User = Depends(get_current_user)):
+    cleanup_database_export_jobs()
+
+    job = database_export_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="导出任务不存在")
+    if job.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="导出任务尚未完成")
+
+    file_path = job.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="导出文件已过期或不存在")
+
+    return FileResponse(
+        file_path,
+        media_type="application/sql; charset=utf-8",
+        filename=job.get("filename") or "ping_monitor_backup.sql",
     )
 
 

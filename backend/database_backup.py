@@ -60,7 +60,7 @@ def _iter_table_rows(db: Session, table):
     return db.execute(statement).mappings()
 
 
-def _iter_insert_statements(db: Session, table, dialect_name: str) -> Iterator[str]:
+def _iter_insert_statements(db: Session, table, dialect_name: str) -> Iterator[tuple[str, int]]:
     columns = list(table.columns)
     quoted_table = _quote_identifier(table.name)
     quoted_columns = ", ".join(_quote_identifier(column.name) for column in columns)
@@ -71,16 +71,55 @@ def _iter_insert_statements(db: Session, table, dialect_name: str) -> Iterator[s
         values = ", ".join(_format_sql_value(row[column.name], dialect_name) for column in columns)
         batch.append(f"({values})")
         if len(batch) >= INSERT_BATCH_SIZE:
-            yield prefix + ",\n".join(batch) + ";\n"
+            yield prefix + ",\n".join(batch) + ";\n", len(batch)
             batch = []
 
     if batch:
-        yield prefix + ",\n".join(batch) + ";\n"
+        yield prefix + ",\n".join(batch) + ";\n", len(batch)
 
 
-def iter_database_backup_sql(db: Session) -> Iterator[str]:
+def iter_database_backup_sql(
+    db: Session,
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> Iterator[str]:
     dialect_name = db.bind.dialect.name if db.bind is not None else "unknown"
     generated_at = datetime.now().isoformat(timespec="seconds")
+    tables = list(Base.metadata.sorted_tables)
+    table_counts: dict[str, int] = {}
+    total_rows = 0
+
+    if progress_callback is not None:
+        _emit_progress(
+            progress_callback,
+            stage="counting",
+            message="正在统计数据表行数",
+            counted_tables=0,
+            total_tables=len(tables),
+        )
+        for index, table in enumerate(tables, start=1):
+            row_count = db.execute(select(func.count()).select_from(table)).scalar_one()
+            table_counts[table.name] = row_count
+            total_rows += row_count
+            if index == len(tables) or index % 2 == 0:
+                _emit_progress(
+                    progress_callback,
+                    stage="counting",
+                    message=f"已统计 {index}/{len(tables)} 张数据表",
+                    counted_tables=index,
+                    total_tables=len(tables),
+                    total_rows=total_rows,
+                )
+
+        _emit_progress(
+            progress_callback,
+            stage="writing",
+            message=f"开始生成 SQL 文件，共 {len(tables)} 张表、{total_rows} 行数据",
+            exported_rows=0,
+            total_rows=total_rows,
+            total_tables=len(tables),
+            table_counts=table_counts,
+        )
 
     yield f"{BACKUP_HEADER}\n"
     yield f"-- Generated at: {generated_at}\n"
@@ -92,16 +131,50 @@ def iter_database_backup_sql(db: Session) -> Iterator[str]:
         yield "PRAGMA foreign_keys=OFF;\n"
     yield "\n"
 
-    for table in reversed(Base.metadata.sorted_tables):
+    for table in reversed(tables):
         yield f"DELETE FROM {_quote_identifier(table.name)};\n"
     yield "\n"
 
-    for table in Base.metadata.sorted_tables:
+    exported_rows = 0
+    last_logged_rows = 0
+    for table_index, table in enumerate(tables, start=1):
+        if progress_callback is not None:
+            _emit_progress(
+                progress_callback,
+                stage="writing",
+                message=f"正在导出数据表 {table.name}",
+                current_table=table.name,
+                table_index=table_index,
+                total_tables=len(tables),
+                exported_rows=exported_rows,
+                total_rows=total_rows,
+            )
+
         yield f"-- Table: {table.name}\n"
         has_rows = False
-        for statement in _iter_insert_statements(db, table, dialect_name):
+        for statement, batch_rows in _iter_insert_statements(db, table, dialect_name):
             has_rows = True
             yield statement
+            exported_rows += batch_rows
+
+            if progress_callback is not None:
+                should_log_rows = (
+                    total_rows
+                    and (exported_rows == total_rows or exported_rows - last_logged_rows >= 50000)
+                )
+                _emit_progress(
+                    progress_callback,
+                    stage="writing",
+                    message=f"已导出 {exported_rows}/{total_rows} 行数据" if should_log_rows else None,
+                    current_table=table.name,
+                    table_index=table_index,
+                    total_tables=len(tables),
+                    exported_rows=exported_rows,
+                    total_rows=total_rows,
+                )
+                if should_log_rows:
+                    last_logged_rows = exported_rows
+
         if not has_rows:
             yield f"-- Empty table: {table.name}\n"
         yield "\n"
@@ -110,6 +183,17 @@ def iter_database_backup_sql(db: Session) -> Iterator[str]:
         yield "SET FOREIGN_KEY_CHECKS=1;\n"
     elif dialect_name == "sqlite":
         yield "PRAGMA foreign_keys=ON;\n"
+
+    if progress_callback is not None:
+        _emit_progress(
+            progress_callback,
+            stage="completed",
+            message="SQL 文件生成完成",
+            exported_rows=exported_rows,
+            total_rows=total_rows,
+            total_tables=len(tables),
+            table_counts=table_counts,
+        )
 
 
 def _split_sql_statements(sql_text: str) -> list[str]:

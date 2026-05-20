@@ -8,6 +8,32 @@
       class="backup-alert"
     />
 
+    <el-card v-if="exporting || exportStatus" shadow="never" class="import-status-card">
+      <template #header>
+        <div class="card-header">
+          <span>导出状态</span>
+          <el-tag :type="exportStatusTag" effect="plain">{{ exportStatusText }}</el-tag>
+        </div>
+      </template>
+
+      <el-progress
+        :percentage="exportProgress"
+        :status="exportStatus === 'failed' ? 'exception' : exportStatus === 'completed' ? 'success' : undefined"
+      />
+
+      <div class="import-meta">
+        <span>{{ exportStageText }}</span>
+        <span v-if="exportCurrentTable">当前表：{{ exportCurrentTable }}</span>
+        <span v-if="exportFileSize">文件大小：{{ formatBytes(exportFileSize) }}</span>
+      </div>
+
+      <div ref="exportLogRef" class="import-log">
+        <div v-for="(line, index) in exportLogs" :key="index" class="import-log-line">
+          {{ line }}
+        </div>
+      </div>
+    </el-card>
+
     <el-card v-if="importing || importStatus" shadow="never" class="import-status-card">
       <template #header>
         <div class="card-header">
@@ -109,11 +135,20 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 const router = useRouter()
+const ACTIVE_EXPORT_JOB_KEY = 'ping-monitor-active-export-job-id'
 const ACTIVE_IMPORT_JOB_KEY = 'ping-monitor-active-import-job-id'
 const IMPORT_SUMMARY_KEY = 'ping-monitor-import-summary'
 
 const exporting = ref(false)
 const importing = ref(false)
+const exportJobId = ref('')
+const exportStatus = ref('')
+const exportStage = ref('')
+const exportProgress = ref(0)
+const exportLogs = ref([])
+const exportCurrentTable = ref('')
+const exportFileSize = ref(0)
+const exportLogRef = ref(null)
 const importJobId = ref('')
 const importStatus = ref('')
 const importStage = ref('')
@@ -121,9 +156,11 @@ const importProgress = ref(0)
 const importLogs = ref([])
 const importCurrentTable = ref('')
 const importLogRef = ref(null)
-const pollTimer = ref(null)
+const exportPollTimer = ref(null)
+const importPollTimer = ref(null)
 const fileList = ref([])
 const selectedFile = ref(null)
+const resumingExport = ref(false)
 const resumingImport = ref(false)
 let componentUnmounted = false
 
@@ -150,7 +187,28 @@ const stageLabels = {
   failed: '导入失败'
 }
 
+const exportStageLabels = {
+  queued: '等待导出任务开始',
+  preparing: '准备导出',
+  counting: '统计数据量',
+  writing: '生成 SQL 文件',
+  completed: '导出完成',
+  failed: '导出失败'
+}
+
 const selectedFileSize = computed(() => formatBytes(selectedFile.value?.size || 0))
+const exportStageText = computed(() => exportStageLabels[exportStage.value] || '准备中')
+const exportStatusText = computed(() => {
+  if (exportStatus.value === 'completed') return '完成'
+  if (exportStatus.value === 'failed') return '失败'
+  if (exporting.value) return '进行中'
+  return '待开始'
+})
+const exportStatusTag = computed(() => {
+  if (exportStatus.value === 'completed') return 'success'
+  if (exportStatus.value === 'failed') return 'danger'
+  return 'warning'
+})
 const importStageText = computed(() => stageLabels[importStage.value] || '准备中')
 const importStatusText = computed(() => {
   if (importStatus.value === 'completed') return '完成'
@@ -218,11 +276,27 @@ const buildImportSummary = (result) => {
   ].filter(Boolean).join('\n')
 }
 
-const clearPollTimer = () => {
-  if (pollTimer.value) {
-    window.clearInterval(pollTimer.value)
-    pollTimer.value = null
+const clearExportPollTimer = () => {
+  if (exportPollTimer.value) {
+    window.clearInterval(exportPollTimer.value)
+    exportPollTimer.value = null
   }
+}
+
+const clearImportPollTimer = () => {
+  if (importPollTimer.value) {
+    window.clearInterval(importPollTimer.value)
+    importPollTimer.value = null
+  }
+}
+
+const rememberActiveExportJob = (jobId) => {
+  if (jobId) {
+    sessionStorage.setItem(ACTIVE_EXPORT_JOB_KEY, jobId)
+    return
+  }
+
+  sessionStorage.removeItem(ACTIVE_EXPORT_JOB_KEY)
 }
 
 const rememberActiveImportJob = (jobId) => {
@@ -234,11 +308,103 @@ const rememberActiveImportJob = (jobId) => {
   sessionStorage.removeItem(ACTIVE_IMPORT_JOB_KEY)
 }
 
+const scrollExportLogToBottom = async () => {
+  await nextTick()
+  if (exportLogRef.value) {
+    exportLogRef.value.scrollTop = exportLogRef.value.scrollHeight
+  }
+}
+
 const scrollImportLogToBottom = async () => {
   await nextTick()
   if (importLogRef.value) {
     importLogRef.value.scrollTop = importLogRef.value.scrollHeight
   }
+}
+
+const applyExportJob = (job) => {
+  exportStatus.value = job.status || ''
+  exportStage.value = job.stage || ''
+  exportProgress.value = Number(job.progress || 0)
+  exportLogs.value = job.logs || []
+  exportCurrentTable.value = job.current_table || ''
+  exportFileSize.value = Number(job.file_size || job.result?.file_size || 0)
+}
+
+const finishExport = async (job) => {
+  clearExportPollTimer()
+  exporting.value = false
+  rememberActiveExportJob('')
+
+  if (job.status === 'failed') {
+    ElMessage.error(`导出失败：${job.error || '未知错误'}`)
+    return
+  }
+
+  try {
+    const blob = await api.downloadDatabaseExport(job.job_id)
+    downloadBlob(blob, job.filename || `ping_monitor_backup_${buildTimestamp()}.sql`)
+    ElMessage.success('SQL 备份导出成功')
+  } catch (error) {
+    ElMessage.error(`下载导出文件失败：${getErrorMessage(error)}`)
+  }
+}
+
+const pollExportStatus = async () => {
+  if (!exportJobId.value) return
+
+  try {
+    const job = await api.getDatabaseExportStatus(exportJobId.value)
+    applyExportJob(job)
+    if (job.status === 'completed' || job.status === 'failed') {
+      await finishExport(job)
+    }
+  } catch (error) {
+    clearExportPollTimer()
+    exporting.value = false
+    if (error.response?.status === 404) {
+      rememberActiveExportJob('')
+    }
+    ElMessage.error(`获取导出状态失败：${getErrorMessage(error)}`)
+  }
+}
+
+const startExportPolling = () => {
+  clearExportPollTimer()
+  exportPollTimer.value = window.setInterval(pollExportStatus, 1000)
+  pollExportStatus()
+}
+
+const resumeActiveExportJob = async () => {
+  if (exporting.value || resumingExport.value) {
+    return
+  }
+
+  let activeJobId = sessionStorage.getItem(ACTIVE_EXPORT_JOB_KEY)
+  if (!activeJobId) {
+    resumingExport.value = true
+    try {
+      const latestJob = await api.getLatestDatabaseExportStatus()
+      activeJobId = latestJob.job_id
+      rememberActiveExportJob(activeJobId)
+      applyExportJob(latestJob)
+    } catch (error) {
+      return
+    } finally {
+      resumingExport.value = false
+    }
+  }
+
+  if (!activeJobId || (exportJobId.value === activeJobId && exportPollTimer.value)) {
+    return
+  }
+
+  exportJobId.value = activeJobId
+  exporting.value = true
+  exportStatus.value = exportStatus.value || 'queued'
+  exportStage.value = exportStage.value || 'queued'
+  exportLogs.value = exportLogs.value.length ? exportLogs.value : ['正在恢复后台导出任务进度...']
+  startExportPolling()
 }
 
 const applyImportJob = (job) => {
@@ -250,7 +416,7 @@ const applyImportJob = (job) => {
 }
 
 const finishImport = async (job) => {
-  clearPollTimer()
+  clearImportPollTimer()
   importing.value = false
   rememberActiveImportJob('')
 
@@ -283,7 +449,7 @@ const pollImportStatus = async () => {
       await finishImport(job)
     }
   } catch (error) {
-    clearPollTimer()
+    clearImportPollTimer()
     importing.value = false
     if (error.response?.status === 404) {
       rememberActiveImportJob('')
@@ -293,8 +459,8 @@ const pollImportStatus = async () => {
 }
 
 const startImportPolling = () => {
-  clearPollTimer()
-  pollTimer.value = window.setInterval(pollImportStatus, 1000)
+  clearImportPollTimer()
+  importPollTimer.value = window.setInterval(pollImportStatus, 1000)
   pollImportStatus()
 }
 
@@ -318,7 +484,7 @@ const resumeActiveImportJob = async () => {
     }
   }
 
-  if (!activeJobId || (importJobId.value === activeJobId && pollTimer.value)) {
+  if (!activeJobId || (importJobId.value === activeJobId && importPollTimer.value)) {
     return
   }
 
@@ -331,15 +497,29 @@ const resumeActiveImportJob = async () => {
 }
 
 const exportBackup = async () => {
+  if (exporting.value) {
+    return
+  }
+
   exporting.value = true
+  exportJobId.value = ''
+  exportStatus.value = 'queued'
+  exportStage.value = 'queued'
+  exportProgress.value = 0
+  exportCurrentTable.value = ''
+  exportFileSize.value = 0
+  exportLogs.value = ['正在创建 SQL 导出任务...']
+
   try {
-    const blob = await api.exportDatabaseBackup()
-    downloadBlob(blob, `ping_monitor_backup_${buildTimestamp()}.sql`)
-    ElMessage.success('SQL 备份导出成功')
+    const result = await api.exportDatabaseBackup()
+    exportJobId.value = result.job_id
+    rememberActiveExportJob(result.job_id)
+    if (!componentUnmounted) {
+      startExportPolling()
+    }
   } catch (error) {
-    ElMessage.error(`导出失败：${getErrorMessage(error)}`)
-  } finally {
     exporting.value = false
+    ElMessage.error(`导出失败：${getErrorMessage(error)}`)
   }
 }
 
@@ -412,18 +592,22 @@ const importBackup = async () => {
 
 onBeforeUnmount(() => {
   componentUnmounted = true
-  clearPollTimer()
+  clearExportPollTimer()
+  clearImportPollTimer()
 })
 
 onMounted(() => {
   componentUnmounted = false
+  resumeActiveExportJob()
   resumeActiveImportJob()
 })
 
 onActivated(() => {
+  resumeActiveExportJob()
   resumeActiveImportJob()
 })
 
+watch(exportLogs, scrollExportLogToBottom)
 watch(importLogs, scrollImportLogToBottom)
 </script>
 

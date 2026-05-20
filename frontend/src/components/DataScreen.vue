@@ -49,7 +49,11 @@
       </div>
     </header>
 
-    <section class="metric-grid">
+    <section
+      id="mobile-overview"
+      class="metric-grid"
+      :class="{ 'is-mobile-active': activeMobileTab === 'overview' }"
+    >
       <article
         v-for="metric in metricCards"
         :key="metric.key"
@@ -82,9 +86,61 @@
       </article>
     </section>
 
+    <section
+      class="mobile-overview-detail glass-panel"
+      :class="{ 'is-mobile-active': activeMobileTab === 'overview' }"
+    >
+      <div class="panel-head">
+        <div>
+          <div class="panel-kicker">Overview</div>
+          <h2>运行概况</h2>
+        </div>
+        <div class="panel-extra">实时同步</div>
+      </div>
+
+      <div class="mobile-health-grid">
+        <div
+          v-for="item in mobileHealthStats"
+          :key="item.label"
+          class="mobile-health-item"
+          :class="item.tone"
+        >
+          <label>
+            <span></span>
+            {{ item.label }}
+          </label>
+          <strong>{{ item.value }}</strong>
+        </div>
+      </div>
+
+      <div class="mobile-data-grid">
+        <div v-for="item in mobileOverviewStats" :key="item.label" class="mobile-data-item">
+          <label>{{ item.label }}</label>
+          <strong>{{ item.value }}</strong>
+          <span>{{ item.unit }}</span>
+        </div>
+      </div>
+
+      <div class="mobile-section-title">覆盖热点</div>
+      <div class="mobile-chip-row">
+        <span v-for="item in topProvinceTags" :key="item.name" class="mobile-chip">
+          {{ item.name }}
+          <strong>{{ item.value }}台</strong>
+        </span>
+      </div>
+
+      <div class="mobile-section-title">网络分布</div>
+      <div class="mobile-chip-row">
+        <span v-for="item in topIspTags" :key="item.name" class="mobile-chip">
+          {{ item.name }}
+          <strong>{{ item.value }}台</strong>
+        </span>
+      </div>
+    </section>
+
     <section class="screen-body">
       <aside class="side-column">
-        <section class="panel glass-panel">
+        <section class="panel glass-panel trend-panel">
           <div class="panel-head">
             <div>
               <div class="panel-kicker">Performance</div>
@@ -95,13 +151,22 @@
           <div ref="trendChartRef" class="chart-panel trend-chart"></div>
         </section>
 
-        <section class="panel glass-panel">
+        <section
+          id="mobile-alerts"
+          class="panel glass-panel alert-panel"
+          :class="{ 'is-mobile-active': activeMobileTab === 'alerts' }"
+        >
           <div class="panel-head">
             <div>
               <div class="panel-kicker">Alert Stream</div>
               <h2>实时告警滚动</h2>
             </div>
             <div class="panel-extra">{{ alerts.length }} 条</div>
+          </div>
+          <div class="mobile-alert-summary">
+            <span class="warning">告警 {{ summary.warningHosts }} 台</span>
+            <span class="danger">离线 {{ summary.offlineHosts }} 台</span>
+            <span>最近 {{ alerts.length }} 条</span>
           </div>
           <div class="alert-marquee">
             <div class="alert-list">
@@ -131,7 +196,11 @@
       </aside>
 
       <main class="center-column">
-        <section class="stage-panel glass-panel">
+        <section
+          id="mobile-map"
+          class="stage-panel glass-panel"
+          :class="{ 'is-mobile-active': activeMobileTab === 'map' }"
+        >
           <div class="panel-head stage-head">
             <div>
               <div class="panel-kicker">Main Stage</div>
@@ -201,6 +270,17 @@
               <div class="legend-note">{{ legendNote }}</div>
             </div>
           </div>
+
+          <div class="mobile-map-detail">
+            <div class="mobile-data-grid">
+              <div v-for="item in mobileMapStats" :key="item.label" class="mobile-data-item">
+                <label>{{ item.label }}</label>
+                <strong>{{ item.value }}</strong>
+                <span>{{ item.unit }}</span>
+              </div>
+            </div>
+            <div class="mobile-map-note">{{ legendNote }}</div>
+          </div>
         </section>
       </main>
 
@@ -227,13 +307,23 @@
           </div>
         </section>
 
-        <section class="panel glass-panel ranking-panel">
+        <section
+          id="mobile-ranking"
+          class="panel glass-panel ranking-panel"
+          :class="{ 'is-mobile-active': activeMobileTab === 'ranking' }"
+        >
           <div class="panel-head">
             <div>
               <div class="panel-kicker">Hot Spot</div>
               <h2>响应时间最慢 TOP10</h2>
             </div>
             <div class="panel-extra">按 24H 平均 RTT</div>
+          </div>
+
+          <div class="mobile-ranking-summary">
+            <span>平均延迟 {{ summary.avgRtt.toFixed(1) }}ms</span>
+            <span v-if="slowHosts[0]">最慢 {{ slowHosts[0].avg_rtt.toFixed(1) }}ms</span>
+            <span>在线率 {{ summary.onlineRate.toFixed(1) }}%</span>
           </div>
 
           <div class="ranking-list">
@@ -266,6 +356,41 @@
         </section>
       </aside>
     </section>
+
+    <nav class="mobile-tabbar glass-panel" aria-label="移动端大屏导航">
+      <button
+        type="button"
+        :class="{ active: activeMobileTab === 'overview' }"
+        @click="setMobileTab('overview')"
+      >
+        <el-icon><Monitor /></el-icon>
+        <span>总览</span>
+      </button>
+      <button
+        type="button"
+        :class="{ active: activeMobileTab === 'map' }"
+        @click="setMobileTab('map')"
+      >
+        <el-icon><DataAnalysis /></el-icon>
+        <span>地图</span>
+      </button>
+      <button
+        type="button"
+        :class="{ active: activeMobileTab === 'alerts' }"
+        @click="setMobileTab('alerts')"
+      >
+        <el-icon><Bell /></el-icon>
+        <span>告警</span>
+      </button>
+      <button
+        type="button"
+        :class="{ active: activeMobileTab === 'ranking' }"
+        @click="setMobileTab('ranking')"
+      >
+        <el-icon><Timer /></el-icon>
+        <span>排行</span>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -291,6 +416,7 @@ const CHINA_MAP_NAME = 'ping-monitor-china'
 const WORLD_MAP_NAME = 'ping-monitor-world'
 const VISIBLE_ALERT_COUNT = 5
 const WARNING_RTT_THRESHOLD = 100
+const LIVE_TREND_POINT_LIMIT = 48
 
 const themePalettes = {
   blue: {
@@ -410,6 +536,7 @@ const databoardStats = ref({
   trend_data: []
 })
 const alerts = ref([])
+const liveTrendPoints = ref([])
 const currentTime = ref('')
 const lastUpdatedAt = ref(null)
 const loading = ref(false)
@@ -426,6 +553,8 @@ const resolveInitialMapView = () => {
 }
 
 const currentMapView = ref(resolveInitialMapView())
+const activeMobileTab = ref('overview')
+const isTouchLikeDevice = ref(false)
 
 const screenShellRef = ref(null)
 const trendChartRef = ref(null)
@@ -507,6 +636,8 @@ const themeStyle = computed(() => ({
   '--grid-line': palette.value.grid,
   '--animation-state': screenConfig.enable_animation ? 'running' : 'paused'
 }))
+
+const mapTooltipTriggerOn = computed(() => (isTouchLikeDevice.value ? 'click' : 'mousemove|click'))
 
 const mapStageStyle = computed(() => ({
   '--map-tilt': screenConfig.enable_3d && currentMapView.value === 'china' ? `${clamp(screenConfig.map_view_angle * 0.24, 4, 11)}deg` : '0deg',
@@ -938,6 +1069,39 @@ const ispDistribution = computed(() => {
 })
 
 const topIspTags = computed(() => ispDistribution.value.slice(0, 6))
+const topProvinceTags = computed(() => provinceDistribution.value.slice(0, 6))
+
+const mobileHealthStats = computed(() => [
+  { label: '在线', value: `${summary.value.onlineHosts} 台`, tone: 'success' },
+  { label: '告警', value: `${summary.value.warningHosts} 台`, tone: 'warning' },
+  { label: '离线', value: `${summary.value.offlineHosts} 台`, tone: 'danger' },
+  { label: '在线率', value: `${summary.value.onlineRate.toFixed(1)}%`, tone: 'success' }
+])
+
+const mobileOverviewStats = computed(() => [
+  { label: '覆盖省份', value: activeProvinceCount.value, unit: '个' },
+  { label: '覆盖国家', value: activeCountryCount.value, unit: '个' },
+  { label: '地理点位', value: geoPointCount.value, unit: '个' },
+  { label: '海外主机', value: overseasHostCount.value, unit: '台' }
+])
+
+const mobileMapStats = computed(() => [
+  { label: '当前视图', value: currentMapView.value === 'china' ? '中国' : '全球', unit: '' },
+  { label: '显示点位', value: visibleGeoPointCount.value, unit: '个' },
+  { label: currentMapView.value === 'china' ? '覆盖省份' : '覆盖国家', value: currentMapView.value === 'china' ? activeProvinceCount.value : activeCountryCount.value, unit: '个' },
+  { label: '海外主机', value: overseasHostCount.value, unit: '台' }
+])
+
+const trendChartData = computed(() => {
+  const history = databoardStats.value.trend_data || []
+  const liveTail = liveTrendPoints.value.slice(-8)
+
+  if (!history.length) {
+    return liveTrendPoints.value
+  }
+
+  return [...history.slice(-24), ...liveTail]
+})
 
 const slowHosts = computed(() => {
   const source = databoardStats.value.host_stats?.length
@@ -1037,7 +1201,11 @@ const metricCards = computed(() => [
 
 const trendSummary = computed(() => {
   const points = databoardStats.value.trend_data?.length || 0
-  return points ? `${points} 个采样点` : '等待趋势样本'
+  if (points) {
+    return liveTrendPoints.value.length ? `${points} 个历史点 + 实时尾迹` : `${points} 个采样点`
+  }
+
+  return liveTrendPoints.value.length ? `实时采样 ${liveTrendPoints.value.length} 点` : '等待趋势样本'
 })
 
 const lastUpdatedLabel = computed(() => {
@@ -1049,6 +1217,18 @@ const lastUpdatedLabel = computed(() => {
 
 const goToAdmin = () => {
   router.push('/admin/login')
+}
+
+const setMobileTab = async (tab) => {
+  activeMobileTab.value = tab
+  await nextTick()
+
+  screenShellRef.value?.scrollTo?.({ top: 0, behavior: 'smooth' })
+  window.setTimeout(() => {
+    trendChartInstance?.resize()
+    mapChartInstance?.resize()
+    ispChartInstance?.resize()
+  }, 320)
 }
 
 const syncFullscreenState = () => {
@@ -1223,6 +1403,7 @@ const fetchScreenData = async () => {
     alerts.value = alertData.items || []
     applyScreenConfig(screenData.screen_config)
     lastUpdatedAt.value = new Date()
+    appendLiveTrendPoint()
     animateMetrics()
     resetRefreshTimer()
     resetAlertTicker()
@@ -1235,6 +1416,33 @@ const fetchScreenData = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const appendLiveTrendPoint = () => {
+  if (!summary.value.totalHosts) {
+    return
+  }
+
+  const now = new Date()
+  const point = {
+    time: now.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }),
+    avg_packet_loss: Number(average(hosts.value.map((host) => Number(host.packet_loss) || 0)).toFixed(2)),
+    avg_rtt: Number(summary.value.avgRtt.toFixed(2)),
+    online_rate: Number(summary.value.onlineRate.toFixed(2)),
+    source: 'live'
+  }
+  const latestPoint = liveTrendPoints.value.at(-1)
+
+  if (latestPoint?.time === point.time) {
+    liveTrendPoints.value = [...liveTrendPoints.value.slice(0, -1), point]
+    return
+  }
+
+  liveTrendPoints.value = [...liveTrendPoints.value, point].slice(-LIVE_TREND_POINT_LIMIT)
 }
 
 const animateMetrics = () => {
@@ -1320,12 +1528,17 @@ const renderTrendChart = () => {
     return
   }
 
-  const trendData = databoardStats.value.trend_data || []
+  const trendData = trendChartData.value
+  const latestTrendPoint = trendData.at(-1)
+  const hasHistoricalTrend = Boolean(databoardStats.value.trend_data?.length)
+  const isLiveFallback = !hasHistoricalTrend && trendData.length > 0
+  const showLiveSymbols = isLiveFallback || trendData.length <= 2
 
   trendChartInstance.setOption(
     {
       animationDuration: 800,
       animationDurationUpdate: 900,
+      animationEasingUpdate: 'cubicOut',
       backgroundColor: 'transparent',
       grid: {
         top: 54,
@@ -1344,6 +1557,7 @@ const renderTrendChart = () => {
       legend: {
         top: 1,
         right: 2,
+        data: ['平均延迟', '平均在线率'],
         itemWidth: 10,
         itemHeight: 10,
         textStyle: {
@@ -1399,7 +1613,9 @@ const renderTrendChart = () => {
           name: '平均延迟',
           type: 'line',
           smooth: true,
-          showSymbol: false,
+          showSymbol: showLiveSymbols,
+          symbol: 'circle',
+          symbolSize: 6,
           data: trendData.map((item) => Number(item.avg_rtt) || 0),
           lineStyle: {
             width: 3,
@@ -1417,12 +1633,51 @@ const renderTrendChart = () => {
           type: 'line',
           yAxisIndex: 1,
           smooth: true,
-          showSymbol: false,
+          showSymbol: showLiveSymbols,
+          symbol: 'circle',
+          symbolSize: 5,
           data: trendData.map((item) => Number(item.online_rate) || 0),
           lineStyle: {
             width: 2,
             type: 'dashed',
             color: palette.value.success
+          }
+        },
+        {
+          name: '实时延迟点',
+          type: 'effectScatter',
+          coordinateSystem: 'cartesian2d',
+          tooltip: { show: false },
+          rippleEffect: {
+            scale: 3.2,
+            brushType: 'stroke'
+          },
+          symbolSize: 9,
+          z: 8,
+          data: latestTrendPoint ? [[latestTrendPoint.time, Number(latestTrendPoint.avg_rtt) || 0]] : [],
+          itemStyle: {
+            color: palette.value.accent,
+            shadowBlur: 16,
+            shadowColor: `${palette.value.accent}99`
+          }
+        },
+        {
+          name: '实时在线率点',
+          type: 'effectScatter',
+          coordinateSystem: 'cartesian2d',
+          yAxisIndex: 1,
+          tooltip: { show: false },
+          rippleEffect: {
+            scale: 2.8,
+            brushType: 'stroke'
+          },
+          symbolSize: 7,
+          z: 8,
+          data: latestTrendPoint ? [[latestTrendPoint.time, Number(latestTrendPoint.online_rate) || 0]] : [],
+          itemStyle: {
+            color: palette.value.success,
+            shadowBlur: 12,
+            shadowColor: `${palette.value.success}77`
           }
         }
       ]
@@ -1485,18 +1740,20 @@ const renderMapChart = () => {
       animationDurationUpdate: 1000,
       tooltip: {
         trigger: 'item',
-        triggerOn: 'mousemove|click',
-        enterable: false,
+        triggerOn: mapTooltipTriggerOn.value,
+        enterable: !isTouchLikeDevice.value,
         confine: true,
         appendToBody: true,
         alwaysShowContent: false,
-        hideDelay: 140,
+        hideDelay: isTouchLikeDevice.value ? 0 : 140,
         transitionDuration: 0.12,
         padding: 0,
         borderWidth: 1,
         backgroundColor: 'rgba(5, 16, 34, 0.96)',
         borderColor: palette.value.border,
-        extraCssText: 'box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38); border-radius: 18px; max-width: 360px; overflow: hidden;',
+        extraCssText: isTouchLikeDevice.value
+          ? 'box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42); border-radius: 14px; max-width: min(320px, calc(100vw - 24px)); overflow: hidden;'
+          : 'box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38); border-radius: 18px; max-width: 360px; overflow: hidden;',
         textStyle: {
           color: palette.value.text
         },
@@ -1837,6 +2094,12 @@ const renderIspChart = () => {
   const data = ispDistribution.value.length
     ? ispDistribution.value
     : [{ name: '暂无数据', value: 1 }]
+  const chartRect = ispChartRef.value?.getBoundingClientRect?.()
+  const chartWidth = chartRect?.width || 260
+  const chartHeight = chartRect?.height || 196
+  const chartCenterYPercent = chartHeight < 170 ? 45 : 43
+  const centerX = chartWidth / 2
+  const centerY = chartHeight * (chartCenterYPercent / 100)
 
   ispChartInstance.setOption(
     {
@@ -1868,8 +2131,8 @@ const renderIspChart = () => {
           right: 4,
           top: 4,
           bottom: 28,
-          radius: ['37%', '61%'],
-          center: ['50%', '40%'],
+          radius: ['45%', '62%'],
+          center: ['50%', `${chartCenterYPercent}%`],
           startAngle: 94,
           avoidLabelOverlap: true,
           minAngle: 1,
@@ -1882,12 +2145,12 @@ const renderIspChart = () => {
             show: true,
             position: 'outside',
             alignTo: 'edge',
-            edgeDistance: 8,
-            bleedMargin: 2,
-            distanceToLabelLine: 3,
+            edgeDistance: 12,
+            bleedMargin: 4,
+            distanceToLabelLine: 7,
             color: palette.value.text,
             fontSize: 10,
-            lineHeight: 13,
+            lineHeight: 14,
             formatter: (params) => {
               const percent = Number(params.percent) || 0
               return percent >= 2 ? `${params.name}\n${percent.toFixed(1)}%` : ''
@@ -1899,8 +2162,9 @@ const renderIspChart = () => {
           },
           labelLine: {
             show: true,
-            length: 9,
-            length2: 12,
+            length: 13,
+            length2: 22,
+            smooth: 0.16,
             maxSurfaceAngle: 80,
             lineStyle: {
               color: palette.value.muted,
@@ -1921,30 +2185,32 @@ const renderIspChart = () => {
       graphic: [
         {
           type: 'text',
-          left: 'center',
-          top: '26.5%',
+          x: centerX,
+          y: centerY - 23,
           silent: true,
           z: 10,
           style: {
             text: '运营商',
             fill: palette.value.muted,
-            fontSize: 12,
-            fontWeight: 500,
-            textAlign: 'center'
+            fontSize: 10,
+            fontWeight: 600,
+            textAlign: 'center',
+            textVerticalAlign: 'middle'
           }
         },
         {
           type: 'text',
-          left: 'center',
-          top: '35%',
+          x: centerX,
+          y: centerY,
           silent: true,
           z: 10,
           style: {
             text: `${hosts.value.length}台`,
             fill: palette.value.text,
-            fontSize: 25,
+            fontSize: 22,
             fontWeight: 700,
-            textAlign: 'center'
+            textAlign: 'center',
+            textVerticalAlign: 'middle'
           }
         }
       ]
@@ -2113,19 +2379,21 @@ const renderTooltipCard = ({ title, tone, stats = [], hosts = [], sectionTitle =
         })
         .join('')
     : `<div style="padding: 12px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.03); color: #89A7C7; font-size: 12px;">${escapeHtml(emptyText)}</div>`
+  const cardWidth = isTouchLikeDevice.value ? 'min(296px, calc(100vw - 48px))' : '340px'
+  const hostListMaxHeight = isTouchLikeDevice.value ? '160px' : '220px'
 
   return `
-    <div style="width: 340px; max-width: 340px; padding: 14px;">
+    <div style="width: ${cardWidth}; max-width: ${cardWidth}; padding: ${isTouchLikeDevice.value ? '12px' : '14px'};">
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
         <strong style="font-size: 16px; color: #EAF4FF; line-height: 1.3;">${escapeHtml(title)}</strong>
         <span style="flex: 0 0 auto; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; ${toneMeta.badgeStyle}">${toneMeta.label}</span>
       </div>
-      <div style="margin-top: 8px; font-size: 11px; color: #89A7C7;">悬停查看，点击可固定，列表支持滚动。</div>
+      <div style="margin-top: 8px; font-size: 11px; color: #89A7C7;">${isTouchLikeDevice.value ? '点击点位或省份查看详情，点击空白关闭。' : '悬停查看，点击可固定，列表支持滚动。'}</div>
       <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px;">
         ${statRows}
       </div>
       <div style="margin-top: 12px; margin-bottom: 8px; font-size: 11px; color: #9EC7FF; letter-spacing: 0.04em;">${escapeHtml(sectionTitle)}</div>
-      <div style="display: grid; gap: 8px; max-height: 220px; overflow: auto; padding-right: 4px;">
+      <div style="display: grid; gap: 8px; max-height: ${hostListMaxHeight}; overflow: auto; padding-right: 4px;">
         ${hostRows}
       </div>
     </div>
@@ -2141,6 +2409,16 @@ const getTooltipPosition = (point, params, dom, rect, size) => {
   const baseY = (chartRect?.top || 0) + y
   const viewWidth = typeof window !== 'undefined' ? window.innerWidth : size?.viewSize?.[0] || 0
   const viewHeight = typeof window !== 'undefined' ? window.innerHeight : size?.viewSize?.[1] || 0
+
+  if (isTouchLikeDevice.value) {
+    const bottomSafeArea = 88
+    const left = Math.max(12, Math.round((viewWidth - tooltipWidth) / 2))
+    const preferredTop = baseY + tooltipHeight + bottomSafeArea + 12 > viewHeight
+      ? baseY - tooltipHeight - 12
+      : baseY + 12
+    const top = clamp(preferredTop, 12, Math.max(12, viewHeight - tooltipHeight - bottomSafeArea))
+    return [left, top]
+  }
 
   const left = baseX + tooltipWidth + 18 > viewWidth ? Math.max(12, baseX - tooltipWidth - 18) : baseX + 18
   const top = baseY + tooltipHeight + 18 > viewHeight ? Math.max(12, baseY - tooltipHeight - 18) : baseY + 18
@@ -2245,10 +2523,10 @@ const syncPinnedMapTooltip = () => {
   mapChartInstance.setOption(
     {
       tooltip: {
-        triggerOn: pinnedMapTooltip ? 'click' : 'mousemove|click',
-        enterable: Boolean(pinnedMapTooltip),
+        triggerOn: pinnedMapTooltip ? 'click' : mapTooltipTriggerOn.value,
+        enterable: Boolean(pinnedMapTooltip) && !isTouchLikeDevice.value,
         alwaysShowContent: Boolean(pinnedMapTooltip),
-        hideDelay: pinnedMapTooltip ? 0 : 140
+        hideDelay: pinnedMapTooltip || isTouchLikeDevice.value ? 0 : 140
       }
     },
     false
@@ -2855,7 +3133,27 @@ const average = (values) => {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
+const detectTouchLikeDevice = () => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const hasCoarsePointer = window.matchMedia?.('(hover: none), (pointer: coarse)').matches
+  return Boolean(hasCoarsePointer || navigator.maxTouchPoints > 0 || window.innerWidth <= 720)
+}
+
+const syncInputMode = () => {
+  const nextTouchMode = detectTouchLikeDevice()
+  const changed = isTouchLikeDevice.value !== nextTouchMode
+  isTouchLikeDevice.value = nextTouchMode
+
+  if (changed && mapChartInstance) {
+    renderMapChart()
+  }
+}
+
 onMounted(async () => {
+  syncInputMode()
   updateClock()
   syncFullscreenState()
   clockTimer = setInterval(updateClock, 1000)
@@ -2864,11 +3162,14 @@ onMounted(async () => {
   await fetchScreenData()
 
   resizeHandler = () => {
+    syncInputMode()
     trendChartInstance?.resize()
     mapChartInstance?.resize()
     ispChartInstance?.resize()
+    renderIspChart()
   }
   window.addEventListener('resize', resizeHandler)
+  window.visualViewport?.addEventListener('resize', resizeHandler)
 
   fullscreenChangeHandler = () => {
     syncFullscreenState()
@@ -2887,6 +3188,7 @@ onUnmounted(() => {
 
   if (resizeHandler) {
     window.removeEventListener('resize', resizeHandler)
+    window.visualViewport?.removeEventListener('resize', resizeHandler)
   }
 
   if (fullscreenChangeHandler) {
@@ -2915,6 +3217,7 @@ onUnmounted(() => {
 .screen-shell {
   position: relative;
   height: 100vh;
+  height: 100dvh;
   min-height: 0;
   padding: 14px 18px;
   display: flex;
@@ -3205,6 +3508,7 @@ onUnmounted(() => {
   gap: 14px;
   padding: 14px 18px;
   min-height: 96px;
+  min-width: 0;
 }
 
 .metric-icon {
@@ -3239,6 +3543,10 @@ onUnmounted(() => {
 .metric-label {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.metric-main {
+  min-width: 0;
 }
 
 .metric-value {
@@ -3818,6 +4126,17 @@ onUnmounted(() => {
   border-radius: 999px;
 }
 
+.mobile-tabbar {
+  display: none;
+}
+
+.mobile-overview-detail,
+.mobile-map-detail,
+.mobile-alert-summary,
+.mobile-ranking-summary {
+  display: none;
+}
+
 .animations-off .map-orbit,
 .animations-off .bg-particles,
 .animations-off .status-dot {
@@ -3826,7 +4145,33 @@ onUnmounted(() => {
 
 @media (max-width: 1600px) {
   .metric-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .metric-card {
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .metric-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    font-size: 19px;
+  }
+
+  .metric-value {
+    font-size: 23px;
+  }
+
+  .metric-detail-row {
+    gap: 4px;
+  }
+
+  .metric-detail {
+    padding: 3px 5px;
+    font-size: 10px;
   }
 
   .screen-body {
@@ -3883,9 +4228,132 @@ onUnmounted(() => {
   }
 }
 
-@media (max-width: 1280px) {
+@media (max-height: 860px) and (min-width: 1281px) {
   .screen-shell {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .screen-header {
+    padding: 10px 16px;
+    gap: 10px;
+  }
+
+  .header-side {
+    gap: 6px;
+  }
+
+  .screen-title {
+    margin: 4px 0 6px;
+    font-size: clamp(22px, 1.65vw, 30px);
+  }
+
+  .header-action-button,
+  .admin-button {
+    min-height: 38px;
+    padding: 8px 12px;
+    border-radius: 13px;
+  }
+
+  .metric-grid {
+    gap: 8px;
+  }
+
+  .metric-card {
+    min-height: 72px;
+    padding: 10px 12px;
+  }
+
+  .metric-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    font-size: 18px;
+  }
+
+  .metric-value {
+    margin-top: 3px;
+    font-size: 21px;
+  }
+
+  .metric-note,
+  .metric-detail-row {
+    margin-top: 4px;
+  }
+
+  .screen-body,
+  .side-column,
+  .center-column {
+    gap: 10px;
+  }
+
+  .panel,
+  .stage-panel {
+    padding: 10px;
+  }
+
+  .panel-head {
+    margin-bottom: 6px;
+  }
+
+  .panel-head h2 {
+    margin-top: 2px;
+    font-size: 16px;
+  }
+
+  .trend-chart,
+  .donut-chart {
+    min-height: 160px;
+  }
+
+  .distribution-panel .donut-chart {
+    min-height: 144px;
+  }
+
+  .stage-overview {
+    margin-bottom: 6px;
+  }
+
+  .overview-pill {
+    padding: 7px 9px;
+  }
+
+  .overview-pill strong {
+    margin-top: 2px;
+    font-size: 15px;
+  }
+
+  .stage-hint {
+    top: 10px;
+    left: 10px;
+    padding: 9px 11px;
+  }
+
+  .stage-legend {
+    left: 10px;
+    bottom: 10px;
+    padding: 8px 10px;
+  }
+}
+
+@media (max-width: 1420px) and (min-width: 1281px) {
+  .screen-header {
+    grid-template-columns: minmax(190px, 0.75fr) minmax(420px, auto) minmax(190px, 0.75fr);
+  }
+
+  .screen-body {
+    grid-template-columns: minmax(220px, 22%) minmax(520px, 56%) minmax(220px, 22%);
+  }
+}
+
+@media (max-width: 1100px) {
+  .screen-shell {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     padding: 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .screen-header {
@@ -3905,6 +4373,12 @@ onUnmounted(() => {
 
   .screen-body {
     grid-template-columns: 1fr;
+    flex: none;
+  }
+
+  .side-column .panel,
+  .stage-panel {
+    flex: none;
   }
 
   .metric-grid {
@@ -3912,7 +4386,7 @@ onUnmounted(() => {
   }
 
   .map-stage {
-    min-height: 620px;
+    min-height: clamp(460px, 62vh, 620px);
   }
 
   .stage-hint {
@@ -3927,30 +4401,663 @@ onUnmounted(() => {
   }
 
   .map-surface {
-    inset: -6px -14px -14px -14px;
+    inset: 0;
+    transform: none;
   }
 }
 
 @media (max-width: 720px) {
-  .metric-grid,
+  .screen-shell {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    padding: 10px 10px calc(82px + env(safe-area-inset-bottom));
+    gap: 10px;
+    overflow: hidden;
+    scroll-padding-top: 0;
+    scroll-padding-bottom: 0;
+    background:
+      radial-gradient(circle at 50% -8%, rgba(30, 144, 255, 0.2), transparent 34%),
+      linear-gradient(180deg, #020712 0%, var(--screen-bg) 45%, #02060f 100%);
+  }
+
+  .screen-header,
+  .metric-card,
+  .panel,
+  .stage-panel {
+    border-radius: 18px;
+  }
+
+  .screen-header {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 10px;
+    align-items: center;
+    padding: 12px;
+    text-align: left;
+  }
+
+  .header-center-main {
+    grid-column: 1 / -1;
+    order: 1;
+    text-align: left;
+  }
+
+  .header-side-left {
+    order: 2;
+    justify-self: start;
+    align-items: flex-start;
+  }
+
+  .header-side-right {
+    order: 3;
+    justify-self: end;
+    align-items: flex-end;
+  }
+
+  .header-kicker,
+  .header-meta,
+  .clock-subtitle {
+    display: none;
+  }
+
+  .header-status {
+    font-size: 12px;
+  }
+
+  .header-actions {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .header-action-button,
+  .admin-button {
+    min-height: 36px;
+    width: 36px;
+    padding: 0;
+    border-radius: 12px;
+    gap: 0;
+  }
+
+  .header-action-button span,
+  .admin-button span {
+    display: none;
+  }
+
+  .metric-grid {
+    display: none;
+    grid-template-columns: none;
+    gap: 10px;
+    margin: 0 -12px;
+    padding: 0 12px 2px;
+    min-height: 108px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .metric-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .metric-card {
+    flex: 0 0 152px;
+    min-height: 106px;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+    scroll-snap-align: start;
+  }
+
+  .metric-card:first-child {
+    display: none;
+  }
+
+  .metric-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    font-size: 17px;
+  }
+
+  .metric-label {
+    font-size: 11px;
+  }
+
+  .metric-value {
+    margin-top: 4px;
+    font-size: 22px;
+  }
+
+  .metric-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .metric-detail {
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .mobile-overview-detail.is-mobile-active {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 10px;
+    overflow: hidden;
+    padding: 10px;
+    border-radius: 20px;
+  }
+
+  .mobile-health-grid,
+  .mobile-data-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .mobile-health-item,
+  .mobile-data-item {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .mobile-health-item label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .mobile-health-item label span {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  .mobile-health-item.success label span {
+    background: var(--success);
+    box-shadow: 0 0 10px var(--success);
+  }
+
+  .mobile-health-item.warning label span {
+    background: var(--warning);
+    box-shadow: 0 0 10px var(--warning);
+  }
+
+  .mobile-health-item.danger label span {
+    background: var(--danger);
+    box-shadow: 0 0 10px var(--danger);
+  }
+
+  .mobile-health-item strong,
+  .mobile-data-item strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-main);
+    font-size: 17px;
+  }
+
+  .mobile-data-item label,
+  .mobile-data-item span {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .mobile-section-title {
+    margin: 0 0 -4px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .mobile-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .mobile-chip {
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .mobile-chip strong {
+    color: var(--text-main);
+    font-size: 11px;
+  }
+
   .stage-overview {
     grid-template-columns: 1fr;
   }
 
+  .screen-body {
+    display: contents;
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .center-column {
+    order: 1;
+  }
+
+  .screen-body > .side-column:first-child {
+    order: 2;
+  }
+
+  .screen-body > .side-column:last-child {
+    order: 3;
+  }
+
+  .trend-panel,
+  .distribution-panel {
+    display: none;
+  }
+
+  .side-column,
+  .center-column {
+    display: contents;
+    gap: 12px;
+  }
+
+  #mobile-map,
+  #mobile-alerts,
+  #mobile-ranking {
+    display: none;
+  }
+
+  #mobile-map.is-mobile-active,
+  #mobile-alerts.is-mobile-active,
+  #mobile-ranking.is-mobile-active {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .screen-title {
-    font-size: 24px;
+    margin: 0;
+    font-size: 21px;
+    line-height: 1.25;
+    letter-spacing: 0;
   }
 
   .clock-value {
-    font-size: 18px;
+    font-size: 16px;
+    letter-spacing: 0.04em;
+  }
+
+  .stage-panel {
+    padding: 10px;
+    border-radius: 22px;
+  }
+
+  .stage-head {
+    align-items: center;
+    gap: 10px;
+  }
+
+  .stage-head h2 {
+    font-size: 17px;
+  }
+
+  .stage-flags {
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .stage-toggle {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+
+  .stage-flag,
+  .stage-overview {
+    display: none;
   }
 
   .map-stage {
-    min-height: 560px;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    border-radius: 20px;
+    background:
+      radial-gradient(circle at 50% 55%, rgba(30, 144, 255, 0.22), transparent 42%),
+      radial-gradient(circle at 50% 82%, rgba(0, 255, 195, 0.1), transparent 25%),
+      rgba(2, 10, 22, 0.82);
   }
 
   .map-surface {
+    inset: 0;
     transform: none;
+  }
+
+  .stage-hint,
+  .stage-legend {
+    display: none;
+  }
+
+  .mobile-map-detail {
+    flex: 0 0 auto;
+    display: block;
+    margin-top: 6px;
+  }
+
+  .mobile-map-detail .mobile-data-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .mobile-map-detail .mobile-data-item {
+    padding: 6px 4px;
+    border-radius: 10px;
+    text-align: center;
+  }
+
+  .mobile-map-detail .mobile-data-item label,
+  .mobile-map-detail .mobile-data-item span {
+    font-size: 10px;
+  }
+
+  .mobile-map-detail .mobile-data-item strong {
+    margin-top: 2px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .mobile-map-note {
+    margin-top: 4px;
+    padding: 0 2px;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 10px;
+    border-radius: 20px;
+  }
+
+  .panel-head {
+    flex: 0 0 auto;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .panel-head h2 {
+    margin-top: 2px;
+    font-size: 17px;
+  }
+
+  .panel-extra {
+    padding-top: 0;
+  }
+
+  .mobile-alert-summary,
+  .mobile-ranking-summary {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .mobile-alert-summary span,
+  .mobile-ranking-summary span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .mobile-alert-summary .warning {
+    color: #fff0a6;
+    background: rgba(250, 219, 20, 0.08);
+  }
+
+  .mobile-alert-summary .danger {
+    color: #ffd7d8;
+    background: rgba(255, 77, 79, 0.08);
+  }
+
+  .alert-marquee {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .alert-list,
+  .ranking-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 6px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .alert-item,
+  .ranking-item {
+    border-radius: 14px;
+  }
+
+  .alert-item {
+    padding: 8px 9px;
+  }
+
+  .alert-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+  }
+
+  .alert-fact {
+    padding: 6px 7px;
+    border-radius: 10px;
+  }
+
+  .ranking-item {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .rank-badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+  }
+
+  .mobile-tabbar {
+    position: fixed;
+    z-index: 30;
+    left: 10px;
+    right: 10px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    padding: 6px;
+    border-radius: 20px;
+    background: rgba(5, 16, 34, 0.86);
+    box-shadow:
+      0 18px 38px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobile-tabbar button {
+    display: flex;
+    min-width: 0;
+    min-height: 44px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .mobile-tabbar button:hover,
+  .mobile-tabbar button:focus-visible,
+  .mobile-tabbar button.active {
+    color: var(--text-main);
+    background: rgba(30, 144, 255, 0.14);
+    outline: none;
+  }
+
+  .mobile-tabbar .el-icon {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 720px) and (max-height: 740px) {
+  .screen-shell {
+    padding: 8px 8px calc(72px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+
+  .screen-header {
+    padding: 9px 10px;
+    gap: 6px 8px;
+  }
+
+  .header-status {
+    display: none;
+  }
+
+  .screen-title {
+    font-size: 19px;
+  }
+
+  .clock-value {
+    font-size: 15px;
+  }
+
+  .panel-kicker {
+    display: none;
+  }
+
+  .panel-head h2,
+  .stage-head h2 {
+    font-size: 15px;
+  }
+
+  .panel-head,
+  .stage-head {
+    margin-bottom: 6px;
+  }
+
+  .mobile-overview-detail.is-mobile-active,
+  .panel,
+  .stage-panel {
+    padding: 8px;
+  }
+
+  .mobile-overview-detail.is-mobile-active {
+    gap: 7px;
+  }
+
+  .mobile-health-grid,
+  .mobile-data-grid {
+    gap: 5px;
+  }
+
+  .mobile-health-item,
+  .mobile-data-item {
+    padding: 6px;
+  }
+
+  .mobile-health-item strong,
+  .mobile-data-item strong {
+    font-size: 15px;
+  }
+
+  .mobile-chip {
+    padding: 4px 7px;
+  }
+
+  .mobile-alert-summary,
+  .mobile-ranking-summary {
+    margin-bottom: 6px;
+  }
+
+  .mobile-alert-summary span,
+  .mobile-ranking-summary span {
+    min-height: 22px;
+    font-size: 10px;
+  }
+
+  .alert-item {
+    padding: 7px;
+  }
+
+  .alert-fact {
+    padding: 5px 6px;
+  }
+
+  .ranking-item {
+    padding: 7px;
+  }
+
+  .rank-badge {
+    width: 30px;
+    height: 30px;
+  }
+
+  .mobile-map-note {
+    display: none;
+  }
+
+  .mobile-tabbar {
+    left: 8px;
+    right: 8px;
+    bottom: max(7px, env(safe-area-inset-bottom));
+    padding: 5px;
+  }
+
+  .mobile-tabbar button {
+    min-height: 40px;
   }
 }
 
