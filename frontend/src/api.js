@@ -143,7 +143,11 @@ export default {
   exportDatabaseBackup: () => apiClient.post('/database/export', null, { timeout: 0 }),
   getLatestDatabaseExportStatus: () => apiClient.get('/database/export/latest', { timeout: 0 }),
   getDatabaseExportStatus: (jobId) => apiClient.get(`/database/export/${jobId}`, { timeout: 0 }),
-  downloadDatabaseExport: (jobId) => apiClient.get(`/database/export/${jobId}/download`, { responseType: 'blob', timeout: 0 }),
+  downloadDatabaseExport: (jobId, onDownloadProgress = null) => apiClient.get(`/database/export/${jobId}/download`, {
+    responseType: 'blob',
+    timeout: 0,
+    onDownloadProgress
+  }),
   importDatabaseBackup: (file) => {
     const formData = new FormData()
     formData.append('file', file)

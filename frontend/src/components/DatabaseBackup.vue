@@ -8,7 +8,7 @@
       class="backup-alert"
     />
 
-    <el-card v-if="exporting || exportStatus" shadow="never" class="import-status-card">
+    <el-card v-if="exporting || exportStatus || downloadingExport" shadow="never" class="import-status-card">
       <template #header>
         <div class="card-header">
           <span>导出状态</span>
@@ -17,14 +17,42 @@
       </template>
 
       <el-progress
-        :percentage="exportProgress"
-        :status="exportStatus === 'failed' ? 'exception' : exportStatus === 'completed' ? 'success' : undefined"
+        v-if="exporting"
+        :percentage="displayExportProgress"
+        :status="displayExportProgressStatus"
+      />
+
+      <el-progress
+        v-else-if="downloadingExport"
+        :percentage="exportDownloadProgress"
+        :status="undefined"
+      />
+
+      <el-progress
+        v-else-if="exportStatus === 'failed' || exportStatus === 'completed'"
+        :percentage="displayExportProgress"
+        :status="displayExportProgressStatus"
       />
 
       <div class="import-meta">
         <span>{{ exportStageText }}</span>
         <span v-if="exportCurrentTable">当前表：{{ exportCurrentTable }}</span>
         <span v-if="exportFileSize">文件大小：{{ formatBytes(exportFileSize) }}</span>
+      </div>
+
+      <div class="export-hint">{{ exportHintText }}</div>
+
+      <div class="export-actions">
+        <el-button
+          v-if="exportStatus === 'completed' && exportJobId"
+          type="success"
+          :loading="downloadingExport"
+          :disabled="downloadingExport"
+          @click="downloadExportFile"
+        >
+          <el-icon><Download /></el-icon>
+          {{ downloadingExport ? `正在下载 ${exportDownloadProgress}%` : '下载 SQL 文件' }}
+        </el-button>
       </div>
 
       <div ref="exportLogRef" class="import-log">
@@ -73,7 +101,7 @@
             导出当前系统的主机、Ping 记录、告警、配置、用户和系统日志，生成一个可恢复的 SQL 文件。
           </div>
 
-          <el-button type="primary" :loading="exporting" @click="exportBackup">
+          <el-button type="primary" :loading="exporting" :disabled="downloadingExport" @click="exportBackup">
             <el-icon><Download /></el-icon>
             导出整个 SQL 文件
           </el-button>
@@ -148,6 +176,9 @@ const exportProgress = ref(0)
 const exportLogs = ref([])
 const exportCurrentTable = ref('')
 const exportFileSize = ref(0)
+const exportFilename = ref('')
+const downloadingExport = ref(false)
+const exportDownloadProgress = ref(0)
 const exportLogRef = ref(null)
 const importJobId = ref('')
 const importStatus = ref('')
@@ -199,15 +230,47 @@ const exportStageLabels = {
 const selectedFileSize = computed(() => formatBytes(selectedFile.value?.size || 0))
 const exportStageText = computed(() => exportStageLabels[exportStage.value] || '准备中')
 const exportStatusText = computed(() => {
-  if (exportStatus.value === 'completed') return '完成'
+  if (downloadingExport.value) return '正在下载'
+  if (exportStatus.value === 'completed') return '待下载'
   if (exportStatus.value === 'failed') return '失败'
   if (exporting.value) return '进行中'
   return '待开始'
 })
 const exportStatusTag = computed(() => {
+  if (downloadingExport.value) return 'info'
   if (exportStatus.value === 'completed') return 'success'
   if (exportStatus.value === 'failed') return 'danger'
-  return 'warning'
+  if (exporting.value) return 'warning'
+  return 'info'
+})
+const displayExportProgress = computed(() => {
+  if (downloadingExport.value) {
+    return exportDownloadProgress.value
+  }
+  if (exportStatus.value === 'completed') {
+    return 100
+  }
+  return exportProgress.value
+})
+const displayExportProgressStatus = computed(() => {
+  if (exportStatus.value === 'failed') return 'exception'
+  if (exportStatus.value === 'completed') return 'success'
+  return undefined
+})
+const exportHintText = computed(() => {
+  if (downloadingExport.value) {
+    return 'SQL 文件正在下载到本地，请保持页面打开。'
+  }
+  if (exportStatus.value === 'completed') {
+    return '文件已经生成，点击下方下载按钮保存到本地。'
+  }
+  if (exportStatus.value === 'failed') {
+    return '导出失败，请查看日志后重新导出。'
+  }
+  if (exporting.value) {
+    return '导出任务正在后台执行，请保持页面打开，不要刷新页面。'
+  }
+  return '等待导出任务开始。'
 })
 const importStageText = computed(() => stageLabels[importStage.value] || '准备中')
 const importStatusText = computed(() => {
@@ -329,24 +392,30 @@ const applyExportJob = (job) => {
   exportLogs.value = job.logs || []
   exportCurrentTable.value = job.current_table || ''
   exportFileSize.value = Number(job.file_size || job.result?.file_size || 0)
+  exportFilename.value = job.filename || job.result?.filename || exportFilename.value
 }
 
-const finishExport = async (job) => {
+const finishExport = async (job, notify = false) => {
   clearExportPollTimer()
   exporting.value = false
-  rememberActiveExportJob('')
+  downloadingExport.value = false
+  exportDownloadProgress.value = 0
 
   if (job.status === 'failed') {
+    rememberActiveExportJob('')
     ElMessage.error(`导出失败：${job.error || '未知错误'}`)
     return
   }
 
-  try {
-    const blob = await api.downloadDatabaseExport(job.job_id)
-    downloadBlob(blob, job.filename || `ping_monitor_backup_${buildTimestamp()}.sql`)
-    ElMessage.success('SQL 备份导出成功')
-  } catch (error) {
-    ElMessage.error(`下载导出文件失败：${getErrorMessage(error)}`)
+  if (job.status === 'completed') {
+    exportProgress.value = 100
+    exportStatus.value = 'completed'
+    exportStage.value = 'completed'
+    exportFilename.value = job.filename || exportFilename.value
+    if (notify) {
+      ElMessage.success('SQL 备份已导出完成，请点击下方下载按钮保存到本地')
+    }
+    return
   }
 }
 
@@ -355,9 +424,10 @@ const pollExportStatus = async () => {
 
   try {
     const job = await api.getDatabaseExportStatus(exportJobId.value)
+    const previousStatus = exportStatus.value
     applyExportJob(job)
     if (job.status === 'completed' || job.status === 'failed') {
-      await finishExport(job)
+      await finishExport(job, previousStatus !== job.status)
     }
   } catch (error) {
     clearExportPollTimer()
@@ -376,7 +446,7 @@ const startExportPolling = () => {
 }
 
 const resumeActiveExportJob = async () => {
-  if (exporting.value || resumingExport.value) {
+  if (exporting.value || downloadingExport.value || resumingExport.value) {
     return
   }
 
@@ -399,12 +469,65 @@ const resumeActiveExportJob = async () => {
     return
   }
 
-  exportJobId.value = activeJobId
-  exporting.value = true
-  exportStatus.value = exportStatus.value || 'queued'
-  exportStage.value = exportStage.value || 'queued'
-  exportLogs.value = exportLogs.value.length ? exportLogs.value : ['正在恢复后台导出任务进度...']
-  startExportPolling()
+  try {
+    const job = await api.getDatabaseExportStatus(activeJobId)
+    exportJobId.value = activeJobId
+    applyExportJob(job)
+
+    if (job.status === 'queued' || job.status === 'running') {
+      exporting.value = true
+      exportStatus.value = job.status || 'queued'
+      exportStage.value = job.stage || 'queued'
+      exportLogs.value = exportLogs.value.length ? exportLogs.value : ['正在恢复后台导出任务进度...']
+      startExportPolling()
+      return
+    }
+
+    if (job.status === 'completed' || job.status === 'failed') {
+      await finishExport(job, false)
+    }
+  } catch (error) {
+    if (error.response?.status === 404) {
+      rememberActiveExportJob('')
+      exportJobId.value = ''
+      return
+    }
+
+    console.error('恢复导出任务失败:', error)
+  }
+}
+
+const downloadExportFile = async () => {
+  if (!exportJobId.value || downloadingExport.value) {
+    return
+  }
+
+  downloadingExport.value = true
+  exportDownloadProgress.value = 0
+  exportLogs.value = [...exportLogs.value, '正在下载 SQL 导出文件...']
+
+  try {
+    const blob = await api.downloadDatabaseExport(exportJobId.value, (event) => {
+      if (event?.total) {
+        exportDownloadProgress.value = Math.min(100, Math.round((event.loaded / event.total) * 100))
+        return
+      }
+
+      if (event?.loaded) {
+        exportDownloadProgress.value = Math.min(99, Math.max(exportDownloadProgress.value, 1))
+      }
+    })
+
+    downloadBlob(blob, exportFilename.value || `ping_monitor_backup_${buildTimestamp()}.sql`)
+    exportDownloadProgress.value = 100
+    exportLogs.value = [...exportLogs.value, 'SQL 文件下载完成']
+    ElMessage.success('SQL 备份下载完成')
+  } catch (error) {
+    exportDownloadProgress.value = 0
+    ElMessage.error(`下载导出文件失败：${getErrorMessage(error)}`)
+  } finally {
+    downloadingExport.value = false
+  }
 }
 
 const applyImportJob = (job) => {
@@ -497,7 +620,7 @@ const resumeActiveImportJob = async () => {
 }
 
 const exportBackup = async () => {
-  if (exporting.value) {
+  if (exporting.value || downloadingExport.value) {
     return
   }
 
@@ -508,6 +631,8 @@ const exportBackup = async () => {
   exportProgress.value = 0
   exportCurrentTable.value = ''
   exportFileSize.value = 0
+  exportFilename.value = ''
+  exportDownloadProgress.value = 0
   exportLogs.value = ['正在创建 SQL 导出任务...']
 
   try {
@@ -656,6 +781,20 @@ watch(importLogs, scrollImportLogToBottom)
   margin: 12px 0;
   color: #606266;
   font-size: 13px;
+}
+
+.export-hint {
+  margin-bottom: 12px;
+  color: #409eff;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .import-log {
