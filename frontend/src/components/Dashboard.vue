@@ -1,6 +1,78 @@
 <template>
-  <div>
+  <div class="dashboard-page">
+    <div
+      v-if="isMobile"
+      class="dashboard-mobile"
+      :class="[`is-${mobileLayoutMode}`]"
+      :style="dashboardMobileStyle"
+    >
+      <div class="dashboard-mobile__topline">
+        <div class="dashboard-mobile__updated">
+          <span>{{ lastLoadedText }}</span>
+        </div>
+        <el-button class="dashboard-mobile__refresh" text :loading="loading" @click="loadData">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+      </div>
+
+      <el-card shadow="never" class="dashboard-mobile__section is-overview">
+        <template #header>
+          <div class="dashboard-mobile__section-header">
+            <span>状态概览</span>
+          </div>
+        </template>
+        <div class="dashboard-mobile__metrics">
+          <div v-for="item in mobileOverviewCards" :key="item.label" class="dashboard-mobile__metric-card">
+            <div class="dashboard-mobile__metric-label">{{ item.label }}</div>
+            <div class="dashboard-mobile__metric-value" :class="`is-${item.tone}`">{{ item.value }}</div>
+            <div class="dashboard-mobile__metric-delta" :class="`is-${item.tone}`">{{ item.delta }}</div>
+          </div>
+        </div>
+      </el-card>
+
+      <el-card shadow="never" class="dashboard-mobile__section is-trend">
+        <template #header>
+          <div class="dashboard-mobile__section-header">
+            <span>在线率趋势（近7天）</span>
+            <el-select v-model="mobileTrendRange" size="small" class="dashboard-mobile__range-select" @change="loadData">
+              <el-option label="7天" value="7d" />
+              <el-option label="30天" value="30d" />
+            </el-select>
+          </div>
+        </template>
+        <div class="dashboard-mobile__trend-body">
+          <div class="dashboard-mobile__trend-legend">
+            <div v-for="item in mobileTrendLegend" :key="item.key" class="dashboard-mobile__trend-chip" :class="`is-${item.color}`">
+              <span class="dashboard-mobile__trend-chip-label">
+                <span class="dashboard-mobile__trend-dot"></span>
+                {{ item.label }}
+              </span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+          <div ref="overallChartDom" class="dashboard-mobile__chart"></div>
+        </div>
+      </el-card>
+
+      <el-card shadow="never" class="dashboard-mobile__section is-actions">
+        <template #header>
+          <div class="dashboard-mobile__section-header">
+            <span>快速操作</span>
+          </div>
+        </template>
+        <div class="dashboard-mobile__quick-actions">
+          <button v-for="action in quickActions" :key="action.key" type="button" class="dashboard-mobile__action" @click="action.action()">
+            <el-icon class="dashboard-mobile__action-icon">
+              <component :is="action.icon" />
+            </el-icon>
+            <span>{{ action.label }}</span>
+          </button>
+        </div>
+      </el-card>
+    </div>
+
     <!-- 统计卡片 -->
+    <template v-else>
     <el-row :gutter="20" style="margin-bottom: 20px">
       <el-col :span="4">
         <el-card shadow="hover">
@@ -259,15 +331,17 @@
     <el-dialog v-model="chartVisible" :title="`${selectedHost?.name} 监控数据`" width="80%">
       <div ref="chartDom" style="width: 100%; height: 400px"></div>
     </el-dialog>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Location, WarningFilled, Loading } from '@element-plus/icons-vue'
+import { Bell, Download, Loading, Location, Plus, Promotion, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import api from '../api'
 import { echarts } from '../lib/echarts'
+import { useViewport } from '../lib/useViewport'
 
 const loading = ref(false)
 const pingAllLoading = ref(false)
@@ -279,11 +353,18 @@ const sortColumn = ref('status')
 const sortOrder = ref('desc')
 const chartPointLimit = ref(12)
 const chartSettingsLoaded = ref(false)
+const mobileTrendRange = ref('7d')
 const dashboard = reactive({
   total_hosts: 0,
   enabled_hosts: 0,
   recent_alerts: 0,
   host_status: []
+})
+const trendStats = reactive({
+  avg_online_rate: 0,
+  avg_rtt: 0,
+  avg_packet_loss: 0,
+  trend_data: []
 })
 
 const chartVisible = ref(false)
@@ -295,6 +376,63 @@ let overallChartInstance = null
 let refreshTimer = null
 let resizeHandler = null
 const lastLoadedAt = ref(0)
+const { isMobile, width: viewportWidth, height: viewportHeight } = useViewport()
+
+const mobileLayoutMode = computed(() => {
+  if (!isMobile.value) {
+    return 'desktop'
+  }
+
+  if (viewportWidth.value <= 340 || viewportHeight.value <= 680) {
+    return 'compact'
+  }
+
+  if (viewportHeight.value <= 780) {
+    return 'balanced'
+  }
+
+  return 'spacious'
+})
+
+const isCompactMobile = computed(() => mobileLayoutMode.value === 'compact')
+const mobileChartPointLimit = computed(() => (isCompactMobile.value ? 6 : 8))
+const mobileChartHeight = computed(() => {
+  if (!isMobile.value) {
+    return 300
+  }
+
+  if (mobileLayoutMode.value === 'compact') {
+    return 150
+  }
+
+  if (mobileLayoutMode.value === 'balanced') {
+    return 180
+  }
+
+  return 200
+})
+
+const mobileQuickActionColumns = computed(() => {
+  if (!isMobile.value) {
+    return 4
+  }
+
+  return viewportWidth.value <= 340 ? 2 : 4
+})
+
+const mobileTrendLegendColumns = computed(() => {
+  if (!isMobile.value) {
+    return 3
+  }
+
+  return viewportWidth.value <= 340 ? 2 : 3
+})
+
+const dashboardMobileStyle = computed(() => ({
+  '--dashboard-mobile-chart-height': `${mobileChartHeight.value}px`,
+  '--dashboard-mobile-action-columns': String(mobileQuickActionColumns.value),
+  '--dashboard-mobile-legend-columns': String(mobileTrendLegendColumns.value)
+}))
 
 const isHostOnline = (host) => {
   if (typeof host?.is_online === 'boolean') {
@@ -324,6 +462,110 @@ const onlineHosts = computed(() => {
 
 const abnormalHosts = computed(() => {
   return dashboard.host_status.filter(isHostProblem).length
+})
+
+const getTrendDelta = (points = [], field, decimals = 1) => {
+  if (!Array.isArray(points) || points.length < 2) {
+    return { text: '暂无对比', tone: 'neutral' }
+  }
+
+  const first = Number(points[0]?.[field] ?? 0)
+  const last = Number(points[points.length - 1]?.[field] ?? 0)
+  const diff = last - first
+  const sign = diff >= 0 ? '↑' : '↓'
+  const absValue = Math.abs(diff).toFixed(decimals)
+
+  return {
+    text: `${sign} ${absValue}`,
+    tone: diff > 0 ? 'danger' : diff < 0 ? 'success' : 'neutral'
+  }
+}
+
+const mobileOverviewCards = computed(() => {
+  const onlineDelta = getTrendDelta(trendStats.trend_data, 'online_rate', 1)
+  const rttDelta = getTrendDelta(trendStats.trend_data, 'avg_rtt', 1)
+
+  return [
+    {
+      label: '在线率',
+      value: `${trendStats.avg_online_rate || 0}%`,
+      delta: onlineDelta.text,
+      tone: onlineDelta.tone
+    },
+    {
+      label: '平均延迟',
+      value: `${trendStats.avg_rtt || 0}ms`,
+      delta: rttDelta.text,
+      tone: rttDelta.tone
+    },
+    {
+      label: '告警数量',
+      value: `${dashboard.recent_alerts || 0}`,
+      delta: dashboard.recent_alerts ? '↑ 近24h' : '暂无告警',
+      tone: dashboard.recent_alerts ? 'danger' : 'neutral'
+    }
+  ]
+})
+
+const mobileTrendLegend = computed(() => [
+  {
+    key: 'online',
+    label: '在线率',
+    value: `${trendStats.avg_online_rate || 0}%`,
+    color: 'green'
+  },
+  {
+    key: 'loss',
+    label: '丢包率',
+    value: `${trendStats.avg_packet_loss || 0}%`,
+    color: 'red'
+  },
+  {
+    key: 'rtt',
+    label: '延迟',
+    value: `${trendStats.avg_rtt || 0}ms`,
+    color: 'blue'
+  }
+])
+
+const quickActions = computed(() => [
+  {
+    key: 'add-host',
+    label: '添加主机',
+    icon: Plus,
+    action: () => window.dispatchEvent(new CustomEvent('ping-monitor:navigate', { detail: { menu: 'hosts', action: 'add' } }))
+  },
+  {
+    key: 'ping',
+    label: 'Ping 检测',
+    icon: Promotion,
+    action: () => window.dispatchEvent(new CustomEvent('ping-monitor:navigate', { detail: { menu: 'hosts' } }))
+  },
+  {
+    key: 'alerts',
+    label: '告警中心',
+    icon: Bell,
+    action: () => window.dispatchEvent(new CustomEvent('ping-monitor:navigate', { detail: { menu: 'alerts' } }))
+  },
+  {
+    key: 'backup',
+    label: '报告导出',
+    icon: Download,
+    action: () => window.dispatchEvent(new CustomEvent('ping-monitor:navigate', { detail: { menu: 'settings-backup' } }))
+  }
+])
+
+const lastLoadedText = computed(() => {
+  if (!lastLoadedAt.value) {
+    return '暂无数据'
+  }
+
+  const date = new Date(lastLoadedAt.value)
+  if (isMobile.value) {
+    return `更新 ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+  }
+
+  return `最后更新：${date.toLocaleString()}`
 })
 
 // 排序函数
@@ -522,13 +764,15 @@ const loadData = async (options = {}) => {
   loading.value = true
   try {
     await ensureChartSettings(options.forceChartSettings === true)
+    const chartRange = isMobile.value ? mobileTrendRange.value : '1h'
 
     const [dashboardData, databoardData] = await Promise.all([
       api.getDashboard(),
-      api.getDataBoardStats('1h')
+      api.getDataBoardStats(chartRange)
     ])
 
     Object.assign(dashboard, dashboardData)
+    Object.assign(trendStats, databoardData || {})
     lastLoadedAt.value = Date.now()
     await nextTick()
     renderOverallChart(databoardData.trend_data || [])
@@ -548,7 +792,9 @@ const renderOverallChart = (trendData) => {
     return
   }
 
-  const points = trendData.slice(-chartPointLimit.value)
+  const mobileChart = isMobile.value
+  const compactMobileChart = mobileChart && isCompactMobile.value
+  const points = trendData.slice(-(mobileChart ? mobileChartPointLimit.value : chartPointLimit.value))
   const times = points.map(item => item.time)
   const packetLoss = points.map(item => item.avg_packet_loss)
   const avgRtt = points.map(item => item.avg_rtt)
@@ -558,34 +804,46 @@ const renderOverallChart = (trendData) => {
     tooltip: {
       trigger: 'axis',
       axisPointer: {
-        type: 'cross'
+        type: mobileChart ? 'line' : 'cross'
       }
     },
     legend: {
+      show: !mobileChart,
       data: ['在线率(%)', '平均丢包率(%)', '平均延迟(ms)'],
       top: 0
     },
     grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '10%',
-      top: '15%',
+      left: mobileChart ? (compactMobileChart ? 4 : 8) : '3%',
+      right: mobileChart ? (compactMobileChart ? 4 : 8) : '4%',
+      bottom: mobileChart ? (compactMobileChart ? 14 : 22) : '10%',
+      top: mobileChart ? (compactMobileChart ? 6 : 10) : '15%',
       containLabel: true
     },
     xAxis: {
       type: 'category',
       data: times,
       axisLabel: {
-        rotate: 45,
-        interval: 'auto'
+        rotate: 0,
+        interval: mobileChart
+          ? Math.max(0, Math.ceil(times.length / (compactMobileChart ? 3 : 4)) - 1)
+          : 'auto',
+        color: '#9ca3af',
+        fontSize: mobileChart ? (compactMobileChart ? 9 : 10) : 12
+      },
+      axisTick: {
+        show: !mobileChart
       },
       boundaryGap: false
     },
     yAxis: [
       {
         type: 'value',
-        name: '百分比(%)',
+        name: mobileChart ? '' : '百分比(%)',
         position: 'left',
+        axisLabel: {
+          color: '#9ca3af',
+          fontSize: mobileChart ? (compactMobileChart ? 9 : 10) : 12
+        },
         axisLine: {
           lineStyle: {
             color: '#67c23a'
@@ -600,8 +858,12 @@ const renderOverallChart = (trendData) => {
       },
       {
         type: 'value',
-        name: '延迟(ms)',
+        name: mobileChart ? '' : '延迟(ms)',
         position: 'right',
+        axisLabel: {
+          color: '#9ca3af',
+          fontSize: mobileChart ? (compactMobileChart ? 9 : 10) : 12
+        },
         axisLine: {
           lineStyle: {
             color: '#409eff'
@@ -618,6 +880,10 @@ const renderOverallChart = (trendData) => {
         type: 'line',
         data: onlineRates,
         smooth: true,
+        showSymbol: !mobileChart,
+        lineStyle: {
+          width: mobileChart ? (compactMobileChart ? 1.2 : 2) : 2
+        },
         itemStyle: { color: '#67c23a' },
         areaStyle: {
           color: {
@@ -638,8 +904,15 @@ const renderOverallChart = (trendData) => {
         type: 'line',
         data: packetLoss,
         smooth: true,
+        showSymbol: !mobileChart,
+        lineStyle: {
+          width: mobileChart ? (compactMobileChart ? 1.2 : 1.4) : 2,
+          type: mobileChart ? 'dashed' : 'solid'
+        },
         itemStyle: { color: '#f56c6c' },
-        areaStyle: {
+        areaStyle: mobileChart ? {
+          opacity: 0.02
+        } : {
           color: {
             type: 'linear',
             x: 0,
@@ -659,8 +932,15 @@ const renderOverallChart = (trendData) => {
         yAxisIndex: 1,
         data: avgRtt,
         smooth: true,
+        showSymbol: !mobileChart,
+        lineStyle: {
+          width: mobileChart ? (compactMobileChart ? 1.2 : 1.4) : 2,
+          type: mobileChart ? 'dotted' : 'solid'
+        },
         itemStyle: { color: '#409eff' },
-        areaStyle: {
+        areaStyle: mobileChart ? {
+          opacity: 0.02
+        } : {
           color: {
             type: 'linear',
             x: 0,
@@ -858,6 +1138,21 @@ watch(chartVisible, (val) => {
   }
 })
 
+watch([viewportHeight, isCompactMobile], () => {
+  if (!isMobile.value) {
+    return
+  }
+
+  nextTick(() => {
+    overallChartInstance?.resize()
+    chartInstance?.resize()
+
+    if (trendStats.trend_data?.length) {
+      renderOverallChart(trendStats.trend_data || [])
+    }
+  })
+})
+
 onMounted(() => {
   loadData({ forceChartSettings: true })
   startRefreshTimer()
@@ -899,6 +1194,354 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.dashboard-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.dashboard-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dashboard-mobile.is-compact {
+  gap: 6px;
+}
+
+.dashboard-mobile__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 0;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__topline {
+  min-height: 20px;
+  padding: 0;
+}
+
+.dashboard-mobile__updated {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__updated {
+  flex-wrap: nowrap;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.dashboard-mobile__refresh {
+  padding: 0;
+  min-width: 32px;
+  color: #3b82f6;
+}
+
+.dashboard-mobile__section {
+  border-radius: 14px;
+  flex: 0 0 auto;
+}
+
+.dashboard-mobile__section.is-trend {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-mobile__section :deep(.el-card__header) {
+  padding: 14px 14px 0;
+  border-bottom: none;
+}
+
+.dashboard-mobile__section :deep(.el-card__body) {
+  padding: 14px;
+}
+
+.dashboard-mobile__section.is-trend :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 8px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__section :deep(.el-card__header) {
+  padding: 8px 10px 0;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__section :deep(.el-card__body) {
+  padding: 8px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__section.is-trend :deep(.el-card__body) {
+  padding-top: 6px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__section.is-overview :deep(.el-card__header),
+.dashboard-mobile.is-compact .dashboard-mobile__section.is-actions :deep(.el-card__header) {
+  display: none;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__section.is-overview :deep(.el-card__body),
+.dashboard-mobile.is-compact .dashboard-mobile__section.is-actions :deep(.el-card__body) {
+  padding: 6px;
+}
+
+.dashboard-mobile__trend-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__trend-body {
+  gap: 5px;
+}
+
+.dashboard-mobile__trend-legend {
+  display: grid;
+  grid-template-columns: repeat(var(--dashboard-mobile-legend-columns, 3), minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dashboard-mobile.is-balanced .dashboard-mobile__trend-legend,
+.dashboard-mobile.is-spacious .dashboard-mobile__trend-legend {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-mobile__trend-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  background: #fff;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.dashboard-mobile__trend-chip strong {
+  font-size: 14px;
+  line-height: 1.1;
+  color: #111827;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__trend-chip {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__trend-chip strong {
+  font-size: 11px;
+}
+
+.dashboard-mobile__trend-chip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__trend-chip-label {
+  gap: 4px;
+  min-width: 0;
+  font-size: 10px;
+}
+
+.dashboard-mobile__trend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.dashboard-mobile__trend-chip.is-green {
+  color: #67c23a;
+}
+
+.dashboard-mobile__trend-chip.is-red {
+  color: #f56c6c;
+}
+
+.dashboard-mobile__trend-chip.is-blue {
+  color: #409eff;
+}
+
+.dashboard-mobile__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.dashboard-mobile__range-select {
+  width: 84px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__range-select {
+  width: 74px;
+}
+
+.dashboard-mobile__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__metrics {
+  gap: 5px;
+}
+
+.dashboard-mobile__metric-card {
+  padding: 12px 8px;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__metric-card {
+  padding: 6px 4px;
+  border-radius: 10px;
+}
+
+.dashboard-mobile__metric-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.dashboard-mobile__metric-value {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__metric-value {
+  margin-top: 3px;
+  font-size: 16px;
+  line-height: 1.1;
+}
+
+.dashboard-mobile__metric-value.is-green,
+.dashboard-mobile__metric-delta.is-success {
+  color: #67c23a;
+}
+
+.dashboard-mobile__metric-value.is-blue {
+  color: #409eff;
+}
+
+.dashboard-mobile__metric-value.is-red,
+.dashboard-mobile__metric-delta.is-danger {
+  color: #f56c6c;
+}
+
+.dashboard-mobile__metric-delta {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__metric-delta {
+  display: none;
+}
+
+.dashboard-mobile__chart {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: var(--dashboard-mobile-chart-height, 150px);
+  height: auto;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__chart {
+  min-height: var(--dashboard-mobile-chart-height, 150px);
+}
+
+.dashboard-mobile__quick-actions {
+  display: grid;
+  grid-template-columns: repeat(var(--dashboard-mobile-action-columns, 4), minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dashboard-mobile.is-balanced .dashboard-mobile__quick-actions,
+.dashboard-mobile.is-spacious .dashboard-mobile__quick-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__quick-actions {
+  gap: 6px;
+}
+
+.dashboard-mobile__action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  color: #111827;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__action {
+  gap: 2px;
+  min-height: 42px;
+  padding: 4px 2px;
+  border-radius: 10px;
+}
+
+.dashboard-mobile__action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 20px;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__action-icon {
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+}
+
+.dashboard-mobile__action span {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dashboard-mobile.is-compact .dashboard-mobile__action span {
+  font-size: 11px;
+  line-height: 1.1;
+}
+
 :deep(.error-row) {
   background-color: #fef0f0 !important;
 }

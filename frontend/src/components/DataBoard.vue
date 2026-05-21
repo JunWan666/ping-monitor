@@ -1,6 +1,86 @@
 <template>
-  <div>
+  <div class="databoard-page">
+    <div v-if="isMobile" class="databoard-mobile">
+      <el-card shadow="never" class="databoard-mobile__range">
+        <el-radio-group v-model="selectedTimeRange" size="small" @change="handleTimeRangeChange" class="databoard-mobile__radio">
+          <el-radio-button label="1h">1h</el-radio-button>
+          <el-radio-button label="1d">1d</el-radio-button>
+          <el-radio-button label="3d">3d</el-radio-button>
+          <el-radio-button label="7d">7d</el-radio-button>
+        </el-radio-group>
+        <el-button type="primary" plain size="small" :loading="loading" @click="loadData" class="databoard-mobile__refresh">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </el-card>
+
+      <div class="databoard-mobile__stats">
+        <el-card shadow="never" class="databoard-mobile__stat">
+          <div class="databoard-mobile__stat-label">监控主机</div>
+          <div class="databoard-mobile__stat-value">{{ stats.total_hosts }}</div>
+        </el-card>
+        <el-card shadow="never" class="databoard-mobile__stat">
+          <div class="databoard-mobile__stat-label">在线率</div>
+          <div class="databoard-mobile__stat-value is-green">{{ stats.avg_online_rate }}%</div>
+        </el-card>
+        <el-card shadow="never" class="databoard-mobile__stat">
+          <div class="databoard-mobile__stat-label">平均延迟</div>
+          <div class="databoard-mobile__stat-value is-blue">{{ stats.avg_rtt }}ms</div>
+        </el-card>
+        <el-card shadow="never" class="databoard-mobile__stat">
+          <div class="databoard-mobile__stat-label">平均丢包</div>
+          <div class="databoard-mobile__stat-value is-red">{{ stats.avg_packet_loss }}%</div>
+        </el-card>
+      </div>
+
+      <el-card shadow="never" class="databoard-mobile__chart-card">
+        <template #header>
+          <span class="databoard-mobile__section-title">整体趋势</span>
+        </template>
+        <div ref="trendChartDom" class="databoard-mobile__chart"></div>
+      </el-card>
+
+      <el-card shadow="never" class="databoard-mobile__list-card">
+        <template #header>
+          <span class="databoard-mobile__section-title">主机排行</span>
+        </template>
+        <div class="databoard-mobile__host-list">
+          <div v-for="(row, index) in filteredHostData" :key="row.id || row.name" class="databoard-mobile__host-item">
+            <div class="databoard-mobile__host-top">
+              <div>
+                <div class="databoard-mobile__host-name">{{ index + 1 }}. {{ row.name }}</div>
+                <div class="databoard-mobile__host-address">{{ row.address }}</div>
+              </div>
+              <el-tag :type="getOnlineRateType(row.online_rate)" effect="plain">{{ row.online_rate }}%</el-tag>
+            </div>
+            <div class="databoard-mobile__host-meta">
+              <span>丢包 {{ row.avg_packet_loss }}%</span>
+              <span>延迟 {{ row.avg_rtt }}ms</span>
+              <span>最低 {{ row.min_rtt }}ms</span>
+              <span>最高 {{ row.max_rtt }}ms</span>
+            </div>
+            <div class="databoard-mobile__host-actions">
+              <el-button size="small" type="primary" plain @click="viewHostChart(row)">详情</el-button>
+            </div>
+          </div>
+        </div>
+      </el-card>
+
+      <div class="databoard-mobile__pager">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="filteredAllHostData.length"
+          layout="prev, pager, next"
+          :small="true"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </div>
     <!-- 时间范围选择器 -->
+    <template v-else>
     <el-card shadow="hover" style="margin-bottom: 20px">
       <el-radio-group v-model="selectedTimeRange" size="large" @change="handleTimeRangeChange">
         <el-radio-button label="1h">过去1小时</el-radio-button>
@@ -153,6 +233,7 @@
     <el-dialog v-model="chartVisible" :title="`${selectedHost?.name} 详细数据（${timeRangeText}）`" width="80%">
       <div ref="hostChartDom" style="width: 100%; height: 400px"></div>
     </el-dialog>
+    </template>
   </div>
 </template>
 
@@ -161,6 +242,7 @@ import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMoun
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { echarts } from '../lib/echarts'
+import { useViewport } from '../lib/useViewport'
 
 const loading = ref(false)
 const selectedTimeRange = ref('1d')
@@ -186,6 +268,7 @@ let trendChartInstance = null
 let hostChartInstance = null
 let resizeHandler = null
 const lastLoadedAt = ref(0)
+const { isMobile } = useViewport()
 
 const timeRangeText = computed(() => {
   const rangeMap = {
@@ -609,4 +692,164 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.databoard-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.databoard-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.databoard-mobile__range,
+.databoard-mobile__chart-card,
+.databoard-mobile__list-card {
+  border-radius: 14px;
+}
+
+.databoard-mobile__range {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.databoard-mobile__radio {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.databoard-mobile__refresh {
+  width: 100%;
+}
+
+.databoard-mobile__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.databoard-mobile__stat {
+  border-radius: 14px;
+}
+
+.databoard-mobile__stat-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.databoard-mobile__stat-value {
+  margin-top: 8px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.databoard-mobile__stat-value.is-green {
+  color: #67c23a;
+}
+
+.databoard-mobile__stat-value.is-blue {
+  color: #409eff;
+}
+
+.databoard-mobile__stat-value.is-red {
+  color: #f56c6c;
+}
+
+.databoard-mobile__section-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.databoard-mobile__chart {
+  width: 100%;
+  height: 180px;
+}
+
+.databoard-mobile__chart-card {
+  flex: 0 0 auto;
+}
+
+.databoard-mobile__list-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.databoard-mobile__list-card :deep(.el-card__body) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.databoard-mobile__host-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.databoard-mobile__host-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.databoard-mobile__host-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.databoard-mobile__host-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.databoard-mobile__host-address {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+}
+
+.databoard-mobile__host-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.databoard-mobile__host-actions {
+  display: flex;
+}
+
+.databoard-mobile__host-actions :deep(.el-button) {
+  width: 100%;
+}
+
+.databoard-mobile__pager {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+  flex: 0 0 auto;
+}
 </style>

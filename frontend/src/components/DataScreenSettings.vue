@@ -201,4 +201,44 @@ onMounted(() => {
 .el-divider {
   margin: 30px 0 20px;
 }
+
+@media (max-width: 767px) {
+  .datascreen-settings {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 0 4px;
+  }
+
+  .datascreen-settings :deep(.el-card) {
+    border-radius: 14px;
+    box-shadow: none;
+  }
+
+  .datascreen-settings :deep(.el-form-item) {
+    display: block;
+  }
+
+  .datascreen-settings :deep(.el-form-item__label) {
+    width: 100% !important;
+    text-align: left;
+    margin-bottom: 6px;
+  }
+
+  .datascreen-settings :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+
+  .datascreen-settings :deep(.el-input),
+  .datascreen-settings :deep(.el-input-number),
+  .datascreen-settings :deep(.el-slider) {
+    width: 100% !important;
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 </style>

@@ -614,6 +614,7 @@ watch(importLogs, scrollImportLogToBottom)
 <style scoped>
 .database-backup {
   width: 100%;
+  min-height: 0;
 }
 
 .backup-alert {
@@ -705,6 +706,33 @@ watch(importLogs, scrollImportLogToBottom)
 @media (max-width: 1199px) {
   .backup-card {
     margin-bottom: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .database-backup {
+    height: 100%;
+    overflow-y: auto;
+    padding-bottom: 4px;
+  }
+
+  .database-backup :deep(.el-card) {
+    border-radius: 14px;
+    box-shadow: none;
+  }
+
+  .backup-alert,
+  .import-status-card {
+    margin-bottom: 12px;
+  }
+
+  .backup-grid :deep(.el-col) {
+    margin-bottom: 12px;
+  }
+
+  .import-meta,
+  .selected-file {
+    flex-direction: column;
   }
 }
 </style>

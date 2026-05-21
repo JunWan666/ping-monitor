@@ -1,7 +1,263 @@
 <template>
-  <div>
+  <div class="settings-root">
+    <div v-if="props.activeTab === 'settings-basic' && isMobile" class="settings-mobile-page">
+      <div class="settings-mobile-section-nav">
+        <button
+          v-for="item in mobileBasicSections"
+          :key="item.key"
+          type="button"
+          class="settings-mobile-section-nav__item"
+          :class="{ active: mobileBasicSection === item.key }"
+          @click="mobileBasicSection = item.key"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+
+      <div class="settings-mobile-scroll">
+        <el-card v-if="mobileBasicSection === 'monitor'" shadow="never" class="settings-mobile-card">
+          <template #header>
+            <span>监控配置</span>
+          </template>
+          <el-form :model="config" label-position="top" label-width="auto" class="settings-mobile-form">
+            <el-form-item label="检测间隔">
+              <div class="settings-mobile-field">
+                <el-input-number v-model="config.check_interval" :min="1" :max="1440" />
+                <span>分钟</span>
+              </div>
+              <div class="settings-mobile-tip">建议 1-60 分钟，过小会增加系统负担。</div>
+            </el-form-item>
+            <el-form-item label="每次发送包数">
+              <div class="settings-mobile-field">
+                <el-input-number v-model="config.packet_count" :min="1" :max="100" />
+                <span>个</span>
+              </div>
+              <div class="settings-mobile-tip">建议 10-20 个，包数越多结果越准确但耗时越长。</div>
+            </el-form-item>
+            <el-form-item label="超时时间">
+              <div class="settings-mobile-field">
+                <el-input-number v-model="config.packet_timeout" :min="1" :max="10" />
+                <span>秒</span>
+              </div>
+              <div class="settings-mobile-tip">建议 2-5 秒，单个 Ping 包等待响应的最长时间。</div>
+            </el-form-item>
+            <el-form-item label="地理位置自动刷新">
+              <div class="settings-mobile-switch">
+                <el-switch v-model="config.auto_refresh_location" />
+                <span>{{ config.auto_refresh_location ? '已开启：每次 Ping / 监控都尝试刷新位置' : '已关闭：仅在位置信息为空时自动补全' }}</span>
+              </div>
+              <div class="settings-mobile-tip">开启后，每次监控或手动 Ping 都会尝试刷新地理位置；关闭后保留已有位置，只对空白位置自动补全。</div>
+            </el-form-item>
+            </el-form>
+          </el-card>
+
+        <el-card v-else-if="mobileBasicSection === 'data'" shadow="never" class="settings-mobile-card">
+          <template #header>
+            <span>数据维护配置</span>
+          </template>
+          <el-form :model="config" label-position="top" label-width="auto" class="settings-mobile-form">
+            <el-form-item label="原始数据保留">
+              <div class="settings-mobile-field">
+                <el-input-number v-model="config.data_retention_days" :min="7" :max="365" />
+                <span>天</span>
+              </div>
+              <div class="settings-mobile-tip">原始 Ping 记录超过保留天数后自动清理，聚合数据会永久保留。</div>
+            </el-form-item>
+            <el-form-item label="数据清理时间">
+              <el-time-select
+                v-model="config.cleanup_time"
+                start="00:00"
+                step="01:00"
+                end="23:00"
+                placeholder="选择时间"
+              />
+              <div class="settings-mobile-tip">每天执行数据清理的时间，建议选择业务低峰时段。</div>
+            </el-form-item>
+            <el-form-item label="数据聚合间隔">
+              <div class="settings-mobile-field">
+                <el-input-number v-model="config.aggregate_interval" :min="1" :max="24" />
+                <span>小时</span>
+              </div>
+              <div class="settings-mobile-tip">每隔多久执行一次小时级数据聚合，建议 1-6 小时。</div>
+            </el-form-item>
+            <el-form-item label="仪表盘数据点">
+              <div class="settings-mobile-field">
+                <el-input-number v-model="config.dashboard_chart_points" :min="3" :max="50" />
+                <span>次检测</span>
+              </div>
+              <div class="settings-mobile-tip">仪表盘趋势图显示多少次检测的数据，建议 12 次。</div>
+            </el-form-item>
+          </el-form>
+        </el-card>
+
+        <el-card v-else-if="mobileBasicSection === 'alert'" shadow="never" class="settings-mobile-card">
+          <template #header>
+            <span>告警通知配置</span>
+          </template>
+          <el-form :model="config" label-position="top" label-width="auto" class="settings-mobile-form">
+            <el-form-item label="告警平台">
+              <el-select v-model="notificationPlatform" placeholder="选择告警平台">
+                <el-option label="不启用" value="none" />
+                <el-option label="Server酱" value="serverchan" />
+                <el-option label="钉钉机器人" value="dingtalk" />
+                <el-option label="企业微信机器人" value="weixin" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="通知模式">
+              <el-radio-group v-model="config.notification_mode" class="settings-mobile-radio">
+                <el-radio-button label="status_change">状态变化</el-radio-button>
+                <el-radio-button label="every_time">每次异常</el-radio-button>
+              </el-radio-group>
+              <div class="settings-mobile-tip">状态变化：仅在正常↔异常转换时通知；每次异常：每次检测到异常都发送通知。</div>
+            </el-form-item>
+            <el-form-item v-if="notificationPlatform === 'serverchan'" label="Server酱密钥">
+              <el-input v-model="config.serverchan_key" placeholder="请输入 Server酱 SendKey" clearable />
+              <div class="settings-mobile-tip">
+                获取地址：<a href="https://sct.ftqq.com" target="_blank">https://sct.ftqq.com</a>
+              </div>
+            </el-form-item>
+            <el-form-item v-if="notificationPlatform === 'dingtalk'" label="Webhook 地址">
+              <el-input v-model="config.webhook_url" placeholder="告警钉钉机器人 Webhook URL" clearable />
+            </el-form-item>
+            <el-form-item v-if="notificationPlatform === 'dingtalk'" label="加签密钥">
+              <el-input v-model="config.webhook_secret" placeholder="告警机器人加签密钥，可选" clearable />
+              <div class="settings-mobile-tip">安全设置为“加签”时填写，以 SEC 开头。</div>
+            </el-form-item>
+            <el-form-item v-if="notificationPlatform === 'weixin'" label="Webhook 地址">
+              <el-input v-model="config.webhook_url" placeholder="企业微信机器人 Webhook URL" clearable />
+            </el-form-item>
+            <el-button
+              v-if="notificationPlatform !== 'none'"
+              type="success"
+              plain
+              class="settings-mobile-full-btn"
+              :loading="testingNotification"
+              :disabled="!canTestNotification"
+              @click="testNotification"
+            >
+              <el-icon><Bell /></el-icon>
+              测试告警通知
+            </el-button>
+          </el-form>
+        </el-card>
+
+        <el-card v-else shadow="never" class="settings-mobile-card">
+          <template #header>
+            <span>报表通知配置（钉钉）</span>
+          </template>
+          <div class="settings-mobile-intro">
+            报表机器人与告警机器人完全分离，适合把日报、周报、月报发到单独群里。日报统计上一自然日并对比前一日，周报统计上一自然周，月报统计上一自然月。
+          </div>
+          <el-form :model="config" label-position="top" label-width="auto" class="settings-mobile-form">
+            <el-form-item label="报表 Webhook 地址">
+              <el-input v-model="config.report_webhook_url" placeholder="报表专用钉钉机器人 Webhook URL" clearable />
+            </el-form-item>
+            <el-form-item label="报表加签密钥">
+              <el-input v-model="config.report_webhook_secret" placeholder="报表机器人加签密钥，可选" clearable />
+              <div class="settings-mobile-tip">建议新建一个专门收报表的钉钉机器人，避免和实时告警混在一起。</div>
+            </el-form-item>
+
+            <div class="settings-mobile-report-card">
+              <div class="settings-mobile-report-card__head">
+                <div>
+                  <strong>日报</strong>
+                  <span>默认发送昨日数据，对比前一日</span>
+                </div>
+                <el-switch v-model="config.daily_report_enabled" />
+              </div>
+              <el-time-select
+                v-model="config.daily_report_time"
+                start="00:00"
+                step="00:30"
+                end="23:30"
+                placeholder="发送时间"
+                :disabled="!config.daily_report_enabled"
+              />
+              <el-button
+                link
+                type="primary"
+                class="settings-mobile-report-card__send"
+                @click="sendReport('daily')"
+                :loading="sendingReportType === 'daily'"
+                :disabled="!canSendDingTalkReport"
+              >
+                立即发送
+              </el-button>
+            </div>
+
+            <div class="settings-mobile-report-card">
+              <div class="settings-mobile-report-card__head">
+                <div>
+                  <strong>周报</strong>
+                  <span>固定汇总上周数据，对比再前一周</span>
+                </div>
+                <el-switch v-model="config.weekly_report_enabled" />
+              </div>
+              <el-time-select
+                v-model="config.weekly_report_time"
+                start="00:00"
+                step="00:30"
+                end="23:30"
+                placeholder="发送时间"
+                :disabled="!config.weekly_report_enabled"
+              />
+              <el-button
+                link
+                type="primary"
+                class="settings-mobile-report-card__send"
+                @click="sendReport('weekly')"
+                :loading="sendingReportType === 'weekly'"
+                :disabled="!canSendDingTalkReport"
+              >
+                立即发送
+              </el-button>
+            </div>
+
+            <div class="settings-mobile-report-card">
+              <div class="settings-mobile-report-card__head">
+                <div>
+                  <strong>月报</strong>
+                  <span>固定汇总上月数据，对比再前一月</span>
+                </div>
+                <el-switch v-model="config.monthly_report_enabled" />
+              </div>
+              <el-time-select
+                v-model="config.monthly_report_time"
+                start="00:00"
+                step="00:30"
+                end="23:30"
+                placeholder="发送时间"
+                :disabled="!config.monthly_report_enabled"
+              />
+              <el-button
+                link
+                type="primary"
+                class="settings-mobile-report-card__send"
+                @click="sendReport('monthly')"
+                :loading="sendingReportType === 'monthly'"
+                :disabled="!canSendDingTalkReport"
+              >
+                立即发送
+              </el-button>
+            </div>
+          </el-form>
+        </el-card>
+      </div>
+
+      <div class="settings-mobile-actions">
+        <el-button type="primary" @click="saveConfig" :loading="saving">
+          <el-icon><Select /></el-icon>
+          保存
+        </el-button>
+        <el-button @click="loadConfig">
+          <el-icon><Refresh /></el-icon>
+          重置
+        </el-button>
+      </div>
+    </div>
+
     <!-- 基本设置 -->
-    <div v-if="props.activeTab === 'settings-basic'">
+    <div v-else-if="props.activeTab === 'settings-basic'" class="settings-page">
       <!-- 监控配置和数据维护配置 - 左右布局 -->
       <el-row :gutter="20" style="margin-bottom: 20px">
         <!-- 左侧：监控配置 -->
@@ -335,8 +591,69 @@
     </div>
 
     <!-- Ping日志 -->
-    <div v-else-if="props.activeTab === 'settings-logs'">
-      <el-card shadow="hover">
+    <div v-else-if="props.activeTab === 'settings-logs'" class="settings-logs-page">
+      <div v-if="isMobile" class="ping-logs-mobile">
+        <el-card shadow="never" class="ping-logs-mobile__toolbar">
+          <el-input
+            v-model="hostSearchKeyword"
+            placeholder="搜索主机名称或地址"
+            clearable
+            @clear="loadPingLogs"
+            @keyup.enter="loadPingLogs"
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
+          <div class="ping-logs-mobile__filters">
+            <el-select v-model="selectedStatus" placeholder="状态" @change="loadPingLogs">
+              <el-option label="全部状态" value="" />
+              <el-option label="正常" value="normal" />
+              <el-option label="异常" value="abnormal" />
+            </el-select>
+            <el-button type="primary" :loading="false" @click="loadPingLogs">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
+        </el-card>
+
+        <div class="ping-logs-mobile__list">
+          <el-empty v-if="pingLogs.length === 0" description="暂无 Ping 日志" :image-size="72" />
+          <div v-for="row in pingLogs" :key="row.id" class="ping-logs-mobile__item">
+            <div class="ping-logs-mobile__head">
+              <div>
+                <div class="ping-logs-mobile__name">{{ row.host_name }}</div>
+                <div class="ping-logs-mobile__address" @click="copyAddress(row.host_address)">{{ row.host_address }}</div>
+              </div>
+              <el-tag :type="row.status === '正常' ? 'success' : row.status === '异常' ? 'warning' : row.status === '离线' ? 'danger' : 'info'" effect="plain">
+                {{ row.status }}
+              </el-tag>
+            </div>
+            <div class="ping-logs-mobile__metrics">
+              <span>发 {{ row.packet_sent }}</span>
+              <span>收 {{ row.packet_received }}</span>
+              <span>丢包 {{ row.packet_loss }}%</span>
+              <span>平均 {{ row.avg_rtt || '-' }}ms</span>
+            </div>
+            <div class="ping-logs-mobile__time">{{ new Date(row.check_time).toLocaleString() }}</div>
+          </div>
+        </div>
+
+        <div class="ping-logs-mobile__pager">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :total="totalLogs"
+            layout="prev, pager, next"
+            :small="true"
+            @size-change="loadPingLogs"
+            @current-change="loadPingLogs"
+          />
+        </div>
+      </div>
+
+      <el-card v-else shadow="hover">
         <template #header>
           <div style="display: flex; justify-content: space-between; align-items: center">
             <span style="font-weight: bold">主机Ping记录</span>
@@ -441,6 +758,7 @@
 import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { useViewport } from '../lib/useViewport'
 
 const props = defineProps({
   activeTab: {
@@ -448,6 +766,15 @@ const props = defineProps({
     default: 'settings-basic'
   }
 })
+
+const { isMobile } = useViewport()
+const mobileBasicSections = [
+  { key: 'monitor', label: '监控' },
+  { key: 'data', label: '维护' },
+  { key: 'alert', label: '告警' },
+  { key: 'report', label: '报表' }
+]
+const mobileBasicSection = ref('monitor')
 
 const saving = ref(false)
 const testingNotification = ref(false)
@@ -672,11 +999,17 @@ watch(() => props.activeTab, (newTab) => {
   if (newTab === 'settings-logs') {
     loadPingLogs()
   }
+  if (newTab === 'settings-basic' && isMobile.value) {
+    mobileBasicSection.value = 'monitor'
+  }
 })
 
 onMounted(() => {
   loadConfig()
   loadHosts()
+  if (props.activeTab === 'settings-basic' && isMobile.value) {
+    mobileBasicSection.value = 'monitor'
+  }
   // 首次进入如果是 Ping 日志标签，立即加载数据
   if (props.activeTab === 'settings-logs') {
     loadPingLogs()
@@ -685,6 +1018,305 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.settings-page {
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.settings-root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.settings-mobile-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  row-gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.settings-mobile-section-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-mobile-section-nav__item {
+  height: 36px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #fff;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-mobile-section-nav__item.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.settings-mobile-scroll {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 24px;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-mobile-card {
+  flex: 0 0 auto;
+  border-radius: 14px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-mobile-scroll > .settings-mobile-card {
+  flex: 0 0 auto;
+}
+
+.settings-mobile-card :deep(.el-card__header) {
+  padding: 14px 14px 0;
+  border-bottom: none;
+  font-weight: 700;
+}
+
+.settings-mobile-card :deep(.el-card__body) {
+  padding: 14px;
+}
+
+.settings-mobile-form :deep(.el-form-item) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+
+.settings-mobile-form :deep(.el-form-item:last-child) {
+  margin-bottom: 0;
+}
+
+.settings-mobile-form :deep(.el-form-item__label) {
+  display: block;
+  width: auto !important;
+  height: auto;
+  line-height: 1.4;
+  padding-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.settings-mobile-form :deep(.el-form-item__content) {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0 !important;
+}
+
+.settings-mobile-form :deep(.el-input),
+.settings-mobile-form :deep(.el-select),
+.settings-mobile-form :deep(.el-input-number),
+.settings-mobile-form :deep(.el-time-select) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.settings-mobile-form :deep(.el-input__wrapper),
+.settings-mobile-form :deep(.el-select__wrapper) {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-mobile-form :deep(.el-input-number .el-input) {
+  width: 100%;
+}
+
+.settings-mobile-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-mobile-field > span,
+.settings-mobile-switch span,
+.settings-mobile-tip {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.settings-mobile-tip {
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.settings-mobile-tip a {
+  color: #2563eb;
+  word-break: break-all;
+}
+
+.settings-mobile-intro {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.settings-mobile-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-mobile-switch span,
+.settings-mobile-tip,
+.settings-mobile-report-row span {
+  overflow-wrap: anywhere;
+}
+
+.settings-mobile-radio {
+  width: 100%;
+}
+
+.settings-mobile-radio :deep(.el-radio-button) {
+  width: 50%;
+}
+
+.settings-mobile-radio :deep(.el-radio-button__inner) {
+  width: 100%;
+}
+
+.settings-mobile-full-btn {
+  width: 100%;
+}
+
+.settings-mobile-report-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0 8px;
+  padding: 12px;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  background: #f8fafc;
+  min-width: 0;
+}
+
+.settings-mobile-report-row div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-mobile-report-row strong {
+  font-size: 14px;
+  color: #111827;
+}
+
+.settings-mobile-report-row span {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.settings-mobile-report-card {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  background: #f8fafc;
+  min-width: 0;
+}
+
+.settings-mobile-report-card:last-child {
+  margin-bottom: 0;
+}
+
+.settings-mobile-report-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-mobile-report-card__head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-mobile-report-card__head strong {
+  font-size: 14px;
+  color: #111827;
+}
+
+.settings-mobile-report-card__head span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+
+.settings-mobile-report-card :deep(.el-select),
+.settings-mobile-report-card :deep(.el-time-select) {
+  width: 100%;
+}
+
+.settings-mobile-report-card__send {
+  justify-self: start;
+  padding-left: 0;
+}
+
+.settings-mobile-actions {
+  z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0 0;
+  background: #f5f7fb;
+}
+
+.settings-mobile-actions :deep(.el-button) {
+  margin-left: 0;
+  min-width: 0;
+}
+
 .settings-dual-card-row {
   margin-bottom: 20px;
 }
@@ -722,6 +1354,58 @@ onMounted(() => {
 }
 
 @media (max-width: 767px) {
+  .settings-page {
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 4px;
+  }
+
+  .settings-page :deep(.el-row) {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .settings-page :deep(.el-col-12) {
+    flex: 0 0 100%;
+    max-width: 100%;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin-bottom: 12px;
+  }
+
+  .settings-page :deep(.el-card) {
+    border-radius: 14px;
+    box-shadow: none;
+  }
+
+  .settings-page :deep(.el-card__header) {
+    padding: 14px 14px 0;
+    border-bottom: none;
+  }
+
+  .settings-page :deep(.el-card__body) {
+    padding: 14px;
+  }
+
+  .settings-page :deep(.el-form-item__label) {
+    width: 100% !important;
+    margin-bottom: 6px;
+    text-align: left;
+  }
+
+  .settings-page :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+
+  .settings-page :deep(.el-input),
+  .settings-page :deep(.el-select),
+  .settings-page :deep(.el-time-select),
+  .settings-page :deep(.el-input-number) {
+    width: 100% !important;
+  }
+
   .settings-dual-actions {
     justify-content: flex-start;
     width: 100%;
@@ -730,6 +1414,90 @@ onMounted(() => {
   .settings-dual-actions :deep(.el-button) {
     flex: 1 1 auto;
     margin-left: 0;
+  }
+
+  .settings-logs-page {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .ping-logs-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .ping-logs-mobile__toolbar {
+    flex: 0 0 auto;
+    border-radius: 14px;
+  }
+
+  .ping-logs-mobile__filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .ping-logs-mobile__list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .ping-logs-mobile__item {
+    flex: 0 0 auto;
+    padding: 12px;
+    border: 1px solid #edf2f7;
+    border-radius: 14px;
+    background: #fff;
+  }
+
+  .ping-logs-mobile__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .ping-logs-mobile__name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #111827;
+  }
+
+  .ping-logs-mobile__address {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #2563eb;
+    word-break: break-all;
+  }
+
+  .ping-logs-mobile__metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: #4b5563;
+  }
+
+  .ping-logs-mobile__time {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+
+  .ping-logs-mobile__pager {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: center;
   }
 }
 </style>

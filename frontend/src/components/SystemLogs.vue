@@ -1,5 +1,76 @@
 <template>
-  <div>
+  <div class="system-logs-page">
+    <div v-if="isMobile" class="system-logs-mobile">
+      <el-card shadow="never" class="system-logs-mobile__toolbar">
+        <el-input
+          v-model="keywordFilter"
+          placeholder="搜索消息、详情或模块"
+          clearable
+          @clear="handleFilterChange"
+          @keyup.enter="handleFilterChange"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <div class="system-logs-mobile__filters">
+          <el-select v-model="timeRangeFilter" placeholder="时间范围" clearable @change="handleFilterChange">
+            <el-option label="最近1小时" :value="1" />
+            <el-option label="最近24小时" :value="24" />
+            <el-option label="最近7天" :value="168" />
+            <el-option label="最近30天" :value="720" />
+          </el-select>
+          <el-select v-model="logTypeFilter" placeholder="类型" clearable @change="handleFilterChange">
+            <el-option label="全部" value="" />
+            <el-option label="信息" value="info" />
+            <el-option label="警告" value="warning" />
+            <el-option label="错误" value="error" />
+            <el-option label="清理" value="cleanup" />
+            <el-option label="聚合" value="aggregate" />
+          </el-select>
+        </div>
+        <div class="system-logs-mobile__actions">
+          <el-button type="primary" :loading="loading" @click="loadLogs">
+            <el-icon><Refresh /></el-icon>
+            刷新
+          </el-button>
+          <el-button type="danger" plain :loading="cleanupLoading" @click="handleCleanupLogs">
+            <el-icon><Delete /></el-icon>
+            清理
+          </el-button>
+        </div>
+      </el-card>
+
+      <div class="system-logs-mobile__list">
+        <el-empty v-if="!logs.length && !loading" description="暂无系统日志" :image-size="72" />
+        <div v-for="row in logs" :key="row.id" class="system-logs-mobile__item">
+          <div class="system-logs-mobile__head">
+            <el-tag :type="getLogTypeTag(row.log_type)" effect="plain">{{ getLogTypeText(row.log_type) }}</el-tag>
+            <span>{{ formatTime(row.created_at) }}</span>
+          </div>
+          <div class="system-logs-mobile__module">{{ row.module }}</div>
+          <div class="system-logs-mobile__message" :style="getMessageStyle(row.message)">{{ row.message }}</div>
+          <div class="system-logs-mobile__item-actions">
+            <el-button size="small" plain @click="copyLogText(row)">复制</el-button>
+            <el-button v-if="row.details" size="small" type="primary" plain @click="viewDetails(row)">详情</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="system-logs-mobile__pager">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="total"
+          layout="prev, pager, next"
+          :small="true"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </div>
+
+    <template v-else>
     <el-card shadow="hover" style="margin-bottom: 20px">
       <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
         <div style="display: flex; gap: 10px; flex-wrap: wrap">
@@ -131,7 +202,9 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="detailsVisible" title="日志详情" width="60%">
+    </template>
+
+    <el-dialog v-model="detailsVisible" title="日志详情" :width="isMobile ? '100%' : '60%'" :fullscreen="isMobile">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="时间">{{ formatTime(selectedLog?.created_at) }}</el-descriptions-item>
         <el-descriptions-item label="类型">
@@ -155,6 +228,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { useViewport } from '../lib/useViewport'
 
 const loading = ref(false)
 const cleanupLoading = ref(false)
@@ -168,6 +242,7 @@ const logTypeFilter = ref('')
 const moduleFilter = ref('')
 const detailsVisible = ref(false)
 const selectedLog = ref(null)
+const { isMobile } = useViewport()
 
 const loadLogs = async () => {
   loading.value = true
@@ -357,3 +432,85 @@ onMounted(() => {
   loadLogs()
 })
 </script>
+
+<style scoped>
+.system-logs-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.system-logs-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.system-logs-mobile__toolbar {
+  flex: 0 0 auto;
+  border-radius: 14px;
+}
+
+.system-logs-mobile__filters,
+.system-logs-mobile__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.system-logs-mobile__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.system-logs-mobile__item {
+  flex: 0 0 auto;
+  padding: 12px;
+  border: 1px solid #edf2f7;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.system-logs-mobile__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.system-logs-mobile__module {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #2563eb;
+}
+
+.system-logs-mobile__message {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #111827;
+  word-break: break-word;
+}
+
+.system-logs-mobile__item-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.system-logs-mobile__pager {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+}
+</style>

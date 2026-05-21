@@ -1,5 +1,147 @@
 <template>
-  <div>
+  <div class="host-manage-page">
+    <div v-if="isMobile" class="host-mobile">
+      <el-card shadow="never" class="host-mobile__toolbar">
+        <div class="host-mobile__search-row">
+          <el-input
+            v-model="searchKeyword"
+            placeholder="搜索主机名称 / IP / 备注"
+            clearable
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
+          <el-button class="host-mobile__filter-btn" plain @click="mobileFiltersVisible = !mobileFiltersVisible">
+            <el-icon><Filter /></el-icon>
+          </el-button>
+        </div>
+
+        <div class="host-mobile__count-row">
+          <span>共 {{ filteredAllHosts.length }} 台主机</span>
+        </div>
+
+        <div v-if="mobileFiltersVisible" class="host-mobile__filters">
+          <el-select v-model="statusFilter" placeholder="状态" clearable>
+            <el-option label="正常" value="正常" />
+            <el-option label="异常" value="异常" />
+            <el-option label="离线" value="离线" />
+            <el-option label="未知" value="未知" />
+          </el-select>
+          <el-select v-model="enabledFilter" placeholder="启用" clearable>
+            <el-option label="已启用" value="enabled" />
+            <el-option label="已停用" value="disabled" />
+          </el-select>
+          <el-select v-model="locationFilter" placeholder="定位" clearable>
+            <el-option label="已定位" value="success" />
+            <el-option label="获取失败" value="failed" />
+            <el-option label="获取中" value="pending" />
+          </el-select>
+        </div>
+      </el-card>
+
+      <div class="host-mobile__cards">
+        <el-card v-for="row in filteredHosts" :key="row.id" shadow="never" class="host-mobile__card" @click="showMobileDetail(row)">
+          <div class="host-mobile__card-head">
+            <div class="host-mobile__title-block">
+              <span class="host-mobile__dot" :class="`is-${getStatusTagType(row.status)}`"></span>
+              <div class="host-mobile__title-text">
+                <div class="host-mobile__name">{{ row.name }}</div>
+                <div class="host-mobile__ip">{{ row.resolved_ip || row.address }}</div>
+              </div>
+            </div>
+            <div class="host-mobile__head-actions" @click.stop>
+              <el-switch v-model="row.enabled" @change="updateHostStatus(row)" />
+              <button type="button" class="host-mobile__chevron" @click="showMobileDetail(row)">
+                <el-icon><ArrowRight /></el-icon>
+              </button>
+            </div>
+          </div>
+
+          <div class="host-mobile__status-row">
+            <el-tag :type="getStatusTagType(row.status)" effect="plain">{{ row.status }}</el-tag>
+            <span>延迟 {{ row.avg_rtt !== null && row.avg_rtt !== undefined ? `${row.avg_rtt} ms` : '--' }}</span>
+            <span>丢包率 {{ row.packet_loss !== null && row.packet_loss !== undefined ? `${row.packet_loss}%` : '--' }}</span>
+          </div>
+        </el-card>
+      </div>
+
+      <button type="button" class="host-mobile__fab" @click="showAddDialog">
+        <el-icon><Plus /></el-icon>
+      </button>
+
+      <div class="host-mobile__pager">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="filteredAllHosts.length"
+          layout="prev, pager, next"
+          :small="true"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+
+      <el-drawer
+        v-model="mobileDetailVisible"
+        :title="mobileDetailHost?.name || '主机详情'"
+        direction="btt"
+        size="76%"
+        class="host-mobile__drawer"
+      >
+        <div v-if="mobileDetailHost" class="host-mobile-detail">
+          <div class="host-mobile-detail__hero">
+            <span class="host-mobile__dot" :class="`is-${getStatusTagType(mobileDetailHost.status)}`"></span>
+            <div>
+              <div class="host-mobile-detail__name">{{ mobileDetailHost.name }}</div>
+              <div class="host-mobile-detail__address">{{ mobileDetailHost.address }}</div>
+            </div>
+            <el-tag :type="getStatusTagType(mobileDetailHost.status)" effect="plain">{{ mobileDetailHost.status }}</el-tag>
+          </div>
+
+          <div class="host-mobile-detail__grid">
+            <div class="host-mobile-detail__cell">
+              <span>解析 IP</span>
+              <strong>{{ mobileDetailHost.resolved_ip || '-' }}</strong>
+            </div>
+            <div class="host-mobile-detail__cell">
+              <span>平均延迟</span>
+              <strong>{{ mobileDetailHost.avg_rtt !== null && mobileDetailHost.avg_rtt !== undefined ? `${mobileDetailHost.avg_rtt} ms` : '-' }}</strong>
+            </div>
+            <div class="host-mobile-detail__cell">
+              <span>丢包率</span>
+              <strong>{{ mobileDetailHost.packet_loss !== null && mobileDetailHost.packet_loss !== undefined ? `${mobileDetailHost.packet_loss}%` : '-' }}</strong>
+            </div>
+            <div class="host-mobile-detail__cell">
+              <span>告警阈值</span>
+              <strong>{{ mobileDetailHost.alert_threshold }}%</strong>
+            </div>
+          </div>
+
+          <div class="host-mobile-detail__section">
+            <div class="host-mobile-detail__label">位置</div>
+            <div class="host-mobile-detail__value">{{ formatLocation(mobileDetailHost) }}</div>
+          </div>
+          <div class="host-mobile-detail__section">
+            <div class="host-mobile-detail__label">最后检查</div>
+            <div class="host-mobile-detail__value">{{ mobileDetailHost.last_check ? new Date(mobileDetailHost.last_check).toLocaleString() : '暂无' }}</div>
+          </div>
+          <div class="host-mobile-detail__section">
+            <div class="host-mobile-detail__label">描述</div>
+            <div class="host-mobile-detail__value">{{ mobileDetailHost.description || '暂无描述' }}</div>
+          </div>
+
+          <div class="host-mobile-detail__actions">
+            <el-button type="primary" @click="pingHost(mobileDetailHost)">Ping</el-button>
+            <el-button @click="refreshIp(mobileDetailHost.id, mobileDetailHost.name)">刷新 IP</el-button>
+            <el-button @click="refreshLocation(mobileDetailHost.id, mobileDetailHost.name)">刷新位置</el-button>
+            <el-button type="warning" @click="showMobileEdit(mobileDetailHost)">编辑</el-button>
+          </div>
+        </div>
+      </el-drawer>
+    </div>
+
+    <template v-else>
     <el-card shadow="hover">
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
@@ -205,12 +347,15 @@
         />
       </div>
     </el-card>
+    </template>
 
     <!-- 添加/编辑主机对话框 -->
     <el-dialog 
       v-model="dialogVisible" 
       :title="dialogMode === 'add' ? '添加主机' : '编辑主机'"
-      width="720px"
+      :width="isMobile ? '100%' : '720px'"
+      :fullscreen="isMobile"
+      class="host-form-dialog"
     >
       <el-form :model="form" label-width="100px">
         <el-form-item label="主机名称">
@@ -276,7 +421,8 @@
     <el-dialog 
       v-model="batchDialogVisible" 
       title="批量导入主机"
-      width="700px"
+      :width="isMobile ? '100%' : '700px'"
+      :fullscreen="isMobile"
     >
       <el-tabs v-model="importTabActive">
         <!-- 文本导入 -->
@@ -365,10 +511,11 @@
     <el-dialog
       v-model="pingDialogVisible"
       title="Ping测试"
-      width="900px"
+      :width="isMobile ? '100%' : '900px'"
+      :fullscreen="isMobile"
       :close-on-click-modal="false"
     >
-      <div style="display: flex; gap: 20px;">
+      <div class="host-ping-layout" style="display: flex; gap: 20px;">
         <!-- 左侧: Ping日志区域 -->
         <div style="flex: 1; minWidth: 0;">
           <div style="marginBottom: 10px; fontWeight: bold; color: #409eff;">实时日志</div>
@@ -456,8 +603,9 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { UploadFilled, Download, Upload, Location, Refresh, WarningFilled, Loading } from '@element-plus/icons-vue'
+import { ArrowRight, Filter, UploadFilled, Download, Upload, Location, Refresh, WarningFilled, Loading, Plus } from '@element-plus/icons-vue'
 import api from '../api'
+import { useViewport } from '../lib/useViewport'
 
 const hosts = ref([])
 const hostsWithStatus = ref([])
@@ -465,6 +613,8 @@ const selectedHosts = ref([])
 const dialogVisible = ref(false)
 const batchDialogVisible = ref(false)
 const pingDialogVisible = ref(false)
+const mobileDetailVisible = ref(false)
+const mobileDetailHost = ref(null)
 const dialogMode = ref('add')
 const importing = ref(false)
 const importProgress = ref(0)
@@ -486,6 +636,8 @@ const enabledFilter = ref('')
 const locationFilter = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
+const mobileFiltersVisible = ref(false)
+const { isMobile } = useViewport()
 let xlsxModulePromise = null
 
 const getXLSX = async () => {
@@ -594,12 +746,17 @@ const loadHosts = async () => {
         isp: statusInfo.isp || host.isp
       }
     })
+
+    if (mobileDetailHost.value) {
+      mobileDetailHost.value = hostsWithStatus.value.find((host) => host.id === mobileDetailHost.value.id) || mobileDetailHost.value
+    }
   } catch (error) {
     ElMessage.error('加载主机列表失败')
   }
 }
 
 const showAddDialog = () => {
+  mobileDetailVisible.value = false
   dialogMode.value = 'add'
   resetForm()
   dialogVisible.value = true
@@ -614,9 +771,20 @@ const showBatchImportDialog = () => {
 }
 
 const showEditDialog = (host) => {
+  mobileDetailVisible.value = false
   dialogMode.value = 'edit'
   Object.assign(form, host)
   dialogVisible.value = true
+}
+
+const showMobileDetail = (host) => {
+  mobileDetailHost.value = host
+  mobileDetailVisible.value = true
+}
+
+const showMobileEdit = (host) => {
+  mobileDetailVisible.value = false
+  showEditDialog(host)
 }
 
 const resetForm = () => {
@@ -1335,5 +1503,280 @@ onMounted(() => {
 
 .upload-demo :deep(.el-upload) {
   width: 100%;
+}
+
+.host-manage-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.host-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.host-mobile__toolbar {
+  border-radius: 14px;
+  flex: 0 0 auto;
+}
+
+.host-mobile__search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.host-mobile__search-row :deep(.el-input) {
+  flex: 1 1 auto;
+}
+
+.host-mobile__filter-btn {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.host-mobile__count-row {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.host-mobile__filters {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.host-mobile__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+.host-mobile__card {
+  border-radius: 14px;
+  flex: 0 0 auto;
+}
+
+.host-mobile__card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.host-mobile__title-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.host-mobile__dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: #c0c4cc;
+  flex: 0 0 auto;
+}
+
+.host-mobile__dot.is-success {
+  background: #67c23a;
+}
+
+.host-mobile__dot.is-warning {
+  background: #e6a23c;
+}
+
+.host-mobile__dot.is-danger {
+  background: #f56c6c;
+}
+
+.host-mobile__title-text {
+  min-width: 0;
+}
+
+.host-mobile__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.host-mobile__ip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+}
+
+.host-mobile__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.host-mobile__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #c0c4cc;
+}
+
+.host-mobile__status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.host-mobile__fab {
+  position: fixed;
+  right: 18px;
+  bottom: 92px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.28);
+}
+
+.host-mobile__fab :deep(.el-icon) {
+  font-size: 22px;
+}
+
+.host-mobile__pager {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 2px;
+  flex: 0 0 auto;
+}
+
+.host-mobile-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.host-mobile-detail__hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.host-mobile-detail__name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.host-mobile-detail__address {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+}
+
+.host-mobile-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.host-mobile-detail__cell,
+.host-mobile-detail__section {
+  padding: 12px;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.host-mobile-detail__cell span,
+.host-mobile-detail__label {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.host-mobile-detail__cell strong,
+.host-mobile-detail__value {
+  display: block;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  word-break: break-word;
+}
+
+.host-mobile-detail__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.host-mobile-detail__actions :deep(.el-button) {
+  margin-left: 0;
+}
+
+@media (max-width: 767px) {
+  :deep(.host-form-dialog .el-dialog__body) {
+    max-height: calc(100vh - 116px);
+    overflow-y: auto;
+  }
+
+  :deep(.host-form-dialog .el-form-item__label) {
+    width: 100% !important;
+    margin-bottom: 6px;
+    text-align: left;
+  }
+
+  :deep(.host-form-dialog .el-form-item__content) {
+    margin-left: 0 !important;
+  }
+
+  :deep(.host-form-dialog .el-col-12) {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  .host-ping-layout {
+    flex-direction: column !important;
+  }
+
+  .host-ping-layout > div {
+    min-width: 0 !important;
+  }
 }
 </style>
