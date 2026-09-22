@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
 <title>CPOLAR · PING 节点实时监控中心</title>
 <meta name="description" content="沉浸式实时 Ping 节点监控可视化大屏" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -573,13 +573,13 @@ body.lite .pulse-ring{display:none}
   /* 概览页 · 链路概览：加大留白 + 内容居中 */
   body[data-mv-tab="overview"] #panelStats .panel-hd{padding:10px 12px 8px}
   body[data-mv-tab="overview"] #panelStats .panel-bd{padding:0 12px 12px}
-  body[data-mv-tab="overview"] .stats{gap:9px;grid-auto-rows:minmax(66px,1fr);overflow-y:auto;min-height:0}
-  body[data-mv-tab="overview"] .stat{padding:12px 13px;text-align:center}
-  body[data-mv-tab="overview"] .stat .lbl{justify-content:center;font-size:11px}
-  body[data-mv-tab="overview"] .stat .val{font-size:23px;margin-top:7px}
-  body[data-mv-tab="overview"] .stat .foot{justify-content:center;gap:7px;margin-top:7px}
-  body[data-mv-tab="overview"] .mini-row{gap:9px;margin-top:9px}
-  body[data-mv-tab="overview"] .mini{padding:9px 10px;text-align:center}
+  body[data-mv-tab="overview"] .stats{gap:8px;grid-auto-rows:minmax(0,1fr);overflow:hidden;min-height:0}
+  body[data-mv-tab="overview"] .stat{padding:9px 10px;text-align:center}
+  body[data-mv-tab="overview"] .stat .lbl{justify-content:center;font-size:10.5px;gap:5px}
+  body[data-mv-tab="overview"] .stat .val{font-size:20px;margin-top:5px}
+  body[data-mv-tab="overview"] .stat .foot{justify-content:center;gap:6px;margin-top:5px}
+  body[data-mv-tab="overview"] .mini-row{gap:8px;margin-top:8px}
+  body[data-mv-tab="overview"] .mini{padding:8px 9px;text-align:center}
   body[data-mv-tab="overview"] .mini b{font-size:16px}
 
   body[data-mv-tab="overview"] #panelStats{flex:1.42 1 0}
@@ -607,7 +607,15 @@ body.lite .pulse-ring{display:none}
   body[data-mv-tab="ranking"] .rk-track{height:6px;margin-top:8px}
 
   /* 地图页：只展示地图，铺满可用空间（地图内容自行按比例居中） */
-  .main [data-mvt="map"]{flex:1 1 0;height:auto;min-height:0}
+  .main [data-mvt="map"]{flex:1 1 0;height:auto;min-height:0;touch-action:none}
+
+  /* 竖屏：把整块地图向右（顺时针）旋转 90°，宽高互换后铺满竖屏 */
+  body[data-mv-tab="map"][data-mv-rot="1"] .main{position:relative}
+  body[data-mv-tab="map"][data-mv-rot="1"] .main [data-mvt="map"]{
+    position:absolute;left:0;top:0;
+    width:var(--mvrot-w,100%);height:var(--mvrot-h,100%);
+    transform-origin:0 0;
+    transform:translateX(var(--mvrot-s,0px)) rotate(90deg)}
 
   /* 地图右上角快捷工具：全屏 / 放大 / 缩小 / 复位 */
   body[data-mv-tab="map"] .map-tools{display:flex}
@@ -2108,8 +2116,11 @@ var FX = {
   },
   resize:function(){
     var panel = $('#mapPanel');
-    var r = panel.getBoundingClientRect();
-    this.w = Math.max(10, r.width); this.h = Math.max(10, r.height);
+    // 注意：地图页在竖屏会被 rotate(90deg)，getBoundingClientRect 拿到的是变换后的视觉尺寸，
+    // 画布必须用布局尺寸（offsetWidth/Height），否则坐标系与绘制内容错位
+    var bw = panel.offsetWidth, bh = panel.offsetHeight;
+    if(!bw || !bh){ var rr = panel.getBoundingClientRect(); bw = rr.width; bh = rr.height; }
+    this.w = Math.max(10, bw); this.h = Math.max(10, bh);
     // 地图光晕层用 1.5 倍足够清晰，比 2 倍少约 44% 的逐帧填充量
     this.dpr = Math.min(1.5, window.devicePixelRatio||1);
     this.cv.width = Math.round(this.w*this.dpr);
@@ -2749,8 +2760,9 @@ var Spark = {
     this.resize();
   },
   resize:function(){
-    var r = this.cv.getBoundingClientRect();
-    this.w = Math.max(120, r.width); this.h = Math.max(30, r.height);
+    var bw = this.cv.offsetWidth, bh = this.cv.offsetHeight;   // 同上：不受 rotate 影响
+    if(!bw || !bh){ var rr = this.cv.getBoundingClientRect(); bw = rr.width; bh = rr.height; }
+    this.w = Math.max(120, bw); this.h = Math.max(30, bh);
     this.cv.width = Math.round(this.w*this.dpr);
     this.cv.height = Math.round(this.h*this.dpr);
   },
@@ -3082,10 +3094,11 @@ function initMapTools(){
     }, { passive:true });
     panel.addEventListener('touchmove', function(e){
       if(e.touches.length === 2 && pinch){
+        e.preventDefault();                 // 关键：不拦住浏览器就会把整个网页一起缩放
         var d = touchDist(e.touches);
         if(d > 6) applyMapZoom(pinch.z * (d / pinch.d));
       }
-    }, { passive:true });
+    }, { passive:false });
     panel.addEventListener('touchend', function(){ pinch = null; }, { passive:true });
     panel.addEventListener('touchcancel', function(){ pinch = null; }, { passive:true });
   }
@@ -3128,7 +3141,31 @@ function initMapTools(){
   }
 }
 
+function isPortrait(){ return window.innerHeight > window.innerWidth; }
+function applyMapRotation(){
+  // 竖屏手机：地图页整块顺时针转 90°，宽高互换铺满屏幕（横着拿手机看）
+  var panel = $('#mapPanel');
+  if(!panel) return;
+  var main = panel.parentNode;
+  var need = isPhoneLayout() && isPortrait() && document.body.getAttribute('data-mv-tab') === 'map';
+  if(need){
+    var box = main.getBoundingClientRect();
+    if(box.width < 60 || box.height < 60){ document.body.removeAttribute('data-mv-rot'); return; }
+    panel.style.setProperty('--mvrot-w', box.height + 'px');
+    panel.style.setProperty('--mvrot-h', box.width + 'px');
+    panel.style.setProperty('--mvrot-s', box.width + 'px');
+    document.body.setAttribute('data-mv-rot', '1');
+  } else {
+    if(document.body.getAttribute('data-mv-rot')){
+      document.body.removeAttribute('data-mv-rot');
+      panel.style.removeProperty('--mvrot-w');
+      panel.style.removeProperty('--mvrot-h');
+      panel.style.removeProperty('--mvrot-s');
+    }
+  }
+}
 function refreshMapGeometry(){
+  applyMapRotation();          // 先定好尺寸与旋转，再按最终尺寸重建画布
   try{
     Stars.resize(); Stars.build();
     Spark.resize();
@@ -3153,6 +3190,7 @@ function setMobileTab(tab, silent){
   if(!silent){ try{ localStorage.setItem(MV.KEY, tab); }catch(e){} }
   // 地图在隐藏状态下尺寸为 0，切回来必须重建几何
   if(tab === 'map') setTimeout(refreshMapGeometry, 90);
+  else applyMapRotation();     // 离开地图页时清掉旋转
 }
 function updateTabBadge(){
   var b = $('#tabAlertBadge');
