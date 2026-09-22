@@ -533,6 +533,63 @@ body.lite .pulse-ring{display:none}
   .col-left > #panelStats{grid-column:1 / span 2}
   .region{min-height:150px}
 }
+/* ===================== 移动端 / 平板竖屏 ===================== */
+@media (max-width:768px){
+  html,body{height:auto;overflow-x:hidden;-webkit-text-size-adjust:100%}
+  .app{height:auto;min-height:100vh;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto;
+    padding:10px 10px 4px;gap:10px}
+
+  /* 顶栏折成两行：品牌 + 操作按钮 / 状态胶囊 */
+  .topbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:2px 0 8px}
+  .brand{flex:1 1 0;min-width:0;gap:8px}
+  .logo{width:30px;height:30px;flex:0 0 auto}
+  .title{min-width:0;overflow:hidden}
+  .title h1{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .title p{display:none}
+  .right-hd{gap:8px;flex:0 0 auto}
+  .hd-btn{padding:5px 9px;font-size:11px}
+  .clock{display:none}          /* 手机系统栏自带时间，这里让位给标题与按钮 */
+  .fps-badge{display:none}
+  .chips{order:3;flex:1 1 100%;overflow-x:auto;gap:6px;padding-bottom:1px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chips .chip{flex:0 0 auto;font-size:11px;padding:4px 8px}
+  .chips .chip:nth-child(n+3){display:inline-flex}
+
+  /* 主区：单列纵向，地图排最前 */
+  .main{grid-template-columns:minmax(0,1fr);gap:10px}
+  .map-panel{order:-1;height:340px;min-height:340px}
+  .col{display:flex;flex-direction:column;gap:10px}
+  .col-left,.col-right{order:0}
+
+  /* 面板改为内容撑高，整页滚动 */
+  .panel,.panel-bd{min-height:0;overflow:visible}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stat .val b,.stat .val span{font-size:22px}
+  .donut-wrap{width:min(158px,54%);margin:0 auto 6px}
+  .legend{grid-template-columns:1fr 1fr;max-height:none;overflow:visible}
+  .region{min-height:0}
+  .gauge{width:126px;margin:0 auto}
+  .rank-list{max-height:none;overflow:visible}
+  .alert-list{max-height:330px}
+  .hud{top:2px}
+  .hud::before{width:280px;height:150px}
+  .hud-label{font-size:10px;letter-spacing:.16em}
+  .hud-value b{font-size:clamp(36px,11vw,54px)}
+  .hud-sub{font-size:10.5px;flex-wrap:wrap;justify-content:center;gap:3px 10px;max-width:100%;padding:0 10px}
+  #hudSpark{height:38px}
+  .map-foot{left:8px;right:8px;bottom:8px;flex-direction:column;align-items:flex-start;gap:5px}
+  .legend-scale{gap:7px;padding:5px 8px;font-size:10px;flex-wrap:wrap}
+  .map-meta{padding:5px 8px;font-size:10px}
+  .tip{max-width:78vw;min-width:0}
+
+  /* 走马灯吸底 */
+  .marquee{position:sticky;bottom:0;height:44px;padding:6px 8px;margin-top:2px;
+    background:rgba(6,12,22,.9);backdrop-filter:blur(10px);border-radius:12px;border:1px solid var(--line)}
+  .mq-item{padding:5px 9px}
+}
+@media (max-width:768px) and (orientation:landscape){
+  .map-panel{height:300px;min-height:300px}
+}
 </style>
 </head>
 <body>
@@ -559,7 +616,7 @@ body.lite .pulse-ring{display:none}
     <div class="brand">
       <div class="logo"><i></i><i></i><i></i><b></b></div>
       <div class="title">
-        <h1 id="brandTitle">PING 节点实时监控中心</h1>
+        <h1 id="brandTitle">CPOLAR 节点实时监控中心</h1>
         <p>CPOLAR EDGE NODE TELEMETRY &nbsp;·&nbsp; REALTIME PULSE</p>
       </div>
     </div>
@@ -1481,7 +1538,7 @@ function renderStats(){
 
   var onlineRate = AGG.total ? AGG.online/AGG.total*100 : 0;
   dTotal.textContent = '实测 ' + REAL_COUNT;
-  $('#stTotalS').textContent = '演示 ' + SIM_COUNT + ' 台';
+  $('#stTotalS').textContent = SIM_COUNT > 0 ? ('演示 ' + SIM_COUNT + ' 台') : '全部为实测节点';
   dOnline.textContent = onlineRate.toFixed(1) + '%';
   dOnline.className = 'delta ' + (onlineRate>98?'down':(onlineRate>94?'':'up'));
   var dv = AGG.avg - (AGG.prevAvg||AGG.avg);
@@ -1588,7 +1645,7 @@ function highlightRegion(k, on){
     $('#dcSub').style.color = r?r.c:'#5f7893';
   } else {
     $('#dcLabel').textContent = '节点总数';
-    $('#dcSub').textContent = '实测 '+REAL_COUNT+' · 演示 '+SIM_COUNT;
+    $('#dcSub').textContent = SIM_COUNT > 0 ? ('实测 '+REAL_COUNT+' · 演示 '+SIM_COUNT) : ('实测 '+REAL_COUNT+' 台');
     $('#dcSub').style.color = '#5f7893';
   }
 }
@@ -2739,7 +2796,7 @@ function alertFacts(a){
   if(/^0(\.0+)?\s*%$/.test(loss)) loss = '';
   var tone = (type==='recovery'||type==='info') ? 'ok' : (type==='packet_loss' ? 'warn' : 'crit');
   var title = (type==='recovery') ? ('节点已恢复' + (rtt?(' · '+rtt):''))
-            : (type==='packet_loss') ? ('丢包告警' + (loss?(' · 丢包 '+loss):''))
+            : (type==='packet_loss') ? ('丢包告警' + (loss?(' · '+loss):''))
             : ((lvl || '异常提醒') + (rtt?(' · '+rtt):''));
   var sub = (a.host_name || '系统状态') + (loss?(' · 丢包 '+loss):'') + (rtt?(' · 延迟 '+rtt):'');
   return { lv:tone, t:title, s:sub };
@@ -2805,10 +2862,14 @@ function syncReal(){
         n.level = levelOf(n);
         if(!first && wasOn !== n.online){
           if(n.online){
-            pendingAlerts.push({ id:++alertSeq, lv:'ok',
-              t:'节点已恢复 · '+(rtt>0?rtt.toFixed(1):'--')+'ms',
-              s:n.name+' · '+n.city+' · 链路重新可用', ts:Date.now(), name:n.name, city:n.city });
+            if(n.sawOffline){
+              n.sawOffline = false;
+              pendingAlerts.push({ id:++alertSeq, lv:'ok',
+                t:'节点已恢复'+(rtt>=0.05?(' · '+rtt.toFixed(1)+'ms'):''),
+                s:n.name+' · '+n.city+' · 链路重新可用', ts:Date.now(), name:n.name, city:n.city });
+            }
           } else {
+            n.sawOffline = true;
             pendingAlerts.push({ id:++alertSeq, lv:'crit', t:'节点离线',
               s:n.name+' · '+n.city+' · 无法建立探测连接', ts:Date.now(), name:n.name, city:n.city });
           }
@@ -2877,7 +2938,9 @@ function tickRound(){
   // 事件告警
   for(i=0;i<NODES.length;i++){
     var n = NODES[i];
-    if(n.recovered){ n.recovered=false; n.lastAlert=AGG.round;
+    if(n.recovered){ n.recovered=false;
+      if(n.real) continue;          // 真实节点的在线状态只由 syncReal 驱动，不在此编造
+      n.lastAlert=AGG.round;
       pendingAlerts.push({ id:++alertSeq, lv:'ok', t:'节点已恢复 · '+n.ms.toFixed(1)+'ms',
         s:n.name+' · '+n.city+' · 链路重新可用', ts:Date.now(), name:n.name, city:n.city }); continue; }
     if(n.event==='offline' && wasOnline[n.id]){ n.event=null; n.lastAlert=AGG.round; pushAlert(n); continue; }
