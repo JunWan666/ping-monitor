@@ -570,9 +570,27 @@ body.lite .pulse-ring{display:none}
   body[data-mv-tab="alerts"] .main [data-mvt="alerts"]{display:flex}
 
   /* 概览页：三块按内容量分配高度 */
-  body[data-mv-tab="overview"] #panelStats{flex:1.15 1 0}
-  body[data-mv-tab="overview"] #panelHealth{flex:0.92 1 0}
-  body[data-mv-tab="overview"] #panelRegion{flex:1.75 1 0}
+  /* 概览页 · 链路概览：加大留白 + 内容居中 */
+  body[data-mv-tab="overview"] #panelStats .panel-hd{padding:10px 12px 8px}
+  body[data-mv-tab="overview"] #panelStats .panel-bd{padding:0 12px 12px}
+  body[data-mv-tab="overview"] .stats{gap:9px;grid-auto-rows:minmax(66px,1fr);overflow-y:auto;min-height:0}
+  body[data-mv-tab="overview"] .stat{padding:12px 13px;text-align:center}
+  body[data-mv-tab="overview"] .stat .lbl{justify-content:center;font-size:11px}
+  body[data-mv-tab="overview"] .stat .val{font-size:23px;margin-top:7px}
+  body[data-mv-tab="overview"] .stat .foot{justify-content:center;gap:7px;margin-top:7px}
+  body[data-mv-tab="overview"] .mini-row{gap:9px;margin-top:9px}
+  body[data-mv-tab="overview"] .mini{padding:9px 10px;text-align:center}
+  body[data-mv-tab="overview"] .mini b{font-size:16px}
+
+  body[data-mv-tab="overview"] #panelStats{flex:1.42 1 0}
+  body[data-mv-tab="overview"] #panelHealth{flex:0.82 1 0}
+  body[data-mv-tab="overview"] #panelRegion{flex:1.46 1 0}
+  body[data-mv-tab="overview"] .gauge{width:104px}
+  body[data-mv-tab="overview"] .gauge-txt b{font-size:17px}
+  body[data-mv-tab="overview"] .gauge-txt b em{font-size:9px}
+  body[data-mv-tab="overview"] .gauge-txt span{font-size:9px;letter-spacing:.05em;margin-top:1px}
+  body[data-mv-tab="overview"] .donut-wrap{width:min(118px,42%)}
+  body[data-mv-tab="overview"] .legend{gap:3px 7px}
 
   .panel,.panel-bd{min-height:0}
   .panel-bd{overflow:hidden}
@@ -582,13 +600,30 @@ body.lite .pulse-ring{display:none}
   .legend{grid-template-columns:1fr 1fr;gap:4px 8px;max-height:none;overflow-y:auto}
   .gauge{width:116px;margin:0 auto}
   .rank-list,.alert-list{max-height:none;overflow-y:auto}
+  /* 排行页：9 条等分高度，把整页铺满 */
+  body[data-mv-tab="ranking"] .rank-list{display:grid;grid-auto-rows:1fr;gap:8px;overflow:hidden}
+  body[data-mv-tab="ranking"] .rank-row{padding:10px 12px}
+  body[data-mv-tab="ranking"] .rk-name{font-size:13px}
+  body[data-mv-tab="ranking"] .rk-track{height:6px;margin-top:8px}
 
-  /* 地图页：地图按 4:3 正常比例，余下空间补指标与排行
-     （选择器要和 .main [data-mvt] 同权重或更高，否则 flex:1 会把它拉满屏） */
-  .main [data-mvt="map"]{height:min(46vh,352px);min-height:0;flex:0 0 auto}
-  body[data-mv-tab="map"] #panelStats{display:flex;flex:0 0 auto}
-  body[data-mv-tab="map"] #panelRank{display:flex;flex:1 1 0;min-height:0}
-  body[data-mv-tab="map"] .mini-row{display:none}
+  /* 地图页：只展示地图，铺满可用空间（地图内容自行按比例居中） */
+  .main [data-mvt="map"]{flex:1 1 0;height:auto;min-height:0}
+
+  /* 地图右上角快捷工具：全屏 / 放大 / 缩小 / 复位 */
+  body[data-mv-tab="map"] .map-tools{display:flex}
+  .map-tools{display:none;position:absolute;right:9px;top:9px;z-index:12;flex-direction:column;gap:6px}
+  .map-tools button{width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+    border-radius:10px;background:rgba(8,16,28,.74);border:1px solid var(--line);color:var(--txt-dim);
+    cursor:pointer;backdrop-filter:blur(8px);transition:color .18s,border-color .18s,background .18s;
+    font:inherit;font-size:15px;line-height:1;padding:0}
+  .map-tools button:hover,.map-tools button.on{color:var(--txt);border-color:var(--line-hi);background:rgba(12,26,44,.86)}
+  .map-tools button svg{display:block}
+
+  /* 沉浸全屏：只留地图 */
+  body.map-immersive .topbar,
+  body.map-immersive .mobile-tabbar{display:none}
+  body.map-immersive .app{height:100vh;height:100dvh;grid-template-rows:minmax(0,1fr);padding:0;gap:0}
+  body.map-immersive .main{gap:0;min-height:0;height:100%}
   /* HUD 收成顶部一条，避免压住地图主体 */
   body[data-mv-tab="map"] .hud{left:8px;right:8px;top:4px;transform:none;
     display:flex;flex-direction:row;align-items:center;justify-content:center;gap:9px;
@@ -791,6 +826,14 @@ body.lite .pulse-ring{display:none}
 
     <!-- 中列：地图 -->
     <section class="map-panel" id="mapPanel" data-mvt="map">
+      <div class="map-tools" id="mapTools">
+        <button type="button" id="mapFullscreen" title="全屏看地图" aria-label="全屏看地图">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        </button>
+        <button type="button" id="mapZoomIn" title="放大" aria-label="放大">+</button>
+        <button type="button" id="mapZoomOut" title="缩小" aria-label="缩小">&minus;</button>
+        <button type="button" id="mapZoomReset" title="复位" aria-label="复位">&#8635;</button>
+      </div>
       <div id="mapBase"></div>
       <canvas id="mapFx"></canvas>
       <div class="frame"></div>
@@ -2980,6 +3023,111 @@ var MV = { tab:'overview', KEY:'ping-mv-tab', TABS:['overview','map','ranking','
 function isPhoneLayout(){
   return window.innerWidth <= 768 || window.innerHeight <= 520;
 }
+/* ---------- 地图缩放 / 全屏工具 ---------- */
+var MAPZOOM = { z:1, MIN:0.7, MAX:8 };
+function touchDist(t){
+  var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+function syncNodePositions(){
+  // 底图缩放后，节点是按投影算的屏幕坐标，必须用 ECharts 的坐标变换重新对齐
+  if(!ECHART || FX.tier !== 'vec') return;
+  try{
+    for(var i=0;i<NODES.length;i++){
+      var n = NODES[i];
+      var px = ECHART.convertToPixel({ geoIndex:0 }, [n.lon, n.lat]);
+      if(px) FX.pts[n.id] = { x:px[0], y:px[1] };
+    }
+    this.__x = 0;
+    FX.buildNodeLayer();
+  }catch(e){}
+}
+function applyMapZoom(z){
+  z = clamp(z, MAPZOOM.MIN, MAPZOOM.MAX);
+  MAPZOOM.z = z;
+  if(FX.tier === 'vec' && ECHART){
+    try{ ECHART.setOption({ geo:{ zoom:z } }); }catch(e){}
+    syncNodePositions();
+  } else if(FX.tier === 'amap' && AMAP_MAP){
+    try{ AMAP_MAP.setZoom(Math.max(3, Math.min(12, 4 + (z-1)*3))); }catch(e){}
+  }
+}
+function initMapTools(){
+  var tools = $('#mapTools');
+  if(!tools) return;
+  var zin = $('#mapZoomIn'), zout = $('#mapZoomOut'), zreset = $('#mapZoomReset'), fab = $('#mapFullscreen');
+  if(zin) zin.addEventListener('click', function(){ applyMapZoom(MAPZOOM.z * 1.35); });
+  if(zout) zout.addEventListener('click', function(){ applyMapZoom(MAPZOOM.z / 1.35); });
+  if(zreset) zreset.addEventListener('click', function(){
+    MAPZOOM.z = 1;
+    if(FX.tier === 'vec' && ECHART){
+      try{ ECHART.setOption({ geo:{ zoom:1 } }); }catch(e){}
+      syncNodePositions();
+    } else if(FX.tier === 'amap' && AMAP_MAP){
+      try{ fitAMap(AMAP_MAP); }catch(e){}
+    }
+  });
+
+  // 滚轮 / 双指缩放
+  var panel = $('#mapPanel');
+  if(panel){
+    panel.addEventListener('wheel', function(e){
+      if(FX.tier !== 'vec') return;
+      e.preventDefault();
+      applyMapZoom(MAPZOOM.z * (e.deltaY < 0 ? 1.12 : 0.89));
+    }, { passive:false });
+    var pinch = null;
+    panel.addEventListener('touchstart', function(e){
+      if(e.touches.length === 2) pinch = { d: touchDist(e.touches), z: MAPZOOM.z };
+    }, { passive:true });
+    panel.addEventListener('touchmove', function(e){
+      if(e.touches.length === 2 && pinch){
+        var d = touchDist(e.touches);
+        if(d > 6) applyMapZoom(pinch.z * (d / pinch.d));
+      }
+    }, { passive:true });
+    panel.addEventListener('touchend', function(){ pinch = null; }, { passive:true });
+    panel.addEventListener('touchcancel', function(){ pinch = null; }, { passive:true });
+  }
+
+  // 全屏（沉浸模式：隐藏顶栏与底栏，只留地图）
+  if(fab){
+    fab.addEventListener('click', function(){
+      var d = topWin().document;
+      var fsEl = d.fullscreenElement || d.webkitFullscreenElement;
+      if(fsEl || document.body.classList.contains('map-immersive')){
+        document.body.classList.remove('map-immersive');
+        var ex = d.exitFullscreen || d.webkitExitFullscreen;
+        try{ if(fsEl && ex) ex.call(d); }catch(e){}
+      } else {
+        document.body.classList.add('map-immersive');
+        try{
+          var rq = d.documentElement.requestFullscreen || d.documentElement.webkitRequestFullscreen;
+          if(rq) rq.call(d.documentElement);
+        }catch(e){}
+      }
+      [320, 700, 1100].forEach(function(ms){          // 全屏切换时视口高度分几次稳定，多对齐几遍
+        setTimeout(function(){
+          fab.classList.toggle('on', document.body.classList.contains('map-immersive'));
+          refreshMapGeometry();
+        }, ms);
+      });
+    });
+    try{
+      ['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){
+        topWin().document.addEventListener(ev, function(){
+          var d = topWin().document;
+          if(!(d.fullscreenElement || d.webkitFullscreenElement)){
+            document.body.classList.remove('map-immersive');
+            fab.classList.remove('on');
+          }
+          setTimeout(refreshMapGeometry, 300);
+        });
+      });
+    }catch(e){}
+  }
+}
+
 function refreshMapGeometry(){
   try{
     Stars.resize(); Stars.build();
@@ -2990,6 +3138,7 @@ function refreshMapGeometry(){
     FX.resize();
     if(wasBuiltin) FX.setProjector(fitProjector(FX.w, FX.h, 34), 'builtin');   // 关键：投影不重建，地图会缩成一小块
     FX.build();
+    if(MAPZOOM.z !== 1) applyMapZoom(MAPZOOM.z);   // 重建会把缩放冲掉，重新套用
   }catch(e){}
 }
 function setMobileTab(tab, silent){
@@ -3189,6 +3338,7 @@ function main(){
 
   // 顶栏按钮（全屏 / 管理后台）+ 移动端底部导航
   initHeaderButtons();
+  initMapTools();
   initMobileTabbar();
 
   // 真实数据：节点状态与巡检同频；告警记录每 5 轮拉一次
