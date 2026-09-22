@@ -623,7 +623,9 @@ body.lite .pulse-ring{display:none}
     position:absolute;left:0;top:0;
     width:var(--mvrot-w,100%);height:var(--mvrot-h,100%);
     transform-origin:0 0;
-    transform:translateX(var(--mvrot-s,0px)) rotate(90deg)}
+    transform:translateX(var(--mvrot-s,0px)) rotate(90deg);
+    /* 提到独立合成层，旋转由 GPU 处理，避免手机上整块地图逐帧重合成 */
+    will-change:transform;backface-visibility:hidden}
 
   /* 地图右上角快捷工具：全屏 / 放大 / 缩小 / 复位 */
   body[data-mv-tab="map"] .map-tools{display:flex}
