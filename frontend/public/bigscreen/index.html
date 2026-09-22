@@ -2734,6 +2734,9 @@ function alertFacts(a){
     return '';
   }
   var loss = pick('丢包率'), rtt = pick('平均延迟'), lvl = pick('告警级别');
+  // 恢复类告警里延迟/丢包常为 0，直接省略而不是显示 "0.0ms"
+  if(/^0(\.0+)?\s*ms$/i.test(rtt)) rtt = '';
+  if(/^0(\.0+)?\s*%$/.test(loss)) loss = '';
   var tone = (type==='recovery'||type==='info') ? 'ok' : (type==='packet_loss' ? 'warn' : 'crit');
   var title = (type==='recovery') ? ('节点已恢复' + (rtt?(' · '+rtt):''))
             : (type==='packet_loss') ? ('丢包告警' + (loss?(' · 丢包 '+loss):''))
@@ -2819,6 +2822,17 @@ function syncReal(){
       var t = readToken();
       chipSrc(t ? '数据不可达 · 请重新登录' : '数据不可达 · 公开访问已关闭');
     });
+}
+
+/* ---------- 入口守卫：公开访问关闭时回登录页（与旧 SPA 行为一致） ---------- */
+function guardPublicAccess(){
+  if(CFG.PREVIEW) return;
+  fetch('/api/public/datascreen/status?_=' + Date.now(), { cache:'no-store', credentials:'same-origin' })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      if(d && d.enabled === false && !readToken()) location.replace('/login');
+    })
+    .catch(function(){});
 }
 
 /* ---------- 顶栏：全屏 / 管理后台 ---------- */
@@ -2953,6 +2967,9 @@ function main(){
   clockTick();
 
   bootBasemap();
+
+  // 公开访问关闭时回登录页（并行探测，不阻塞首屏渲染）
+  guardPublicAccess();
 
   // 顶栏按钮（全屏 / 管理后台）
   initHeaderButtons();
