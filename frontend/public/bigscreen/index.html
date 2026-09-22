@@ -254,7 +254,8 @@ canvas{display:block}
 .gauge-txt{position:absolute;left:0;right:0;bottom:2px;text-align:center}
 .gauge-txt b{font-family:var(--mono);font-size:21px;color:var(--txt);text-shadow:0 0 9px var(--accentA)}
 .gauge-txt b em{font-style:normal;font-size:10.5px;color:var(--txt-mute)}
-.gauge-txt span{display:block;font-size:10.5px;letter-spacing:.08em;color:var(--txt-mute);margin-top:2px}
+.gauge-txt > span{display:block;font-size:10.5px;letter-spacing:.08em;color:var(--txt-mute);margin-top:2px}
+.gauge-txt b span{display:inline}   /* 数值与 /100 同行，别被上面的后代选择器改成块级 */
 .health-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .hi{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--txt-dim)}
 .hi > span:first-child{flex:0 0 64px;letter-spacing:.04em}
@@ -574,21 +575,28 @@ body.lite .pulse-ring{display:none}
   body[data-mv-tab="overview"] #panelStats .panel-hd{padding:10px 12px 8px}
   body[data-mv-tab="overview"] #panelStats .panel-bd{padding:0 12px 12px}
   body[data-mv-tab="overview"] .stats{gap:8px;grid-auto-rows:minmax(0,1fr);overflow:hidden;min-height:0}
-  body[data-mv-tab="overview"] .stat{padding:9px 10px;text-align:center}
-  body[data-mv-tab="overview"] .stat .lbl{justify-content:center;font-size:10.5px;gap:5px}
-  body[data-mv-tab="overview"] .stat .val{font-size:20px;margin-top:5px}
-  body[data-mv-tab="overview"] .stat .foot{justify-content:center;gap:6px;margin-top:5px}
+  /* 卡片内容垂直居中+紧凑，保证"标签/数值/底行"三行都完整显示 */
+  body[data-mv-tab="overview"] .stat{padding:8px 9px;text-align:center;display:flex;flex-direction:column;justify-content:center}
+  body[data-mv-tab="overview"] .stat .lbl{justify-content:center;font-size:10px;gap:4px;line-height:1.3}
+  body[data-mv-tab="overview"] .stat .val{font-size:18px;margin-top:4px;line-height:1.15}
+  body[data-mv-tab="overview"] .stat .foot{justify-content:center;gap:5px;margin-top:4px;line-height:1.3}
+  body[data-mv-tab="overview"] .stat .delta{font-size:10px;padding:1px 5px}
+  body[data-mv-tab="overview"] .stat .mini-txt{font-size:10px}
   body[data-mv-tab="overview"] .mini-row{gap:8px;margin-top:8px}
   body[data-mv-tab="overview"] .mini{padding:8px 9px;text-align:center}
   body[data-mv-tab="overview"] .mini b{font-size:16px}
 
-  body[data-mv-tab="overview"] #panelStats{flex:1.42 1 0}
-  body[data-mv-tab="overview"] #panelHealth{flex:0.82 1 0}
-  body[data-mv-tab="overview"] #panelRegion{flex:1.46 1 0}
+  body[data-mv-tab="overview"] #panelStats{flex:1.52 1 0}
+  body[data-mv-tab="overview"] #panelHealth{flex:0.76 1 0}
+  body[data-mv-tab="overview"] #panelRegion{flex:1.42 1 0}
   body[data-mv-tab="overview"] .gauge{width:104px}
-  body[data-mv-tab="overview"] .gauge-txt b{font-size:17px}
-  body[data-mv-tab="overview"] .gauge-txt b em{font-size:9px}
-  body[data-mv-tab="overview"] .gauge-txt span{font-size:9px;letter-spacing:.05em;margin-top:1px}
+  /* 表盘数字与标签用 flex 竖排 + nowrap，避免缩小时换行叠在一起 */
+  body[data-mv-tab="overview"] .gauge-txt{position:absolute;left:0;right:0;bottom:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:1px;text-align:center}
+  body[data-mv-tab="overview"] .gauge-txt b{display:block;font-size:17px;line-height:1.05;white-space:nowrap}
+  body[data-mv-tab="overview"] .gauge-txt b span{display:inline}      /* 数值必须与 /100 同行 */
+  body[data-mv-tab="overview"] .gauge-txt b em{font-size:9px;white-space:nowrap;margin-left:2px}
+  body[data-mv-tab="overview"] .gauge-txt > span{display:block;font-size:9px;line-height:1.25;letter-spacing:.04em;margin:0;white-space:nowrap}
   body[data-mv-tab="overview"] .donut-wrap{width:min(118px,42%)}
   body[data-mv-tab="overview"] .legend{gap:3px 7px}
 
