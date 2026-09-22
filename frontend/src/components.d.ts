@@ -17,6 +17,7 @@ declare module 'vue' {
     DatabaseBackup: typeof import('./components/DatabaseBackup.vue')['default']
     DataBoard: typeof import('./components/DataBoard.vue')['default']
     DataScreen: typeof import('./components/DataScreen.vue')['default']
+    DataScreenLegacy: typeof import('./components/DataScreenLegacy.vue')['default']
     DataScreenSettings: typeof import('./components/DataScreenSettings.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']

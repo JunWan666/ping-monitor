@@ -1,0 +1,3074 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>CPOLAR · PING 节点实时监控中心</title>
+<meta name="description" content="沉浸式实时 Ping 节点监控可视化大屏" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   0. 基础变量
+   ===================================================================== */
+:root{
+  --cyan:#38f0ff; --violet:#7c5cff; --pink:#ff5ec4; --green:#35e0a1;
+  --amber:#ffb547; --red:#ff4f6d; --blue:#6ea8ff; --lime:#b8f14a;
+  --txt:#dcefff; --txt-dim:#9db6ce; --txt-mute:#8ba3bd;
+  --bg0:#03060e; --bg1:#050b18; --bg2:#0a1c34;
+  --panelA:rgba(13,27,48,.82); --panelB:rgba(6,13,26,.70); --panelC:rgba(8,17,32,.78);
+  --cardA:rgba(22,44,74,.60); --cardB:rgba(8,17,32,.44);
+  --row:rgba(6,13,26,.46); --chip:rgba(13,27,48,.62); --tip-bg:rgba(3,6,14,.97);
+  --line:rgba(56,240,255,.14); --line-hi:rgba(56,240,255,.36); --fill:rgba(56,240,255,.09);
+  --grid:rgba(56,240,255,.055); --halo:rgba(56,240,255,.03);
+  --scan1:rgba(56,240,255,.035); --scan2:rgba(56,240,255,.07);
+  --vig1:rgba(3,6,14,.62); --vig2:rgba(3,6,14,.9);
+  --glowA:rgba(56,240,255,.40); --glowB:rgba(124,92,255,.36); --glowC:rgba(255,94,196,.20);
+  --pglowA:rgba(56,240,255,.075); --pglowB:rgba(124,92,255,.07); --glowSoft:rgba(56,240,255,.26);
+  --mapBg1:rgba(16,44,80,.55); --mapBg2:rgba(3,6,14,.78);
+  --hudBg1:rgba(6,13,26,.86); --hudBg2:rgba(6,13,26,.45);
+  --accent:#7af6ff; --accent2:#9d80ff;
+  --accentA:rgba(56,240,255,.55); --accentB:rgba(124,92,255,.45);
+  --title1:#f2fbff; --title2:#8fe9ff; --title3:#b39dff; --title4:#ff9ede;
+  --hero1:#ffffff; --hero2:#9ff0ff; --hero3:#5cc9ff; --hero4:#7c5cff;
+  --mono:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
+  --sans:'Inter','HarmonyOS Sans SC','PingFang SC','Microsoft YaHei',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --hero:'Orbitron','JetBrains Mono',ui-monospace,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;width:100%}
+body{
+  background:var(--bg0);color:var(--txt);font-family:var(--sans);font-size:14px;
+  overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  user-select:none;
+}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+canvas{display:block}
+
+/* 滚动条 */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--fill);border-radius:3px}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--cyan),var(--violet));border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,var(--accent),var(--accent2))}
+
+/* =====================================================================
+   1. 沉浸式背景层
+   ===================================================================== */
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.bg-base{position:absolute;inset:0;background:
+  radial-gradient(ellipse 120% 80% at 50% -10%,var(--bg2) 0%,var(--bg1) 45%,var(--bg0) 100%),
+  linear-gradient(180deg,var(--bg1),var(--bg0))}
+.blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.55;mix-blend-mode:screen;will-change:transform}
+.b1{width:54vw;height:54vw;left:-10vw;top:-16vw;background:radial-gradient(circle at 45% 45%,var(--glowA),transparent 66%);animation:drift1 27s ease-in-out infinite}
+.b2{width:48vw;height:48vw;right:-12vw;top:4vh;background:radial-gradient(circle at 50% 50%,var(--glowB),transparent 66%);animation:drift2 33s ease-in-out infinite}
+.b3{width:62vw;height:62vw;left:20vw;bottom:-34vw;background:radial-gradient(circle at 50% 50%,var(--glowC),transparent 66%);animation:drift3 39s ease-in-out infinite}
+@keyframes drift1{50%{transform:translate3d(7vw,4vh,0) scale(1.16)}}
+@keyframes drift2{50%{transform:translate3d(-5vw,6vh,0) scale(1.10)}}
+@keyframes drift3{50%{transform:translate3d(4vw,-5vh,0) scale(1.14)}}
+.bg-grid{
+  position:absolute;inset:-70px -6% -6%;
+  background-image:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:66px 66px;
+  -webkit-mask-image:radial-gradient(ellipse 72% 62% at 50% 46%,#000 0%,rgba(0,0,0,.35) 55%,transparent 82%);
+  mask-image:radial-gradient(ellipse 72% 62% at 50% 46%,#000 0%,rgba(0,0,0,.35) 55%,transparent 82%);
+  animation:gridDrift 24s linear infinite;opacity:.85;will-change:transform
+}
+@keyframes gridDrift{from{transform:translate3d(0,-66px,0)}to{transform:translate3d(0,0,0)}}
+.bg-halo{position:absolute;left:50%;top:46%;width:120vw;height:120vh;transform:translate(-50%,-50%);
+  background:radial-gradient(circle at 50% 50%,var(--halo),transparent 55%);animation:breathe 9s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.45;transform:translate(-50%,-50%) scale(1.06)}}
+#stars{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.85}
+.vignette{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse 80% 72% at 50% 44%,transparent 38%,var(--vig1) 82%,var(--vig2) 100%)}
+.noise{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:.018;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.scanline{position:fixed;left:0;right:0;height:32vh;z-index:2;pointer-events:none;opacity:.16;
+  background:linear-gradient(180deg,transparent,var(--scan1) 45%,var(--scan2) 50%,var(--scan1) 55%,transparent);
+  animation:scanMove 14s linear infinite}
+@keyframes scanMove{0%{transform:translateY(-40vh)}100%{transform:translateY(140vh)}}
+
+/* =====================================================================
+   2. 布局骨架
+   ===================================================================== */
+.app{position:relative;z-index:3;height:100vh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;
+  gap:10px;padding:10px 16px 0}
+.main{display:grid;grid-template-columns:minmax(272px,19.2vw) minmax(0,1fr) minmax(300px,21.2vw);
+  gap:12px;min-height:0}
+.col{display:grid;gap:12px;min-height:0}
+.col-left{grid-template-rows:auto auto minmax(0,1fr)}
+.col-right{grid-template-rows:minmax(240px,1.02fr) minmax(220px,1fr)}
+
+/* =====================================================================
+   3. 顶栏
+   ===================================================================== */
+.topbar{position:relative;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+  gap:16px;padding:2px 4px 11px}
+.topbar::after{content:'';position:absolute;left:0;right:0;bottom:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--accentA) 18%,var(--accentB) 52%,var(--accentA) 82%,transparent)}
+.topbar::before{content:'';position:absolute;left:50%;bottom:-1px;width:180px;height:2px;transform:translateX(-50%);
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);filter:blur(1px);opacity:.9}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
+.logo{position:relative;width:46px;height:46px;flex:0 0 auto}
+.logo i{position:absolute;border-radius:50%;border:1px solid var(--accentA)}
+.logo i:nth-child(1){inset:0;border-top-color:var(--cyan);animation:spin 9s linear infinite}
+.logo i:nth-child(2){inset:6px;border-color:var(--accentB);border-left-color:var(--violet);animation:spin 5.6s linear infinite reverse}
+.logo i:nth-child(3){inset:12px;border-color:var(--accentA);border-bottom-color:var(--cyan);animation:spin 3.4s linear infinite}
+.logo b{position:absolute;inset:17px;border-radius:50%;
+  background:radial-gradient(circle,#fff 0%,var(--accent) 40%,transparent 74%);
+  box-shadow:0 0 22px var(--accentA);animation:corePulse 2.4s ease-in-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes corePulse{50%{transform:scale(1.28);opacity:.85}}
+.title{min-width:0}
+.title h1{font-size:clamp(17px,1.42vw,30px);font-weight:700;letter-spacing:.07em;white-space:nowrap;
+  background:linear-gradient(96deg,var(--title1) 0%,var(--title2) 42%,var(--title3) 78%,var(--title4) 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 8px var(--glowSoft))}
+.title p{margin-top:4px;font-size:11px;font-weight:500;letter-spacing:.3em;color:var(--txt-mute);white-space:nowrap}
+.chips{display:flex;align-items:center;gap:9px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;
+  border:1px solid var(--line);background:var(--chip);font-size:12px;font-weight:500;color:var(--txt-dim);
+  letter-spacing:.02em;white-space:nowrap;backdrop-filter:blur(7px)}
+.chip b{font-family:var(--mono);color:var(--txt);font-weight:600;font-size:11.5px}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 9px var(--green);animation:blink 1.8s ease-in-out infinite}
+.chip .dot.cy{background:var(--cyan);box-shadow:0 0 9px var(--cyan)}
+.chip .dot.vi{background:var(--violet);box-shadow:0 0 9px var(--violet)}
+@keyframes blink{50%{opacity:.28;transform:scale(.8)}}
+.right-hd{display:flex;align-items:center;justify-content:flex-end;gap:18px}
+.hd-btns{display:flex;align-items:center;gap:7px}
+.hd-btn{font:inherit;font-size:12px;font-weight:500;letter-spacing:.02em;color:var(--txt-dim);
+  background:var(--cardB);border:1px solid var(--line);border-radius:9px;padding:6px 11px;cursor:pointer;
+  transition:color .18s,border-color .18s,background .18s;white-space:nowrap;line-height:1}
+.hd-btn:hover{color:var(--txt);border-color:var(--line-hi);background:var(--cardA)}
+@media (max-width:1440px){.hd-btn{padding:5px 8px;font-size:11px}}
+.clock{text-align:right;line-height:1}
+.clock .t{font-family:var(--mono);font-size:clamp(19px,1.5vw,29px);font-weight:700;letter-spacing:.05em;color:#eaf9ff;
+  text-shadow:0 0 9px var(--accentA)}
+.clock .t span{color:var(--cyan)}
+.clock .d{margin-top:6px;font-size:12px;font-weight:500;letter-spacing:.1em;color:var(--txt-dim)}
+.fps-badge{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  min-width:56px;padding:5px 9px;border-radius:10px;border:1px solid var(--line);background:var(--chip)}
+.fps-badge b{font-family:var(--mono);font-size:14px;color:var(--green);text-shadow:0 0 7px rgba(53,224,161,.5)}
+.fps-badge b.warn{color:var(--amber);text-shadow:0 0 7px rgba(255,181,71,.5)}
+.fps-badge span{font-size:10px;letter-spacing:.16em;color:var(--txt-mute)}
+
+/* =====================================================================
+   4. 面板
+   ===================================================================== */
+.panel{position:relative;display:flex;flex-direction:column;min-height:0;border-radius:14px;
+  border:1px solid var(--line);
+  background:linear-gradient(158deg,var(--panelA) 0%,var(--panelB) 55%,var(--panelC) 100%);
+  box-shadow:0 26px 60px -30px #000,inset 0 1px 0 rgba(255,255,255,.05);overflow:hidden}
+.panel > .glow{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(120% 78% at 0% 0%,var(--pglowA),transparent 56%),
+             radial-gradient(90% 60% at 100% 100%,var(--pglowB),transparent 60%)}
+.corner{position:absolute;width:13px;height:13px;pointer-events:none;opacity:.75;z-index:2}
+.corner.tl{left:-1px;top:-1px;border-left:1.5px solid var(--line-hi);border-top:1.5px solid var(--line-hi);border-radius:14px 0 0 0}
+.corner.tr{right:-1px;top:-1px;border-right:1.5px solid var(--line-hi);border-top:1.5px solid var(--line-hi);border-radius:0 14px 0 0}
+.corner.bl{left:-1px;bottom:-1px;border-left:1.5px solid var(--line-hi);border-bottom:1.5px solid var(--line-hi);border-radius:0 0 0 14px}
+.corner.br{right:-1px;bottom:-1px;border-right:1.5px solid var(--line-hi);border-bottom:1.5px solid var(--line-hi);border-radius:0 0 14px 0}
+.panel-hd{position:relative;z-index:2;display:flex;align-items:center;gap:9px;padding:12px 14px 9px;flex:0 0 auto}
+.panel-hd .bar{width:3px;height:14px;border-radius:2px;background:linear-gradient(180deg,var(--cyan),var(--violet));
+  box-shadow:0 0 11px var(--accentA)}
+.panel-hd h3{font-size:14px;font-weight:600;letter-spacing:.06em;color:var(--txt);white-space:nowrap}
+.panel-hd .en{font-size:10px;font-weight:500;letter-spacing:.16em;color:var(--txt-mute);transform:translateY(1px)}
+.panel-hd .hd-right{margin-left:auto;font-size:11.5px;color:var(--txt-dim);letter-spacing:.02em;display:flex;align-items:center;gap:7px}
+.panel-hd .hd-right b{font-family:var(--mono);color:var(--txt);font-weight:600}
+.panel-bd{position:relative;z-index:2;flex:1 1 auto;min-height:0;padding:0 14px 14px;display:flex;flex-direction:column}
+
+/* =====================================================================
+   5. 统计卡
+   ===================================================================== */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stat{position:relative;padding:9px 11px 10px 13px;border-radius:11px;overflow:hidden;
+  background:linear-gradient(155deg,var(--cardA),var(--cardB));
+  border:1px solid var(--fill);transition:border-color .55s ease,box-shadow .55s ease,background .55s ease}
+.stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--c,var(--cyan));
+  box-shadow:0 0 14px var(--c,var(--cyan));opacity:.9;transition:background .55s,box-shadow .55s}
+.stat::after{content:'';position:absolute;right:-24px;top:-24px;width:64px;height:64px;border-radius:50%;
+  background:radial-gradient(circle,var(--c,var(--cyan)),transparent 68%);opacity:.14;transition:opacity .6s}
+.stat .lbl{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;letter-spacing:.03em;color:var(--txt-dim)}
+.stat .lbl i{width:5px;height:5px;border-radius:50%;background:var(--c,var(--cyan));box-shadow:0 0 8px var(--c,var(--cyan))}
+.stat .val{margin-top:5px;font-family:var(--mono);font-weight:700;font-size:clamp(19px,1.5vw,28px);line-height:1.1;
+  color:var(--txt);text-shadow:0 0 9px var(--pglowA);transition:color .55s,text-shadow .55s}
+.stat .val em{font-style:normal;font-family:var(--sans);font-size:11px;font-weight:500;letter-spacing:.04em;color:var(--txt-mute);margin-left:4px}
+.stat .foot{display:flex;align-items:center;justify-content:space-between;margin-top:5px;gap:6px}
+.stat .delta{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:6px;color:var(--cyan);
+  background:var(--fill);transition:background .5s,color .5s}
+.stat .delta.up{color:#ffca6b;background:rgba(255,181,71,.13)}
+.stat .delta.down{color:#7dffc4;background:rgba(53,224,161,.13)}
+.stat .mini-txt{font-size:11px;color:var(--txt-mute);letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat.warn{border-color:rgba(255,181,71,.34);box-shadow:0 0 26px -12px rgba(255,181,71,.7)}
+.stat.warn .val{color:#ffd08a;text-shadow:0 0 11px rgba(255,181,71,.4)}
+.stat.crit{border-color:rgba(255,79,109,.42);box-shadow:0 0 30px -10px rgba(255,79,109,.8);animation:critPulse 1.7s ease-in-out infinite}
+.stat.crit .val{color:#ff9db0;text-shadow:0 0 12px rgba(255,79,109,.45)}
+@keyframes critPulse{50%{box-shadow:0 0 34px -6px rgba(255,79,109,.95)}}
+
+.mini-row{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:10px}
+.mini{padding:7px 9px;border-radius:10px;background:var(--cardB);border:1px solid var(--fill);position:relative;overflow:hidden}
+.mini b{display:block;font-family:var(--mono);font-size:15px;color:var(--txt);font-weight:600}
+.mini b em{font-style:normal;font-size:10px;color:var(--txt-mute);margin-left:2px;font-family:var(--sans)}
+.mini span{display:block;margin-top:3px;font-size:11px;letter-spacing:.01em;color:var(--txt-mute)}
+.mini i{position:absolute;left:0;bottom:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--violet));
+  box-shadow:0 0 8px var(--accentA);transition:width .9s cubic-bezier(.22,.9,.24,1)}
+
+/* =====================================================================
+   6. 区域分布环形图
+   ===================================================================== */
+.region{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px}
+.donut-wrap{position:relative;width:min(176px,54%);margin:2px auto 4px;flex:0 0 auto}
+.donut{width:100%;height:auto;display:block;overflow:visible}
+.donut .track{fill:none;stroke:var(--fill);stroke-width:11}
+.donut .arc{fill:none;stroke-width:11;stroke-linecap:round;
+  transition:stroke-dasharray .95s cubic-bezier(.22,.9,.24,1),stroke-dashoffset .95s cubic-bezier(.22,.9,.24,1),
+    opacity .45s ease,stroke-width .35s ease;
+  filter:drop-shadow(0 0 2.5px currentColor);cursor:pointer}
+.donut .arc.dim{opacity:.22}
+.donut .arc.hot{stroke-width:14}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.donut-center .n{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--txt);text-shadow:0 0 10px var(--accentA);line-height:1}
+.donut-center .l{margin-top:5px;font-size:11px;letter-spacing:.1em;color:var(--txt-mute)}
+.donut-center .s{margin-top:3px;font-size:10.5px;font-family:var(--mono)}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;overflow:auto;padding-right:2px;flex:1;min-height:0;align-content:start}
+.lg{display:flex;align-items:center;gap:6px;padding:4px 7px;border-radius:7px;cursor:pointer;
+  border:1px solid transparent;transition:background .35s,border-color .35s}
+.lg:hover,.lg.hot{background:var(--pglowA);border-color:var(--line-hi)}
+.lg i{width:7px;height:7px;border-radius:2px;flex:0 0 auto;box-shadow:0 0 8px currentColor;background:currentColor}
+.lg .nm{font-size:12px;font-weight:500;color:var(--txt);letter-spacing:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .ct{font-family:var(--mono);font-size:11.5px;color:var(--txt-dim)}
+.lg .pc{font-family:var(--mono);font-size:10.5px;color:var(--txt-mute);width:38px;text-align:right}
+
+/* =====================================================================
+   7. 健康度
+   ===================================================================== */
+.health{display:flex;align-items:center;gap:14px}
+.gauge{position:relative;width:132px;flex:0 0 auto}
+.gauge svg{width:100%;height:auto;display:block}
+.gauge .gt{fill:none;stroke:var(--fill);stroke-width:9;stroke-linecap:round}
+.gauge .gv{fill:none;stroke-width:9;stroke-linecap:round;
+  transition:stroke-dasharray 1.1s cubic-bezier(.22,.9,.24,1),stroke .7s ease;filter:drop-shadow(0 0 3px currentColor)}
+.gauge .tick{stroke:var(--line-hi);stroke-width:1.4}
+.gauge-txt{position:absolute;left:0;right:0;bottom:2px;text-align:center}
+.gauge-txt b{font-family:var(--mono);font-size:21px;color:var(--txt);text-shadow:0 0 9px var(--accentA)}
+.gauge-txt b em{font-style:normal;font-size:10.5px;color:var(--txt-mute)}
+.gauge-txt span{display:block;font-size:10.5px;letter-spacing:.08em;color:var(--txt-mute);margin-top:2px}
+.health-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.hi{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--txt-dim)}
+.hi > span:first-child{flex:0 0 64px;letter-spacing:.04em}
+.hi > b{flex:0 0 54px;text-align:right;font-family:var(--mono);font-weight:600;color:var(--txt)}
+.hi .track{flex:1 1 auto;height:3px;border-radius:2px;background:var(--fill);overflow:hidden;margin-left:2px}
+.hi .track i{display:block;height:100%;border-radius:2px;transition:width .95s cubic-bezier(.22,.9,.24,1)}
+
+/* =====================================================================
+   8. 地图
+   ===================================================================== */
+.map-panel{position:relative;border-radius:16px;overflow:hidden;border:1px solid var(--line);
+  background:radial-gradient(ellipse 80% 70% at 50% 42%,var(--mapBg1),var(--mapBg2));
+  box-shadow:0 30px 70px -34px #000,inset 0 0 60px -30px var(--pglowA)}
+.map-panel .frame{position:absolute;inset:0;pointer-events:none;z-index:4;
+  box-shadow:inset 0 0 34px -16px var(--pglowA),inset 0 0 0 1px var(--line)}
+#mapBase{position:absolute;inset:0;opacity:0;transition:opacity 1.1s ease;z-index:1}
+#mapBase.on{opacity:1}
+#mapFx{position:absolute;inset:0;z-index:2}
+.map-panel .amap-logo,.map-panel .amap-copyright{opacity:.28!important;filter:grayscale(1)}
+
+.hud{position:absolute;left:50%;top:6px;transform:translateX(-50%);z-index:5;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 26px 4px}
+.hud::before{content:'';position:absolute;left:50%;top:-6px;width:460px;height:230px;transform:translateX(-50%);
+  background:radial-gradient(ellipse at 50% 32%,var(--hudBg1) 0%,var(--hudBg2) 42%,transparent 72%);z-index:-1}
+.hud-label{display:flex;align-items:center;gap:9px;font-size:11.5px;font-weight:500;letter-spacing:.22em;color:var(--txt-dim)}
+.hud-label i{width:5px;height:5px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:blink 1.6s ease-in-out infinite}
+.hud-value{display:flex;align-items:flex-end;gap:6px;line-height:.94}
+.hud-value b{font-family:var(--hero);font-weight:900;font-size:clamp(44px,4.5vw,88px);letter-spacing:-.01em;
+  background:linear-gradient(180deg,var(--hero1) 0%,var(--hero2) 42%,var(--hero3) 72%,var(--hero4) 130%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 11px var(--accentA));
+  transition:filter .6s ease}
+.hud-value em{font-style:normal;font-family:var(--mono);font-size:15px;font-weight:500;color:var(--txt-dim);margin-bottom:10px;letter-spacing:.06em}
+.hud.crit .hud-value b{background:linear-gradient(180deg,#fff 0%,#ffd0a0 40%,#ff8ba1 75%,#ff4f6d 120%);
+  -webkit-background-clip:text;background-clip:text;
+  filter:drop-shadow(0 0 12px rgba(255,79,109,.42))}
+.hud.crit .hud-value em{color:#ffb3c1}
+.hud-sub{display:flex;align-items:center;gap:12px;font-size:11.5px;color:var(--txt-dim);letter-spacing:.02em}
+.hud-sub .dv{font-family:var(--mono);padding:1px 7px;border-radius:6px;color:#ffca6b;background:rgba(255,181,71,.12);transition:color .5s,background .5s}
+.hud-sub .dv.down{color:#7dffc4;background:rgba(53,224,161,.12)}
+.hud-sub b{font-family:var(--mono);color:var(--txt);font-weight:600}
+#hudSpark{width:430px;height:58px;margin-top:2px;opacity:.95}
+.pulse-ring{position:absolute;left:50%;top:64px;width:16px;height:16px;margin-left:-8px;pointer-events:none}
+.pulse-ring i{position:absolute;inset:0;border-radius:50%;border:1px solid var(--accentA);animation:ring 2.6s ease-out infinite}
+.pulse-ring i:nth-child(2){animation-delay:.85s}
+.pulse-ring i:nth-child(3){animation-delay:1.7s}
+@keyframes ring{0%{transform:scale(.4);opacity:.9}100%{transform:scale(6);opacity:0}}
+
+.map-foot{position:absolute;left:14px;right:14px;bottom:10px;z-index:5;display:flex;align-items:flex-end;
+  justify-content:space-between;gap:12px;pointer-events:none}
+.legend-scale{display:flex;align-items:center;gap:9px;padding:6px 11px;border-radius:9px;
+  background:var(--chip);border:1px solid var(--line);font-size:11px;color:var(--txt-dim);
+  backdrop-filter:blur(7px);letter-spacing:.01em}
+.legend-scale i{width:8px;height:8px;border-radius:50%;display:inline-block;box-shadow:0 0 8px currentColor;background:currentColor}
+.legend-scale s{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.map-meta{display:flex;align-items:center;gap:9px;padding:6px 11px;border-radius:9px;
+  background:var(--chip);border:1px solid var(--line);font-size:11px;color:var(--txt-dim);
+  backdrop-filter:blur(7px);letter-spacing:.01em}
+.map-meta b{font-family:var(--mono);color:var(--txt);font-weight:600}
+.tier{display:inline-flex;align-items:center;gap:6px}
+.tier i{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 9px var(--green)}
+.tier.vec i{background:var(--cyan);box-shadow:0 0 9px var(--cyan)}
+.tier.builtin i{background:var(--violet);box-shadow:0 0 9px var(--violet)}
+
+.tip{position:absolute;z-index:9;pointer-events:none;padding:10px 13px 11px;border-radius:10px;min-width:172px;
+  background:var(--tip-bg);border:1px solid var(--accentA);
+  box-shadow:0 16px 40px -14px #000,0 0 0 1px rgba(0,0,0,.6);
+  transform:translate(-50%,-116%);opacity:0;transition:opacity .18s ease}
+.tip.on{opacity:1}
+.tip::after{content:'';position:absolute;left:50%;bottom:-5px;width:9px;height:9px;margin-left:-5px;
+  background:var(--tip-bg);border-right:1px solid var(--accentA);border-bottom:1px solid var(--accentA);
+  transform:rotate(45deg)}
+.tip .tn{font-size:13.5px;color:var(--txt);font-weight:700;letter-spacing:0;white-space:nowrap;
+  padding-bottom:7px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.tip .tl{display:flex;justify-content:space-between;gap:16px;font-size:12px;color:var(--txt-dim);margin-top:5px;
+  letter-spacing:0}
+.tip .tl b{font-family:var(--mono);font-size:12.5px;color:var(--txt);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* =====================================================================
+   9. 排行榜
+   ===================================================================== */
+.rank-list{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;overflow:hidden}
+.rank-row{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:9px;align-items:center;
+  padding:6px 9px;border-radius:9px;background:var(--row);border:1px solid var(--line);
+  transition:transform .7s cubic-bezier(.22,.9,.24,1),background .5s,border-color .5s,opacity .4s;
+  will-change:transform}
+.rank-row .rk{font-family:var(--mono);font-size:11.5px;color:var(--txt-mute);text-align:center}
+.rank-row.top1{background:linear-gradient(90deg,rgba(255,79,109,.14),rgba(10,21,38,.4));border-color:rgba(255,79,109,.26)}
+.rank-row.top1 .rk{color:#ff9db0}
+.rank-row.top2 .rk{color:#ffd08a}
+.rank-row.top3 .rk{color:#a8e6ff}
+.rk-main{min-width:0}
+.rk-name{font-size:12.5px;font-weight:500;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0}
+.rk-name s{text-decoration:none;color:var(--txt-mute);font-size:11px;margin-left:6px}
+.rk-track{position:relative;height:5px;border-radius:3px;background:var(--fill);margin-top:5px;overflow:hidden}
+.rk-track i{display:block;height:100%;border-radius:3px;width:0;
+  transition:width 1s cubic-bezier(.22,.9,.24,1),background .6s ease,box-shadow .6s ease}
+.rk-track::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.16),transparent);
+  transform:translateX(-100%);animation:sheen 3.6s ease-in-out infinite}
+@keyframes sheen{0%,72%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.rk-val{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--txt);min-width:68px;text-align:right;transition:color .5s}
+.rk-val em{font-style:normal;font-size:10px;color:var(--txt-mute);margin-left:3px}
+.rank-row.enter{animation:rowIn .6s cubic-bezier(.22,.9,.24,1) both}
+@keyframes rowIn{from{opacity:0;transform:translateX(18px)}}
+
+/* =====================================================================
+   10. 告警
+   ===================================================================== */
+.alert-list{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:6px;
+  padding-right:5px;overflow-anchor:none}
+.alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center;
+  padding:7px 10px;border-radius:9px;border:1px solid var(--line);background:var(--row);
+  animation:alertIn .55s cubic-bezier(.22,.9,.24,1) both}
+@keyframes alertIn{from{opacity:0;transform:translateY(-12px) scale(.98);filter:blur(3px)}}
+.alert.out{opacity:0;transform:translateX(22px);transition:opacity .45s,transform .45s}
+.alert .ad{width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 9px var(--amber)}
+.alert .am{min-width:0}
+.alert .at{font-size:12.5px;font-weight:500;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alert .as{font-size:11.5px;color:var(--txt-dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alert .atm{font-family:var(--mono);font-size:11px;color:var(--txt-mute)}
+.alert.crit{border-color:rgba(255,79,109,.3);background:linear-gradient(90deg,rgba(255,79,109,.13),rgba(9,19,34,.42))}
+.alert.crit .ad{background:var(--red);box-shadow:0 0 11px var(--red);animation:blink 1.3s ease-in-out infinite}
+.alert.crit .at{color:#ffc3ce}
+.alert.ok{border-color:rgba(53,224,161,.26);background:linear-gradient(90deg,rgba(53,224,161,.11),rgba(9,19,34,.42))}
+.alert.ok .ad{background:var(--green);box-shadow:0 0 11px var(--green)}
+.alert.ok .at{color:#b6f5da}
+.empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--txt-mute);font-size:12px;letter-spacing:.06em}
+
+/* =====================================================================
+   11. 底部走马灯
+   ===================================================================== */
+.marquee{position:relative;height:52px;display:flex;align-items:center;gap:12px;padding:2px 2px 11px;overflow:hidden}
+.mq-live{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;padding:8px 13px;border-radius:11px;
+  border:1px solid rgba(255,79,109,.34);background:linear-gradient(120deg,rgba(255,79,109,.14),rgba(255,79,109,.04));
+  font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:#ffb8c6;
+  box-shadow:0 0 24px -10px rgba(255,79,109,.9)}
+.mq-live i{width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 11px var(--red);animation:blink 1.15s ease-in-out infinite}
+.mq-view{position:relative;flex:1 1 auto;min-width:0;overflow:hidden;height:100%;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 3.5%,#000 96.5%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 3.5%,#000 96.5%,transparent)}
+.mq-track{position:absolute;left:0;top:50%;transform:translateY(-50%);display:flex;gap:12px;will-change:transform}
+.mq-item{flex:0 0 auto;width:248px;display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:10px;
+  border:1px solid var(--line);background:linear-gradient(115deg,var(--cardA),var(--cardB));
+  transition:border-color .6s ease,background .6s ease,opacity .6s ease;overflow:hidden}
+.mq-item .st{width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--green);
+  box-shadow:0 0 9px var(--green);transition:background .6s,box-shadow .6s}
+.mq-item .nm{flex:1;min-width:0;font-size:12.5px;font-weight:500;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mq-item .nm s{text-decoration:none;display:block;font-size:10.5px;color:var(--txt-mute);letter-spacing:.01em;margin-top:2px}
+.mq-item .ms{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--cyan);min-width:56px;text-align:right;
+  transition:color .6s ease;text-shadow:0 0 7px var(--accentA)}
+.mq-item .ms em{font-style:normal;font-size:9.5px;color:var(--txt-mute);margin-left:2px}
+.mq-item.warn .ms{color:#ffca6b;text-shadow:0 0 7px rgba(255,181,71,.32)}
+.mq-item.crit .ms{color:#ff9db0;text-shadow:0 0 8px rgba(255,79,109,.42)}
+.mq-item.crit{border-color:rgba(255,79,109,.3);background:linear-gradient(115deg,rgba(60,18,30,.7),rgba(8,16,30,.5))}
+.mq-item.off{opacity:.62}
+.mq-item.off .st{background:#5a6a80;box-shadow:none}
+.mq-item.off .ms{color:#7d8ea3;text-shadow:none}
+
+/* =====================================================================
+   12. 性能降级 / 适配
+   ===================================================================== */
+body.lite .blob{filter:blur(56px);opacity:.3;animation:none}
+body.lite .bg-grid{animation:none}
+body.lite .noise,body.lite .scanline{display:none}
+body.lite .chip,body.lite .legend-scale,body.lite .map-meta,body.lite .tip{backdrop-filter:none}
+body.lite .rk-track::after{display:none}
+body.lite .panel{box-shadow:0 20px 44px -30px #000}
+body.lite .hud-value b{filter:drop-shadow(0 0 8px var(--accentA))}
+body.lite .donut .arc{filter:none}
+body.lite .pulse-ring{display:none}
+
+/* 主题选择器 */
+.theme-pick{display:flex;align-items:center;gap:5px;padding:5px 7px;border-radius:10px;
+  border:1px solid var(--line);background:var(--chip)}
+.theme-pick .tp{width:16px;height:16px;padding:0;border-radius:5px;cursor:pointer;outline:none;
+  border:1px solid rgba(255,255,255,.22);background:linear-gradient(135deg,var(--c1),var(--c2));
+  transition:transform .22s cubic-bezier(.22,.9,.24,1),box-shadow .22s}
+.theme-pick .tp:hover{transform:translateY(-1px) scale(1.14)}
+.theme-pick .tp.on{box-shadow:0 0 0 2px rgba(255,255,255,.5),0 0 12px var(--accentA)}
+
+/* ---- 超大屏 ---- */
+@media (min-width:2200px){
+  .panel-hd h3{font-size:15px}
+  .stat .val{font-size:32px}
+  .stat .lbl{font-size:11.5px}
+  .mini b{font-size:16px}
+  .donut-wrap{width:min(222px,52%)}
+  .donut-center .n{font-size:33px}
+  .legend .lg .nm{font-size:12.5px}
+  .legend .lg .ct{font-size:12.5px}
+  .rk-name{font-size:13px}
+  .rk-val{font-size:15px}
+  .alert .at{font-size:12.5px}
+  .mq-item{width:274px}
+  .mq-item .nm{font-size:12.5px}
+  .mq-item .ms{font-size:15px;min-width:60px}
+  #hudSpark{width:520px;height:66px}
+  .title h1{letter-spacing:.09em}
+}
+
+/* ---- 中等屏（笔记本 / 小尺寸大屏）---- */
+@media (max-width:1600px){
+  .app{padding:8px 12px 0}
+  .main{grid-template-columns:minmax(226px,17.6vw) minmax(0,1fr) minmax(252px,19.6vw);gap:10px}
+  .col{gap:10px}
+  .panel-hd{padding:9px 11px 7px;gap:7px}
+  .panel-hd h3{font-size:12.5px;letter-spacing:.1em}
+  .panel-hd .en{display:none}
+  .panel-hd .hd-right{display:none}
+  .panel-bd{padding:0 11px 11px}
+  .stat{padding:7px 9px 8px 11px}
+  .stat .val{font-size:clamp(16px,1.42vw,24px);margin-top:3px}
+  .stat .foot .mini-txt{display:none}
+  .delta{white-space:nowrap}
+  .mini{padding:6px 8px}
+  .mini b{font-size:12.5px}
+  .mini span{font-size:8.5px}
+  .mini-row{gap:7px;margin-top:7px}
+  .health{gap:9px}
+  .gauge{width:104px}
+  .gauge-txt b{font-size:17px}
+  .gauge-txt span{font-size:8.5px;letter-spacing:.1em}
+  .hi{font-size:10.5px}
+  .hi > span:first-child{flex:0 0 56px}
+  .hi > b{flex:0 0 46px}
+  .donut-wrap{width:min(148px,52%)}
+  .donut-center .n{font-size:22px}
+  .legend{gap:4px 8px}
+  .lg{padding:3px 5px}
+  .lg .nm{font-size:10.5px}
+  .lg .pc{width:30px}
+  #hudSpark{width:330px;height:48px}
+  .hud-value b{font-size:clamp(36px,4vw,68px)}
+  .hud::before{width:400px;height:200px}
+  .rank-row{padding:5px 8px;gap:7px}
+  .rk-name{font-size:10.5px}
+  .rk-val{font-size:12px;min-width:56px}
+  .alert{padding:6px 9px}
+  .alert .at{font-size:11px}
+  .mq-item{width:212px;padding:7px 10px}
+  .mq-item .nm{font-size:10.5px}
+}
+/* ---- 矮屏（768/800 高度）---- */
+@media (max-height:840px){
+  .topbar{padding-bottom:7px}
+  .title p{display:none}
+  .panel-hd{padding:7px 11px 5px}
+  .panel-hd h3{font-size:12px}
+  .stat .val{margin-top:2px}
+  .mini-row{margin-top:6px}
+  .gauge{width:92px}
+  .donut-wrap{width:min(128px,48%);margin:0 auto 2px}
+  .legend{gap:2px 8px}
+  .rank-list{gap:4px}
+  .rank-row{padding:3px 7px}
+  .rk-track{margin-top:3px}
+  .alert-list{gap:4px}
+  .alert{padding:5px 8px}
+  .alert .as{margin-top:1px}
+  .mq-item{padding:6px 9px}
+  #hudSpark{height:42px}
+  .hud{padding:6px 22px 0}
+  .hud-value b{font-size:clamp(32px,3.6vw,58px)}
+  .marquee{height:46px;padding-bottom:8px}
+}
+/* ---- 窄屏 ---- */
+@media (max-width:1300px){
+  .theme-pick{display:none}
+  .health-info{display:none}
+  .gauge{width:132px;margin:0 auto}
+  .legend{grid-template-columns:1fr 1fr}
+  .chips .chip:nth-child(n+3){display:none}
+}
+@media (max-width:1180px){
+  .main{grid-template-columns:minmax(0,1fr) minmax(0,286px)}
+  .col-left{grid-template-columns:1fr 1fr;grid-template-rows:auto minmax(0,1fr)}
+  .col-left > #panelStats{grid-column:1 / span 2}
+  .region{min-height:150px}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ 背景 ============ -->
+<div class="bg">
+  <div class="bg-base"></div>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-halo"></div>
+</div>
+<canvas id="stars"></canvas>
+<div class="vignette"></div>
+<div class="noise"></div>
+<div class="scanline"></div>
+
+<!-- ============ 主体 ============ -->
+<div class="app">
+
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo"><i></i><i></i><i></i><b></b></div>
+      <div class="title">
+        <h1 id="brandTitle">PING 节点实时监控中心</h1>
+        <p>CPOLAR EDGE NODE TELEMETRY &nbsp;·&nbsp; REALTIME PULSE</p>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip"><i class="dot"></i>实时巡检中<b id="chipRound">#0</b></span>
+      <span class="chip"><i class="dot cy"></i>数据源 <b id="chipSrc">your-service 公开节点</b></span>
+      <span class="chip"><i class="dot vi"></i>控制中心 <b id="chipHub">武汉</b></span>
+    </div>
+    <div class="right-hd">
+      <div class="hd-btns">
+        <button class="hd-btn" type="button" id="btnFullscreen" title="全屏 / 退出全屏"><span id="btnFullscreenTxt">全屏</span></button>
+        <button class="hd-btn" type="button" id="btnAdmin" title="进入管理后台">管理后台</button>
+      </div>
+      <div class="theme-pick" id="themePick" title="切换配色主题"></div>
+      <div class="clock">
+        <div class="t num" id="clockT">00:00:00</div>
+        <div class="d" id="clockD">----</div>
+      </div>
+      <div class="fps-badge"><b id="fpsVal">60</b><span>FPS</span></div>
+    </div>
+  </header>
+
+  <!-- 主区域 -->
+  <div class="main">
+
+    <!-- 左列 -->
+    <div class="col col-left">
+      <section class="panel" id="panelStats">
+        <div class="glow"></div>
+        <div class="panel-hd">
+          <span class="bar"></span><h3>链路概览</h3><span class="en">OVERVIEW</span>
+          <span class="hd-right">巡检 <b id="ovTick">2.4s</b></span>
+        </div>
+        <div class="panel-bd">
+          <div class="stats">
+            <div class="stat" id="stTotalCard" style="--c:#38f0ff">
+              <div class="lbl"><i></i>监控节点总数</div>
+              <div class="val"><span id="stTotal">0</span><em>台</em></div>
+              <div class="foot"><span class="delta" id="stTotalD">+0</span><span class="mini-txt" id="stTotalS">全域覆盖</span></div>
+            </div>
+            <div class="stat" id="stOnlineCard" style="--c:#35e0a1">
+              <div class="lbl"><i></i>在线节点</div>
+              <div class="val"><span id="stOnline">0</span><em>台</em></div>
+              <div class="foot"><span class="delta down" id="stOnlineD">0%</span><span class="mini-txt" id="stOnlineS">实时在线率</span></div>
+            </div>
+            <div class="stat" id="stAvgCard" style="--c:#7c5cff">
+              <div class="lbl"><i></i>平均延迟</div>
+              <div class="val"><span id="stAvg">0.0</span><em>ms</em></div>
+              <div class="foot"><span class="delta" id="stAvgD">±0</span><span class="mini-txt">阈值 45 / 80 ms</span></div>
+            </div>
+            <div class="stat" id="stAlertCard" style="--c:#ffb547">
+              <div class="lbl"><i></i>活跃告警</div>
+              <div class="val"><span id="stAlert">0</span><em>条</em></div>
+              <div class="foot"><span class="delta" id="stAlertD">0</span><span class="mini-txt" id="stAlertS">严重 0</span></div>
+            </div>
+          </div>
+          <div class="mini-row">
+            <div class="mini"><b><span id="mnLoss">0.00</span><em>%</em></b><span>平均丢包率</span><i id="mnLossBar" style="width:0%"></i></div>
+            <div class="mini"><b><span id="mnPeak">0</span><em>ms</em></b><span>峰值延迟</span><i id="mnPeakBar" style="width:0%"></i></div>
+            <div class="mini"><b><span id="mnFast">0</span><em>台</em></b><span>优质节点 &lt;25ms</span><i id="mnFastBar" style="width:0%"></i></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panelHealth">
+        <div class="glow"></div>
+        <div class="panel-hd"><span class="bar"></span><h3>网络健康度</h3><span class="en">HEALTH</span></div>
+        <div class="panel-bd">
+          <div class="health">
+            <div class="gauge">
+              <svg viewBox="0 0 120 78">
+                <path class="gt" d="M14 68 A46 46 0 0 1 106 68" pathLength="100"></path>
+                <path class="gv" id="gaugeArc" d="M14 68 A46 46 0 0 1 106 68" pathLength="100"
+                      stroke="#35e0a1" stroke-dasharray="0 100"></path>
+                <g id="gaugeTicks"></g>
+              </svg>
+              <div class="gauge-txt"><b><span id="healthVal">0</span><em>/100</em></b><span>综合健康指数</span></div>
+            </div>
+            <div class="health-info">
+              <div class="hi"><span>在线率</span><b id="hiOnline">0%</b><span class="track"><i id="hiOnlineBar" style="width:0%;background:linear-gradient(90deg,#35e0a1,#38f0ff)"></i></span></div>
+              <div class="hi"><span>低延迟占比</span><b id="hiFast">0%</b><span class="track"><i id="hiFastBar" style="width:0%;background:linear-gradient(90deg,#38f0ff,#7c5cff)"></i></span></div>
+              <div class="hi"><span>异常占比</span><b id="hiBad">0%</b><span class="track"><i id="hiBadBar" style="width:0%;background:linear-gradient(90deg,#ffb547,#ff4f6d)"></i></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panelRegion">
+        <div class="glow"></div>
+        <div class="panel-hd"><span class="bar"></span><h3>区域分布</h3><span class="en">REGION</span>
+          <span class="hd-right">在线 <b id="rgOnline">0</b>/<b id="rgTotal">0</b></span></div>
+        <div class="panel-bd">
+          <div class="region">
+            <div class="donut-wrap">
+              <svg class="donut" viewBox="0 0 200 200">
+                <g transform="rotate(-90 100 100)">
+                  <circle class="track" cx="100" cy="100" r="76"></circle>
+                  <g id="donutArcs"></g>
+                </g>
+              </svg>
+              <div class="donut-center">
+                <div class="n num" id="dcNum">0</div>
+                <div class="l" id="dcLabel">节点总数</div>
+                <div class="s" id="dcSub" style="color:#5f7893">—</div>
+              </div>
+            </div>
+            <div class="legend" id="legend"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 中列：地图 -->
+    <section class="map-panel" id="mapPanel">
+      <div id="mapBase"></div>
+      <canvas id="mapFx"></canvas>
+      <div class="frame"></div>
+      <div class="pulse-ring"><i></i><i></i><i></i></div>
+
+      <div class="hud" id="hud">
+        <div class="hud-label"><i></i>实时平均延迟 · AVG LATENCY<i></i></div>
+        <div class="hud-value"><b id="hudAvg">0.0</b><em>ms</em></div>
+        <div class="hud-sub">
+          <span class="dv" id="hudDelta">±0.0</span>
+          <span>较上轮巡检</span>
+          <span>峰值 <b id="hudPeak">0</b>ms</span>
+          <span>丢包 <b id="hudLoss">0.00</b>%</span>
+        </div>
+        <canvas id="hudSpark"></canvas>
+      </div>
+
+      <div class="map-foot">
+        <div class="legend-scale">
+          <s><i style="color:#35e0a1"></i>&lt;25ms</s>
+          <s><i style="color:#38f0ff"></i>25-45</s>
+          <s><i style="color:#6ea8ff"></i>45-60</s>
+          <s><i style="color:#ffb547"></i>60-80</s>
+          <s><i style="color:#ff4f6d"></i>&gt;80ms</s>
+          <s><i style="color:#5a6a80"></i>离线</s>
+        </div>
+        <div class="map-meta">
+          <span class="tier builtin" id="tierBadge"><i></i><b>内置矢量引擎</b></span>
+          <span>节点 <b id="mmNodes">0</b></span>
+          <span>链路 <b id="mmLinks">0</b></span>
+        </div>
+      </div>
+
+      <div class="tip" id="mapTip">
+        <div class="tn" id="tipName">—</div>
+        <div class="tl"><span>延迟</span><b id="tipMs">—</b></div>
+        <div class="tl"><span>丢包</span><b id="tipLoss">—</b></div>
+        <div class="tl"><span>位置</span><b id="tipLoc">—</b></div>
+        <div class="tl"><span>ISP</span><b id="tipIsp">—</b></div>
+      </div>
+    </section>
+
+    <!-- 右列 -->
+    <div class="col col-right">
+      <section class="panel" id="panelRank">
+        <div class="glow"></div>
+        <div class="panel-hd"><span class="bar"></span><h3>延迟 TOP 排行</h3><span class="en">LATENCY RANK</span>
+          <span class="hd-right">重排 <b id="rankTick">#0</b></span></div>
+        <div class="panel-bd"><div class="rank-list" id="rankList"></div></div>
+      </section>
+
+      <section class="panel" id="panelAlert">
+        <div class="glow"></div>
+        <div class="panel-hd"><span class="bar"></span><h3>实时告警</h3><span class="en">LIVE ALERTS</span>
+          <span class="hd-right"><b id="alertCount">0</b> 条 · 滚动可查</span></div>
+        <div class="panel-bd"><div class="alert-list" id="alertList"></div></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 底部走马灯 -->
+  <footer class="marquee">
+    <div class="mq-live"><i></i>LIVE PING</div>
+    <div class="mq-view" id="mqView"><div class="mq-track" id="mqTrack"></div></div>
+  </footer>
+</div>
+
+<!-- 真实节点数据（存在时优先使用）；缺失时自动使用内置数据 -->
+<script src="hosts_data.js"></script>
+
+<!-- 内置节点数据（与 hosts_data.js 同源）：用 file:// 打开、或 hosts_data.js 缺失时自动启用 -->
+<script id="hosts-fallback">
+window.__HOSTS_FALLBACK = [
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":11.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":13.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":10.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":7.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":16.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":10,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":12.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":14,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":17.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":15.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":12.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":9.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":10.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":13.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":12.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":15,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":11.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":11.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":12.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5454,"lo":114.342,"r":14.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":55.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":11.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":11.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":14.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":13.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":33.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":9.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":14.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":14.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":12.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":12.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":15.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":30.5454,"lo":114.342,"r":5.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":8.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":33.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":21.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":21,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":32.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":29.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":32.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":32,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":18.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":28.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.2936,"lo":120.162,"r":33.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":32,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":17.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":31.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":18.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":37.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":32,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":32.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":29.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":31.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":31.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":32.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":31.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":31.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":20.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":16.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":35.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":34.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":36.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":37.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":33.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"镇江市","la":32.1878,"lo":119.426,"r":0,"l":100,"on":0},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":31.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":25.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.8112,"lo":119.974,"r":22.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":20.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":27.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.8112,"lo":119.974,"r":23.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":25.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":24.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"香港特别行政区","c":"香港","la":22.2855,"lo":114.158,"r":26.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":28.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":24.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":28,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":23.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":22.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":23.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"浙江省","c":"杭州市","la":30.2936,"lo":120.162,"r":25.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":8.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":8.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":3.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":7.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":6.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":5.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":12,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":12.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":17.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":16.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":9.5,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":12.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":11.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":16.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":8.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":10,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":13.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":11.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":20.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":15.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":12.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":13.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":15.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":12.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":14.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":17.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":15.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":13.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"襄阳市","la":32.0423,"lo":112.145,"r":13.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.8206,"lo":117.227,"r":23.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.7833,"lo":119.967,"r":24.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.7833,"lo":119.967,"r":20.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.7833,"lo":119.967,"r":20.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.7833,"lo":119.967,"r":18.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.7833,"lo":119.967,"r":16.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"镇江市","la":32.2094,"lo":119.434,"r":0,"l":100,"on":0},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.7833,"lo":119.967,"r":18.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"常州市","la":31.8638,"lo":117.281,"r":19.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"湖北省","c":"武汉市","la":30.5833,"lo":114.267,"r":9.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"江苏省","c":"镇江市","la":32.2094,"lo":119.434,"r":0,"l":100,"on":0},
+  {"n":"sample-node.example.com","p":"香港特别行政区","c":"香港","la":22.2855,"lo":114.158,"r":82.3,"l":10,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":24.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":25.7,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":27.6,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":31.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":22.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":26,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":24.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":26.2,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":23.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"北京市","c":"Beijing","la":39.9075,"lo":116.397,"r":25.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Beijing","la":31.2222,"lo":121.458,"r":21.3,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Shanghai","la":31.2243,"lo":121.469,"r":21.1,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Shanghai","la":31.2243,"lo":121.469,"r":20,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Shanghai","la":31.2243,"lo":121.469,"r":21.4,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Beijing","la":31.2304,"lo":121.474,"r":20.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Beijing","la":31.2222,"lo":121.458,"r":20.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Shanghai","la":31.2243,"lo":121.469,"r":19.9,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Shanghai","la":31.2243,"lo":121.469,"r":19.8,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Beijing","la":31.2222,"lo":121.458,"r":22,"l":0,"on":1},
+  {"n":"sample-node.example.com","p":"上海市","c":"Shanghai","la":31.2243,"lo":121.469,"r":16.1,"l":0,"on":1}
+];
+</script>
+
+
+<script id="app">
+(function(){
+'use strict';
+/*
+ * PING 节点实时监控可视化大屏
+ * ---------------------------------------------------------------
+ *  1. CFG        —— 巡检周期 / 阈值 / CDN / 高德 Key
+ *  2. THEME      —— 6 套配色主题（语义色 + 明暗基底 → 派生全部 rgba）
+ *  3. 工具       —— DOM / 数学 / 缓动数字
+ *  4. 数据       —— 真实节点 + 演示节点、城市、区域、ISP
+ *  5. 聚合与物理 —— 每轮巡检的延迟游走、掉线恢复、告警判定
+ *  6. 渲染       —— 统计卡 / 环形图 / 健康度 / 排行 / 告警 / 走马灯
+ *  7. 地图       —— Canvas 光效层 + 三档底图（ECharts → 高德 → 内置）
+ *  8. 主循环     —— 单 rAF 驱动一切，附 FPS 监测与自动降级
+ * ---------------------------------------------------------------
+ */
+
+/* =====================================================================
+   配置
+   ===================================================================== */
+var CFG = {
+  TICK: 2400,              // 巡检周期 ms
+  LIVE: true,              // 同域部署时=true：每轮从后端公开接口拉真实数据
+  API: '/api/public/datascreen',
+  SHOW_SIM: false,         // 是否补演示节点（真实节点分布太稀时才需要）
+  PREVIEW: /[?&]preview=1/.test(location.search),   // 后台预览模式（/datascreen-preview）
+  API_PREVIEW: '/api/datascreen/preview',            // 预览走鉴权接口
+  API_ALERTS: '/api/public/alerts',
+  API_ALERTS_PREVIEW: '/api/alerts',
+  SHOW_FLOW_LINES: true,   // 由后台「可视化大屏设置」覆盖
+  STAR_COUNT: 0,           // 0 = 按屏幕自动；后台 particle_count 覆盖
+  MAX_ALERT_FETCH: 12,     // 首次从后端拉的告警条数
+  WARN: 45,                // 延迟告警阈值 ms
+  CRIT: 80,                // 延迟严重阈值 ms
+  LOSS_WARN: 1.0,          // 丢包告警阈值 %
+  LOSS_CRIT: 5.0,          // 丢包严重阈值 %
+  MAX_ALERTS: 34,          // 告警列表上限
+  MARQ_ITEMS: 34,          // 走马灯常驻条目
+  MARQ_SPEED: 96,          // 走马灯速度 px/s
+  AMAP_KEY: '',   // ← 高德 Key（可替换）
+  AMAP_WAIT: 3400,         // 等待高德就绪的时限
+  ECHARTS_CDN: [
+    'https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js',
+    'https://unpkg.com/echarts@5.5.1/dist/echarts.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.1/echarts.min.js'
+  ],
+  GEO_CDN: [
+    'https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/json/china.json',
+    'https://unpkg.com/echarts@4.9.0/map/json/china.json',
+    'https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json'
+  ],
+  HUB: { n:'CONTROL-CENTER', c:'武汉市', p:'湖北省', la:30.58333, lo:114.26685 }
+};
+
+/* =====================================================================
+   主题：一套主题 = 8 个语义色 + 6 个明暗基底 + 若干文案色，其余 rgba 派生
+   ===================================================================== */
+var THEME_DEF = [
+  { id:'cyan', name:'深空青', en:'DEEP SPACE',
+    base:{ cyan:'#38f0ff', violet:'#7c5cff', pink:'#ff5ec4', green:'#35e0a1',
+           amber:'#ffb547', red:'#ff4f6d', blue:'#6ea8ff', lime:'#b8f14a' },
+    lv:{ fast:'#35e0a1', good:'#38f0ff', mid:'#6ea8ff', warn:'#ffb547', crit:'#ff4f6d', off:'#7f97b0' },
+    reg:['#38f0ff','#7c5cff','#35e0a1','#ffb547','#ff5ec4','#ff6b6b','#6ea8ff','#b8f14a'],
+    bg:['#03060e','#050b18','#0a1c34'], surf:'#0d1b30', surfDark:'#060d1a', surfLight:'#162c4a',
+    txt:['#dcefff','#9db6ce','#8ba3bd'], land:'#102c50',
+    title:['#f2fbff','#8fe9ff','#b39dff','#ff9ede'],
+    hero:['#ffffff','#9ff0ff','#5cc9ff','#7c5cff'],
+    amap:'darkblue' },
+  { id:'amber', name:'熔金橙', en:'MOLTEN GOLD',
+    base:{ cyan:'#ffb547', violet:'#ff7a45', pink:'#ff5e8a', green:'#9fe08a',
+           amber:'#ffd479', red:'#ff5a4f', blue:'#7fd4e8', lime:'#e8e04a' },
+    lv:{ fast:'#9fe08a', good:'#7fd4e8', mid:'#74b8ff', warn:'#ffce6b', crit:'#ff5a4f', off:'#a8937a' },
+    reg:['#ffb547','#ff7a45','#9fe08a','#7fd4e8','#ff5e8a','#ff4f4f','#ffd479','#c8d94a'],
+    bg:['#0c0703','#150d05','#2c1a07'], surf:'#2a1a0a', surfDark:'#140b04', surfLight:'#43290e',
+    txt:['#fff2e2','#e0bf9a','#c2a077'], land:'#5a3512',
+    title:['#fffaf0','#ffd479','#ff9a4d','#ff6b6b'],
+    hero:['#ffffff','#ffe0a8','#ffab52','#ff7043'],
+    amap:'dark' },
+  { id:'matrix', name:'矩阵绿', en:'MATRIX',
+    base:{ cyan:'#2fe08a', violet:'#4fd1ff', pink:'#25c9a8', green:'#7bf0a0',
+           amber:'#d8e04a', red:'#ff5a5a', blue:'#3fb6ff', lime:'#c8f14a' },
+    lv:{ fast:'#7bf0a0', good:'#2fe0c8', mid:'#4fd1ff', warn:'#d8e04a', crit:'#ff5a5a', off:'#7f9c8b' },
+    reg:['#2fe08a','#4fd1ff','#7bf0a0','#d8e04a','#25c9a8','#ff6b6b','#a8f14a','#6ea8ff'],
+    bg:['#020a06','#04120b','#07301c'], surf:'#0a2a1c', surfDark:'#04140c', surfLight:'#10452c',
+    txt:['#e0fff0','#93c9ae','#7da894'], land:'#0d4029',
+    title:['#f0fff8','#7bffc4','#2fe08a','#4fd1ff'],
+    hero:['#ffffff','#b6ffd8','#3ff0a0','#20c9a0'],
+    amap:'dark' },
+  { id:'magenta', name:'霓虹紫', en:'NEON VIOLET',
+    base:{ cyan:'#52e0ff', violet:'#9b6cff', pink:'#ff5ec4', green:'#3ce0a0',
+           amber:'#ffb547', red:'#ff4f8d', blue:'#7a8cff', lime:'#c8f14a' },
+    lv:{ fast:'#3ce0a0', good:'#52e0ff', mid:'#7a8cff', warn:'#ffb547', crit:'#ff4f8d', off:'#9b8fb0' },
+    reg:['#52e0ff','#9b6cff','#3ce0a0','#ffb547','#ff5ec4','#ff4f6d','#7a8cff','#c8f14a'],
+    bg:['#08040f','#0d0618','#1e0a33'], surf:'#22103a', surfDark:'#100720', surfLight:'#341a55',
+    txt:['#f2e8ff','#c0a8e0','#a68fc4'], land:'#3d1c68',
+    title:['#fdf5ff','#d8a8ff','#9b6cff','#ff5ec4'],
+    hero:['#ffffff','#e3b6ff','#a86cff','#ff5ec4'],
+    amap:'grey' },
+  { id:'ice', name:'冰川蓝', en:'GLACIER',
+    base:{ cyan:'#9fe8ff', violet:'#b9c8ff', pink:'#ffc2e0', green:'#9fe6d0',
+           amber:'#ffd9a0', red:'#ff9aa8', blue:'#7fb4ff', lime:'#dcefa8' },
+    lv:{ fast:'#9fe6d0', good:'#9fe8ff', mid:'#7fb4ff', warn:'#ffd9a0', crit:'#ff9aa8', off:'#8fa6be' },
+    reg:['#9fe8ff','#b9c8ff','#9fe6d0','#ffd9a0','#ffc2e0','#ff9aa8','#7fb4ff','#dcefa8'],
+    bg:['#05080f','#080d17','#0e1a2c'], surf:'#16233a', surfDark:'#0a1220', surfLight:'#24344f',
+    txt:['#eaf4ff','#a8bdd4','#8fa6be'], land:'#1e3252',
+    title:['#ffffff','#d6ecff','#9fc4ff','#c8b8ff'],
+    hero:['#ffffff','#dff1ff','#9fd0ff','#b9c8ff'],
+    amap:'mutedblue' },
+  { id:'crimson', name:'朱砂红', en:'CRIMSON',
+    base:{ cyan:'#58d8e0', violet:'#a86cff', pink:'#ff7ab0', green:'#4fd6a0',
+           amber:'#ffc46b', red:'#ff5a5a', blue:'#7f9dff', lime:'#d6e06a' },
+    lv:{ fast:'#4fd6a0', good:'#58d8e0', mid:'#7f9dff', warn:'#ffc46b', crit:'#ff5a5a', off:'#b09096' },
+    reg:['#58d8e0','#a86cff','#4fd6a0','#ffc46b','#ff7ab0','#ff5a5a','#7f9dff','#d6e06a'],
+    bg:['#0b0507','#140709','#2c0a11'], surf:'#2a1016', surfDark:'#15070a', surfLight:'#43181f',
+    txt:['#ffeaee','#d8b0b8','#bd9199'], land:'#571c28',
+    title:['#fff5f6','#ff9aa8','#ff5a7a','#ff8f4f'],
+    hero:['#ffffff','#ffd0d6','#ff7a8a','#ff4f6d'],
+    amap:'dark' }
+];
+
+var THEME = null;                     // 当前生效主题（派生后的完整表）
+
+function rgbaOf(hex,a){
+  var c = hex2rgb(hex);
+  return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')';
+}
+function mixHex(h1,h2,t){
+  var a = hex2rgb(h1), b = hex2rgb(h2);
+  return '#' + [0,1,2].map(function(i){
+    var v = Math.round(a[i] + (b[i]-a[i])*t);
+    return (v<16?'0':'') + v.toString(16);
+  }).join('');
+}
+function alphaCache(hex, n){
+  var out = [];
+  for(var i=0;i<n;i++) out.push(rgbaOf(hex, (i/(n-1)).toFixed(3)));
+  return out;
+}
+function buildTheme(def){
+  var b = def.base, bg = def.bg;
+  var bright = mixHex(b.cyan, '#ffffff', 0.42);      // 亮一档的主色，用于描边/准星，保证清晰
+  var t = {
+    id:def.id, name:def.name, en:def.en, amap:def.amap,
+    base:b,
+    lv:def.lv,
+    reg:def.reg,
+    title:def.title, hero:def.hero,
+    land:{ f1:rgbaOf(def.land,.66), f2:rgbaOf(def.land,.5), f3:rgbaOf(bg[0],.4),
+           dot:hex2rgb(bright), stroke:rgbaOf(bright,.8), glow:rgbaOf(b.cyan,.6) },
+    label:{ city:'#e6f6ff', node:'#eaf8ff', stroke:'rgba(2,7,15,0.95)' },
+    fx:{ sweep1:rgbaOf(b.cyan,.028), sweep2:rgbaOf(b.cyan,.06),
+         linkFrom:rgbaOf(b.cyan,.6), sonar:rgbaOf(b.cyan,.9), ring:rgbaOf(b.cyan,.55) },
+    starA:alphaCache(b.cyan,16), starB:alphaCache(def.txt[0],16),
+    dotA:[rgbaOf(b.cyan,.05), rgbaOf(b.cyan,.09), rgbaOf(b.cyan,.12), rgbaOf(b.cyan,.16)],
+    css:{
+      'cyan':b.cyan,'violet':b.violet,'pink':b.pink,'green':b.green,
+      'amber':b.amber,'red':b.red,'blue':b.blue,'lime':b.lime,
+      'bg0':bg[0],'bg1':bg[1],'bg2':bg[2],
+      'surf':def.surf,'surf-dark':def.surfDark,'surf-light':def.surfLight,
+      'txt':def.txt[0],'txt-dim':def.txt[1],'txt-mute':def.txt[2],
+      'line':rgbaOf(b.cyan,.14),'line-hi':rgbaOf(b.cyan,.36),'fill':rgbaOf(b.cyan,.09),
+      'grid':rgbaOf(b.cyan,.055),'halo':rgbaOf(b.cyan,.03),
+      'scan1':rgbaOf(b.cyan,.035),'scan2':rgbaOf(b.cyan,.07),
+      'vig1':rgbaOf(bg[0],.62),'vig2':rgbaOf(bg[0],.9),
+      'glowA':rgbaOf(b.cyan,.40),'glowB':rgbaOf(b.violet,.36),'glowC':rgbaOf(b.pink,.20),
+      'pglowA':rgbaOf(b.cyan,.075),'pglowB':rgbaOf(b.violet,.07),
+      'panelA':rgbaOf(def.surf,.82),'panelB':rgbaOf(def.surfDark,.70),'panelC':rgbaOf(def.surfDark,.78),
+      'cardA':rgbaOf(def.surfLight,.60),'cardB':rgbaOf(def.surfDark,.44),
+      'row':rgbaOf(def.surfDark,.46),'chip':rgbaOf(def.surf,.62),'tip-bg':rgbaOf(bg[0],.97),
+      'mapBg1':rgbaOf(def.land,.55),'mapBg2':rgbaOf(bg[0],.78),
+      'hudBg1':rgbaOf(def.surfDark,.86),'hudBg2':rgbaOf(def.surfDark,.45),
+      'glowSoft':rgbaOf(b.cyan,.26),
+      'title1':def.title[0],'title2':def.title[1],'title3':def.title[2],'title4':def.title[3],
+      'hero1':def.hero[0],'hero2':def.hero[1],'hero3':def.hero[2],'hero4':def.hero[3],
+      'accent':mixHex(b.cyan,'#ffffff',0.24),
+      'accent2':mixHex(b.violet,'#ffffff',0.24),
+      'accentA':rgbaOf(bright,.6),'accentB':rgbaOf(b.violet,.45)
+    },
+    echarts:{ area:rgbaOf(def.land,.92), border:rgbaOf(bright,.85),
+              label:rgbaOf(mixHex(def.txt[1],'#ffffff',0.2),.9), glow:rgbaOf(b.cyan,.6) }
+  };
+  t.lv.off = def.txt[2];
+  return t;
+}
+
+/* 应用主题：CSS 变量 + Canvas 调色 + ECharts + 高德 + 环形图 */
+function applyTheme(id, silent){
+  var def = null;
+  for(var i=0;i<THEME_DEF.length;i++) if(THEME_DEF[i].id===id) def = THEME_DEF[i];
+  if(!def) def = THEME_DEF[0];
+  THEME = buildTheme(def);
+
+  var rs = document.documentElement.style;
+  for(var k in THEME.css) rs.setProperty('--'+k, THEME.css[k]);
+
+  // 区域色（环形图 / 图例 / 地图标签）
+  for(var r=0;r<REGIONS.length;r++) REGIONS[r].c = THEME.reg[r];
+  REGIONS.forEach(function(x){ REGION_COLOR[x.k] = x.c; });
+
+  // 语义色（排行榜条 / 地图节点 / 告警环）
+  LEVEL_COLOR[0] = THEME.lv.fast; LEVEL_COLOR[1] = THEME.lv.warn;
+  LEVEL_COLOR[2] = THEME.lv.crit; LEVEL_COLOR[3] = THEME.lv.off;
+  for(var q=0;q<4;q++) LEVEL_RGB[q] = hex2rgb(LEVEL_COLOR[q]);
+
+  // Canvas
+  if(window.FX && FX.cv){
+    FX.buildSprites();
+    FX.nl = null; FX.sweepGrad = null;
+    FX.buildNodeLayer();
+  }
+  // 环形图与图例重建（颜色是内联属性）
+  if(document.getElementById('donutArcs')){
+    buildDonut(); renderRegion(); highlightRegion(null,false);
+  }
+  // ECharts 底图
+  if(ECHART){
+    ECHART.setOption({ geo:{ itemStyle:{ areaColor:THEME.echarts.area, borderColor:THEME.echarts.border,
+      shadowColor:THEME.echarts.glow }, label:{ color:THEME.echarts.label } } });
+  }
+  // 高德底图
+  if(AMAP_MAP){ try{ AMAP_MAP.setMapStyle('amap://styles/'+THEME.amap); }catch(e){} }
+
+  // 切换按钮状态 + 记忆
+  var btns = document.querySelectorAll('.tp');
+  for(var b=0;b<btns.length;b++) btns[b].classList.toggle('on', btns[b].getAttribute('data-t')===THEME.id);
+  if(!silent){ try{ localStorage.setItem('ping-theme', THEME.id); }catch(e){} }
+}
+function savedTheme(){
+  // 支持 ?theme=amber 直接指定，方便对比与分享
+  try{
+    var m = /[?&]theme=([a-z]+)/.exec(location.search);
+    if(m){
+      for(var i=0;i<THEME_DEF.length;i++) if(THEME_DEF[i].id===m[1]) return m[1];
+    }
+  }catch(e){}
+  try{ return localStorage.getItem('ping-theme') || 'cyan'; }catch(e){ return 'cyan'; }
+}
+function initThemePicker(){
+  var box = document.getElementById('themePick');
+  if(!box) return;
+  var html = '';
+  for(var i=0;i<THEME_DEF.length;i++){
+    var d = THEME_DEF[i];
+    html += '<button class="tp" data-t="'+d.id+'" title="'+d.name+' · '+d.en+'" '+
+      'style="--c1:'+d.base.cyan+';--c2:'+d.base.violet+'"></button>';
+  }
+  box.innerHTML = html;
+  box.addEventListener('click', function(e){
+    var btn = e.target.closest ? e.target.closest('.tp') : null;
+    if(btn) applyTheme(btn.getAttribute('data-t'));
+  });
+}
+
+/* =====================================================================
+   工具
+   ===================================================================== */
+var $ = function(s){ return document.querySelector(s); };
+var clamp = function(v,a,b){ return v<a?a:(v>b?b:v); };
+var lerp = function(a,b,t){ return a+(b-a)*t; };
+var easeOut = function(t){ return 1-Math.pow(1-t,3); };
+var R = (function(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; var t=Math.imul(seed^seed>>>15,1|seed);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; })(20240921);
+function fmtNum(v,d){
+  d = d||0;
+  var s = (Math.abs(v)>=1000 && d===0) ? Math.round(v).toLocaleString('en-US') : v.toFixed(d);
+  return s;
+}
+function pad2(n){ return n<10?'0'+n:''+n; }
+function timeStr(ts){
+  var d = new Date(ts);
+  return pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
+}
+function hex2rgb(h){
+  h = h.replace('#','');
+  if(h.length===3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  var n = parseInt(h,16);
+  return [ (n>>16)&255, (n>>8)&255, n&255 ];
+}
+function rgba(c,a){ return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')'; }
+function debounce(fn,ms){ var t; return function(){ var a=arguments,s=this; clearTimeout(t);
+  t=setTimeout(function(){ fn.apply(s,a); },ms); }; }
+
+/* 缓动数字：单 rAF 循环驱动，避免多循环 */
+var tweens = [];
+function tweenTo(el,to,d,apply){
+  for(var i=tweens.length-1;i>=0;i--) if(tweens[i].el===el) tweens.splice(i,1);
+  var from = (el.__v===undefined) ? to : el.__v;
+  el.__v = to;
+  var t = { el:el, from:from, to:to, d:Math.max(1,d), t0:performance.now(), apply:apply };
+  tweens.push(t);
+  return t;
+}
+function stepTweens(){
+  var now = performance.now();   // 与 tweenTo 使用同一时间基准，避免 rAF 时间戳偏移
+  for(var i=tweens.length-1;i>=0;i--){
+    var t = tweens[i];
+    var p = clamp((now-t.t0)/t.d,0,1);
+    var v = lerp(t.from,t.to,easeOut(p));
+    t.apply(v);
+    if(p>=1){ t.apply(t.to); t.el.__v = t.to; tweens.splice(i,1); }
+  }
+}
+function animNum(el,to,d){
+  if(!el) return;
+  tweenTo(el,to,d,function(v){ el.textContent = fmtNum(v, el.__dec||0); });
+}
+
+/* =====================================================================
+   数据：真实节点（hosts_data.js / 内置）+ 模拟边缘节点
+   ===================================================================== */
+var REGION_BY_PROV = {
+  '浙江省':'华东','江苏省':'华东','上海市':'华东','安徽省':'华东','福建省':'华东','山东省':'华东','江西省':'华东',
+  '湖北省':'华中','湖南省':'华中','河南省':'华中',
+  '北京市':'华北','天津市':'华北','河北省':'华北','山西省':'华北','内蒙古自治区':'华北',
+  '广东省':'华南','广西壮族自治区':'华南','海南省':'华南',
+  '四川省':'西南','重庆市':'西南','云南省':'西南','贵州省':'西南','西藏自治区':'西南',
+  '陕西省':'西北','甘肃省':'西北','青海省':'西北','宁夏回族自治区':'西北','新疆维吾尔自治区':'西北',
+  '辽宁省':'东北','吉林省':'东北','黑龙江省':'东北',
+  '香港特别行政区':'港澳台','澳门特别行政区':'港澳台','台湾省':'港澳台'
+};
+var REGIONS = [
+  { k:'华东',  c:'#38f0ff' }, { k:'华中', c:'#7c5cff' }, { k:'华南', c:'#35e0a1' },
+  { k:'华北',  c:'#ffb547' }, { k:'西南', c:'#ff5ec4' }, { k:'西北', c:'#ff6b6b' },
+  { k:'东北',  c:'#6ea8ff' }, { k:'港澳台', c:'#b8f14a' }
+];
+var REGION_COLOR = {}; REGIONS.forEach(function(r){ REGION_COLOR[r.k]=r.c; });
+REGIONS.forEach(function(r){ r.base = r.c; });
+
+/* 城市基础信息（用于模拟节点与 ISP 推断） */
+var ISP_BY_CITY = {
+  '杭州市':'阿里云','武汉市':'中国电信','襄阳市':'中国电信','常州市':'中国电信','镇江市':'中国电信',
+  '北京市':'腾讯云','上海市':'腾讯云','香港':'阿里云','深圳市':'腾讯云','广州市':'腾讯云',
+  '成都市':'中国电信','西安市':'中国电信','重庆市':'中国电信','南京市':'中国电信','苏州市':'中国电信'
+};
+var ISP_BY_CITY_EXTRA = ['中国电信','中国联通','中国移动','阿里云','腾讯云','华为云','教育网'];
+
+/* 模拟边缘节点城市表：[城市, 省份, 纬度, 经度, 数量, 基准延迟] */
+var SIM_CITIES = [
+  ['南京市','江苏省',32.0603,118.7969,6,24],   ['苏州市','江苏省',31.2989,120.5853,5,20],
+  ['无锡市','江苏省',31.4912,120.3119,4,21],   ['宁波市','浙江省',29.8683,121.5440,4,23],
+  ['合肥市','安徽省',31.8206,117.2272,4,27],   ['温州市','浙江省',27.9944,120.6994,3,27],
+  ['福州市','福建省',26.0745,119.2965,3,32],   ['厦门市','福建省',24.4798,118.0894,3,34],
+  ['济南市','山东省',36.6512,117.1201,3,26],   ['青岛市','山东省',36.0671,120.3826,4,30],
+  ['南昌市','江西省',28.6820,115.8579,2,25],   ['徐州市','江苏省',34.2058,117.2848,2,28],
+  ['长沙市','湖南省',28.2282,112.9388,5,23],   ['郑州市','河南省',34.7466,113.6254,5,22],
+  ['洛阳市','河南省',34.6197,112.4540,2,28],   ['宜昌市','湖北省',30.6924,111.2865,2,20],
+  ['广州市','广东省',23.1291,113.2644,7,26],   ['深圳市','广东省',22.5431,114.0579,7,28],
+  ['东莞市','广东省',23.0207,113.7518,3,29],   ['佛山市','广东省',23.0218,113.1219,2,27],
+  ['南宁市','广西壮族自治区',22.8170,108.3665,2,38], ['海口市','海南省',20.0444,110.1999,2,45],
+  ['珠海市','广东省',22.2707,113.5767,2,30],
+  ['成都市','四川省',30.5728,104.0668,5,42],   ['重庆市','重庆市',29.5630,106.5516,5,38],
+  ['昆明市','云南省',24.8801,102.8329,3,55],   ['贵阳市','贵州省',26.6470,106.6302,3,48],
+  ['拉萨市','西藏自治区',29.6520,91.1721,2,92],
+  ['西安市','陕西省',34.3416,108.9398,4,40],   ['兰州市','甘肃省',36.0611,103.8343,2,58],
+  ['西宁市','青海省',36.6171,101.7782,1,66],   ['银川市','宁夏回族自治区',38.4872,106.2309,1,62],
+  ['乌鲁木齐市','新疆维吾尔自治区',43.8256,87.6168,2,88],
+  ['沈阳市','辽宁省',41.8057,123.4315,3,45],   ['大连市','辽宁省',38.9140,121.6147,2,43],
+  ['哈尔滨市','黑龙江省',45.8038,126.5349,2,52],['长春市','吉林省',43.8171,125.3235,2,50],
+  ['天津市','天津市',39.0842,117.2009,3,33],   ['石家庄市','河北省',38.0428,114.5149,3,34],
+  ['太原市','山西省',37.8706,112.5489,2,40],   ['呼和浩特市','内蒙古自治区',40.8414,111.7519,2,52],
+  ['台北市','台湾省',25.0330,121.5654,2,46],   ['澳门','澳门特别行政区',22.1987,113.5439,1,36]
+];
+
+/* 内置兜底数据（与 hosts_data.js 同源，二者取其一即可离线运行） */
+
+function nodeName(city,i){
+  var code = { '杭州市':'hz','武汉市':'wh','襄阳市':'xy','北京市':'bj','上海市':'sh','常州市':'cz','镇江市':'zj',
+    '香港':'hk','南京市':'nj','苏州市':'sz','深圳市':'sz2','广州市':'gz','成都市':'cd','西安市':'xa','重庆市':'cq',
+    '天津市':'tj','长沙市':'cs','郑州市':'zz','青岛市':'qd','昆明市':'km','沈阳市':'sy','大连市':'dl',
+    '哈尔滨市':'hrb','乌鲁木齐市':'wlmq','拉萨市':'ls','兰州市':'lz','贵阳市':'gy','福州市':'fz','厦门市':'xm',
+    '合肥市':'hf','南昌市':'nc','石家庄市':'sjz','太原市':'ty','济南市':'jn','宁波市':'nb','无锡市':'wx',
+    '温州市':'wz','徐州市':'xz','洛阳市':'ly','宜昌市':'yc','东莞市':'dg','佛山市':'fs','珠海市':'zh',
+    '南宁市':'nn','海口市':'hk2','西宁市':'xn','银川市':'yc2','长春市':'cc','呼和浩特市':'hhht','台北市':'tpe','澳门':'mo' }[city]
+    || ('n'+(city.length));
+  return i===0 ? (code+'-node.example.com') : (code+(i+1)+'-node.example.com');
+}
+
+/* 节点数据来源：优先外链 hosts_data.js（window.__HOSTS），否则用内嵌兜底数据 */
+function hostData(){
+  if(window.__HOSTS && window.__HOSTS.length) return window.__HOSTS;
+  return window.__HOSTS_FALLBACK || [];
+}
+var NODES = [];
+/* 部分节点取自 IP 库，城市字段会是英文，这里统一成中文 */
+var CITY_ALIAS = { 'Beijing':'北京市', 'Shanghai':'上海市', 'Guangzhou':'广州市', 'Shenzhen':'深圳市',
+  'Hong Kong':'香港', 'Chengdu':'成都市', 'Wuhan':'武汉市' };
+function normCity(c){ return CITY_ALIAS[c] || c; }
+function buildNodes(){
+  var real = hostData();
+  var idx = 0, i, k;
+
+  for(i=0;i<real.length;i++){
+    var h = real[i];
+    var prov = h.p || '', city = normCity(h.c || '');
+    var region = REGION_BY_PROV[prov] || '华东';
+    var on = !!h.on;
+    var base = (h.r && h.r>0) ? h.r : 14 + R()*22;
+    var jr = 0.045 + Math.min(0.075, 0.0016*Math.sqrt(real.length));
+    NODES.push(mkNode({
+      id: idx++, name: h.n, city: city, prov: prov, region: region,
+      lat: h.la + (R()-0.5)*jr*2, lon: h.lo + (R()-0.5)*jr*2.3,
+      base: base, online: on, loss: h.l || 0, real: true,
+      isp: ISP_BY_CITY[city] || ISP_BY_CITY_EXTRA[idx % ISP_BY_CITY_EXTRA.length]
+    }));
+  }
+  for(k=0;CFG.SHOW_SIM && k<SIM_CITIES.length;k++){
+    var c = SIM_CITIES[k];
+    var rg = REGION_BY_PROV[c[1]] || '华东';
+    for(i=0;i<c[4];i++){
+      NODES.push(mkNode({
+        id: idx++, name: nodeName(c[0],i), city: c[0], prov: c[1], region: rg,
+        lat: c[2] + (R()-0.5)*0.24, lon: c[3] + (R()-0.5)*0.30,
+        base: c[5]*(0.82+R()*0.42), online: R()>0.965,
+        loss: R()<0.9?0:R()*3.2, real: false,
+        isp: ISP_BY_CITY[c[0]] || ISP_BY_CITY_EXTRA[idx % ISP_BY_CITY_EXTRA.length]
+      }));
+    }
+  }
+}
+function mkNode(o){
+  o.ms = o.online ? o.base : 0;
+  o.spike = 0;
+  o.offlineFor = o.online ? 0 : (2 + Math.floor(R()*5));
+  o.phase = R()*Math.PI*2;
+  o.tw = 0.7 + R()*0.6;
+  o.level = 0;
+  o.lastAlert = -99;
+  o.hist = [];
+  o.level = levelOf(o);
+  return o;
+}
+function levelOf(n){
+  if(!n.online) return 3;                                   // 3 = 离线
+  if(n.ms>=CFG.CRIT || n.loss>=CFG.LOSS_CRIT) return 2;     // 2 = 严重
+  if(n.ms>=CFG.WARN || n.loss>=CFG.LOSS_WARN) return 1;     // 1 = 告警
+  return 0;                                                 // 0 = 正常
+}
+var LEVEL_COLOR = ['#35e0a1','#ffb547','#ff4f6d','#5a6a80'];
+var LEVEL_RGB = LEVEL_COLOR.map(hex2rgb);
+function nodeColor(n){
+  var L = (THEME && THEME.lv) ? THEME.lv : { fast:'#35e0a1', good:'#38f0ff', mid:'#6ea8ff', warn:'#ffb547', crit:'#ff4f6d', off:'#5a6a80' };
+  if(!n.online) return L.off;
+  if(n.ms>=CFG.CRIT) return L.crit;
+  if(n.ms>=60) return L.warn;
+  if(n.ms>=45) return L.mid;
+  if(n.ms>=25) return L.good;
+  return L.fast;
+}
+
+/* =====================================================================
+   聚合状态
+   ===================================================================== */
+var AGG = {
+  total:0, online:0, avg:0, peak:0, loss:0, alerts:0, crit:0,
+  fast:0, prevAvg:0, avgHist:[], health:0, round:0,
+  regionOnline:{}, regionTotal:{}
+};
+function computeAgg(){
+  var i,n, s=0, cnt=0, peak=0, loss=0, alerts=0, crit=0, fast=0, online=0;
+  var ro={}, rt={};
+  for(i=0;i<REGIONS.length;i++){ ro[REGIONS[i].k]=0; rt[REGIONS[i].k]=0; }
+  for(i=0;i<NODES.length;i++){
+    n = NODES[i];
+    rt[n.region] = (rt[n.region]||0)+1;
+    if(n.online){
+      online++; ro[n.region] = (ro[n.region]||0)+1;
+      s += n.ms; cnt++;
+      if(n.ms>peak) peak = n.ms;
+      loss += n.loss;
+      if(n.ms<25) fast++;
+    }
+    if(!n.online || n.ms>=CFG.WARN || n.loss>=CFG.LOSS_WARN) alerts++;
+    if(!n.online || n.ms>=CFG.CRIT || n.loss>=CFG.LOSS_CRIT) crit++;
+  }
+  AGG.total = NODES.length;
+  AGG.online = online;
+  AGG.avg = cnt ? s/cnt : 0;
+  AGG.peak = peak;
+  AGG.loss = cnt ? loss/cnt : 0;
+  AGG.alerts = alerts;
+  AGG.crit = crit;
+  AGG.fast = fast;
+  AGG.regionOnline = ro; AGG.regionTotal = rt;
+  var onlineRate = NODES.length ? online/NODES.length : 1;
+  var badRate = NODES.length ? alerts/NODES.length : 0;
+  var latPen = clamp((AGG.avg-22)/1.15, 0, 34);
+  var h = 100 - (1-onlineRate)*46 - latPen - badRate*54 - clamp(AGG.loss*2.6,0,10);
+  AGG.health = clamp(h, 3, 100);
+  AGG.avgHist.push(AGG.avg);
+  if(AGG.avgHist.length>110) AGG.avgHist.shift();
+}
+
+/* =====================================================================
+   物理：一轮巡检
+   ===================================================================== */
+function physics(dt){
+  var i,n;
+  for(i=0;i<NODES.length;i++){
+    n = NODES[i];
+    if(n.online){
+      if(n.live){
+        /* 真实节点：只向 API 值收敛 + 视觉级微抖，不编造尖刺/丢包/掉线 */
+        n.ms = clamp(n.ms + (n.base-n.ms)*0.55 + (Math.random()-0.5)*0.8, 2.5, 620);
+        n.spike = 0;
+      } else {
+        var drift = (n.base-n.ms)*0.20 + (Math.random()-0.5)*n.base*0.16 + (Math.random()-0.5)*1.5;
+        n.ms = clamp(n.ms + drift + n.spike, 2.5, 620);
+        n.spike *= 0.42;
+        if(n.spike<0.15) n.spike = 0;
+        n.loss = clamp(n.loss + (Math.random()-0.5)*0.22 + (n.ms>110?0.06:-0.02), 0, 9);
+        if(n.loss<0.06) n.loss = 0;
+      }
+    } else {
+      n.ms = 0;
+      if(n.live){ n.level = levelOf(n); continue; }   // 真实节点在线状态以 API 为准
+      if(n.offlineFor>0) n.offlineFor--;
+      if(n.offlineFor<=0 && Math.random()<0.55){
+        n.online = true; n.ms = n.base*(1.4+Math.random()*1.2); n.spike = 0;
+        n.loss = Math.random()*2.4;      // 复位丢包率，避免恢复后仍长期严重告警
+        n.recovered = true;
+      }
+    }
+    n.level = levelOf(n);
+  }
+  // 随机事件：延迟尖刺 / 节点掉线（只作用于演示节点；真实节点的事件由 API 决定）
+  var EV = [];
+  for(var q=0;q<NODES.length;q++){ if(!NODES[q].real) EV.push(NODES[q]); }
+  if(EV.length){
+    if(Math.random()<0.62){
+      var a = EV[(Math.random()*EV.length)|0];
+      if(a.online){ a.spike = 12 + Math.random()*58; a.event = 'spike'; }
+    }
+    if(Math.random()<0.16){
+      var offs = EV.filter(function(x){ return x.online; });
+      if(offs.length){
+        var b = offs[(Math.random()*offs.length)|0];
+        b.online = false; b.offlineFor = 2+((Math.random()*4)|0); b.event = 'offline'; b.ms = 0;
+      }
+    }
+  }
+  computeAgg();
+}
+
+/* =====================================================================
+   告警
+   ===================================================================== */
+
+var pendingAlerts = [];
+var alertSeq = 0;
+function alertText(n){
+  if(!n.online) return { lv:'crit', t:'节点离线', s:n.name+' · '+n.city+' · 无法建立探测连接' };
+  if(n.ms>=CFG.CRIT) return { lv:'crit', t:'延迟严重超阈 '+n.ms.toFixed(1)+'ms', s:n.name+' · '+n.city+' · 阈值 '+CFG.CRIT+'ms' };
+  if(n.loss>=CFG.LOSS_CRIT) return { lv:'crit', t:'丢包率异常 '+n.loss.toFixed(1)+'%', s:n.name+' · '+n.city+' · 链路抖动' };
+  if(n.ms>=CFG.WARN) return { lv:'warn', t:'延迟升高 '+n.ms.toFixed(1)+'ms', s:n.name+' · '+n.city+' · 阈值 '+CFG.WARN+'ms' };
+  if(n.loss>=CFG.LOSS_WARN) return { lv:'warn', t:'轻微丢包 '+n.loss.toFixed(1)+'%', s:n.name+' · '+n.city };
+  return null;
+}
+function pushAlert(n,ts){
+  var a = alertText(n);
+  if(!a) return;
+  pendingAlerts.push({ id:++alertSeq, lv:a.lv, t:a.t, s:a.s, ts: ts||Date.now(), name:n.name, city:n.city });
+  // 队列硬上限，防止意外高频事件把内存堆起来
+  if(pendingAlerts.length > 300) pendingAlerts.splice(0, pendingAlerts.length-300);
+}
+
+/* =====================================================================
+   渲染：统计 / 健康度
+   ===================================================================== */
+var elTotal=$('#stTotal'), elOnline=$('#stOnline'), elAvg=$('#stAvg'), elAlert=$('#stAlert');
+elTotal.__dec=0; elOnline.__dec=0; elAvg.__dec=1; elAlert.__dec=0;
+var dTotal=$('#stTotalD'), dOnline=$('#stOnlineD'), dAvg=$('#stAvgD'), dAlert=$('#stAlertD');
+
+function renderStats(){
+  animNum(elTotal, AGG.total, 1000);
+  animNum(elOnline, AGG.online, 1000);
+  animNum(elAvg, AGG.avg, 1100);
+  animNum(elAlert, AGG.alerts, 1000);
+
+  var onlineRate = AGG.total ? AGG.online/AGG.total*100 : 0;
+  dTotal.textContent = '实测 ' + REAL_COUNT;
+  $('#stTotalS').textContent = '演示 ' + SIM_COUNT + ' 台';
+  dOnline.textContent = onlineRate.toFixed(1) + '%';
+  dOnline.className = 'delta ' + (onlineRate>98?'down':(onlineRate>94?'':'up'));
+  var dv = AGG.avg - (AGG.prevAvg||AGG.avg);
+  dAvg.textContent = (dv>=0?'▲ ':'▼ ') + Math.abs(dv).toFixed(2);
+  dAvg.className = 'delta ' + (dv>0.05?'up':(dv<-0.05?'down':''));
+  dAlert.textContent = AGG.crit>0 ? ('严重 '+AGG.crit) : '全部可控';
+  dAlert.className = 'delta ' + (AGG.crit>0?'up':'down');
+  $('#stAlertS').textContent = '严重 '+AGG.crit+' · 离线 '+(AGG.total-AGG.online);
+  $('#stOnlineS').textContent = AGG.online+' / '+AGG.total+' 台';
+
+  $('#stAvgCard').className = 'stat ' + (AGG.avg>=CFG.CRIT?'crit':(AGG.avg>=CFG.WARN?'warn':''));
+  $('#stAlertCard').className = 'stat ' + (AGG.crit>0?'crit':(AGG.alerts>0?'warn':''));
+
+  $('#mnLoss').textContent = AGG.loss.toFixed(2);
+  $('#mnLossBar').style.width = clamp(AGG.loss*22,0,100)+'%';
+  $('#mnPeak').textContent = fmtNum(AGG.peak,0);
+  $('#mnPeakBar').style.width = clamp(AGG.peak*0.8,0,100)+'%';
+  $('#mnFast').textContent = AGG.fast;
+  $('#mnFastBar').style.width = clamp(AGG.fast/Math.max(1,AGG.online)*100,0,100)+'%';
+  $('#ovTick').textContent = (CFG.TICK/1000).toFixed(1)+'s';
+  $('#chipRound').textContent = '#'+AGG.round;
+  $('#rankTick').textContent = '#'+AGG.round;
+
+  // 健康度
+  var hv = Math.round(AGG.health);
+  animNum($('#healthVal'), hv, 1000);
+  var gc = hv>=80?'#35e0a1':(hv>=60?'#38f0ff':(hv>=40?'#ffb547':'#ff4f6d'));
+  var arc = $('#gaugeArc');
+  arc.setAttribute('stroke-dasharray', clamp(hv,0,100)+' 100');
+  arc.setAttribute('stroke', gc);
+  $('#hiOnline').textContent = onlineRate.toFixed(1)+'%';
+  $('#hiOnlineBar').style.width = onlineRate+'%';
+  $('#hiFast').textContent = (AGG.fast/Math.max(1,AGG.online)*100).toFixed(0)+'%';
+  $('#hiFastBar').style.width = clamp(AGG.fast/Math.max(1,AGG.online)*100,0,100)+'%';
+  var bad = AGG.alerts/Math.max(1,AGG.total)*100;
+  $('#hiBad').textContent = bad.toFixed(1)+'%';
+  $('#hiBadBar').style.width = clamp(bad*2.4,0,100)+'%';
+
+  // HUD
+  var hudAvg = $('#hudAvg'); hudAvg.__dec=1; animNum(hudAvg, AGG.avg, 1100);
+  $('#hudPeak').textContent = fmtNum(AGG.peak,0);
+  $('#hudLoss').textContent = AGG.loss.toFixed(2);
+  var hd = $('#hudDelta');
+  hd.textContent = (dv>=0?'▲ ':'▼ ') + Math.abs(dv).toFixed(2)+' ms';
+  hd.className = 'dv' + (dv<-0.05?' down':'');
+  $('#hud').className = 'hud' + (AGG.avg>=CFG.CRIT?' crit':'');
+
+  // 顶栏
+  $('#rgOnline').textContent = AGG.online;
+  $('#rgTotal').textContent = AGG.total;
+  $('#mmNodes').textContent = AGG.total;
+  $('#mmLinks').textContent = LINK_COUNT;
+}
+
+/* =====================================================================
+   渲染：区域环形图
+   ===================================================================== */
+var arcEls = {};
+function buildDonut(){
+  var g = $('#donutArcs'), C = 2*Math.PI*76, html='';
+  REGIONS.forEach(function(r){
+    html += '<circle class="arc" data-k="'+r.k+'" cx="100" cy="100" r="76" pathLength="100" '+
+      'stroke="'+r.c+'" style="color:'+r.c+'" stroke-dasharray="0 100" stroke-dashoffset="0"></circle>';
+  });
+  g.innerHTML = html;
+  var els = g.querySelectorAll('.arc');
+  for(var i=0;i<els.length;i++){
+    arcEls[els[i].getAttribute('data-k')] = els[i];
+    els[i].addEventListener('mouseenter', onRegionEnter);
+    els[i].addEventListener('mouseleave', onRegionLeave);
+  }
+  // 图例
+  var lg = REGIONS.map(function(r){
+    return '<div class="lg" data-k="'+r.k+'"><i style="color:'+r.c+'"></i>'+
+      '<span class="nm">'+r.k+'</span><span class="ct num" data-ct="'+r.k+'">0</span>'+
+      '<span class="pc num" data-pc="'+r.k+'">0%</span></div>';
+  }).join('');
+  $('#legend').innerHTML = lg;
+  var rows = $('#legend').querySelectorAll('.lg');
+  for(var j=0;j<rows.length;j++){
+    rows[j].addEventListener('mouseenter', function(){ onRegionEnter.call(this); });
+    rows[j].addEventListener('mouseleave', onRegionLeave);
+  }
+}
+function highlightRegion(k, on){
+  var any = !k;
+  REGIONS.forEach(function(r){
+    var el = arcEls[r.k];
+    if(!el) return;
+    if(on && r.k===k){ el.classList.add('hot'); el.classList.remove('dim'); }
+    else if(on && !any){ el.classList.add('dim'); el.classList.remove('hot'); }
+    else { el.classList.remove('hot'); el.classList.remove('dim'); }
+  });
+  var rows = $('#legend').querySelectorAll('.lg');
+  for(var i=0;i<rows.length;i++){
+    var kk = rows[i].getAttribute('data-k');
+    rows[i].classList.toggle('hot', !!on && kk===k);
+  }
+  if(on && k){
+    var r = null; REGIONS.forEach(function(x){ if(x.k===k) r=x; });
+    $('#dcLabel').textContent = k;
+    var ct = AGG.regionOnline[k]||0, tt = AGG.regionTotal[k]||0;
+    $('#dcSub').textContent = '在线率 '+(tt?(ct/tt*100).toFixed(0):0)+'%';
+    $('#dcSub').style.color = r?r.c:'#5f7893';
+  } else {
+    $('#dcLabel').textContent = '节点总数';
+    $('#dcSub').textContent = '实测 '+REAL_COUNT+' · 演示 '+SIM_COUNT;
+    $('#dcSub').style.color = '#5f7893';
+  }
+}
+function onRegionEnter(){ highlightRegion(this.getAttribute('data-k'), true); }
+function onRegionLeave(){ highlightRegion(null, false); }
+
+function renderRegion(){
+  var total = 0, i;
+  for(i=0;i<REGIONS.length;i++) total += AGG.regionOnline[REGIONS[i].k]||0;
+  total = total || 1;
+  var off = 0;
+  REGIONS.forEach(function(r){
+    var v = AGG.regionOnline[r.k]||0;
+    var pct = v/total*100;
+    var el = arcEls[r.k];
+    if(el){
+      el.setAttribute('stroke-dasharray', Math.max(0,pct-0.8).toFixed(2)+' 100');
+      el.setAttribute('stroke-dashoffset', (-off).toFixed(2));
+    }
+    off += pct;
+    var ct = document.querySelector('[data-ct="'+r.k+'"]');
+    var pc = document.querySelector('[data-pc="'+r.k+'"]');
+    if(ct) ct.textContent = v;
+    if(pc) pc.textContent = pct.toFixed(1)+'%';
+  });
+  var dc = $('#dcNum'); dc.__dec=0; animNum(dc, AGG.total, 1000);
+}
+
+/* =====================================================================
+   渲染：排行榜（FLIP 平滑重排）
+   ===================================================================== */
+var rankMap = {}, rankOrder = [], rankMax = 1;
+function renderRank(){
+  var list = $('#rankList');
+  var sorted = NODES.slice().sort(function(a,b){
+    if(a.online!==b.online) return a.online?-1:1;
+    return b.ms-a.ms;
+  }).slice(0,9);
+  rankMax = Math.max(1, sorted[0] ? sorted[0].ms : 1);
+  var ids = sorted.map(function(n){ return n.id; });
+  var changed = ids.join(',') !== rankOrder.join(',');
+
+  // 更新内容
+  sorted.forEach(function(n,idx){
+    var el = rankMap[n.id], isNew = false;
+    if(!el){
+      el = document.createElement('div');
+      el.innerHTML = '<span class="rk num"></span><div class="rk-main"><div class="rk-name"></div>'+
+        '<div class="rk-track"><i></i></div></div><span class="rk-val num">&nbsp;<em>ms</em></span>';
+      rankMap[n.id] = el;
+      isNew = true;
+    }
+    el.querySelector('.rk').textContent = pad2(idx+1);
+    el.querySelector('.rk-name').innerHTML = n.name + '<s>'+n.city+'</s>';
+    var pct = n.online ? clamp(n.ms/rankMax*100,3,100) : 100;
+    var bar = el.querySelector('.rk-track i');
+    var col = nodeColor(n);
+    bar.style.width = pct.toFixed(1)+'%';
+    bar.style.background = n.online
+      ? 'linear-gradient(90deg,'+col+'cc,'+col+')'
+      : 'linear-gradient(90deg,#40506a,#5a6a80)';
+    bar.style.boxShadow = '0 0 12px '+col+'aa';
+    el.querySelector('.rk-val').innerHTML = (n.online? n.ms.toFixed(1):'--') + '<em>ms</em>';
+    el.querySelector('.rk-val').style.color = col;
+    el.className = 'rank-row' + (idx===0?' top1':(idx===1?' top2':(idx===2?' top3':''))) + (isNew?' enter':'');
+    if(isNew){ (function(x){ setTimeout(function(){ x.classList.remove('enter'); }, 760); })(el); }
+    el.setAttribute('data-lv', n.level);
+  });
+  // 移除过期
+  Object.keys(rankMap).forEach(function(id){
+    if(ids.indexOf(+id)<0){
+      var e = rankMap[id];
+      delete rankMap[id];
+      e.style.opacity='0'; e.style.transform='translateX(22px)';
+      setTimeout(function(){ if(e.parentNode) e.parentNode.removeChild(e); },420);
+    }
+  });
+  if(changed){
+    var first = {};
+    Object.keys(rankMap).forEach(function(id){
+      var e = rankMap[id];
+      if(e.parentNode) first[id] = e.getBoundingClientRect().top;
+    });
+    ids.forEach(function(id){
+      var e = rankMap[id];
+      if(e) list.appendChild(e);           // 移动 DOM 到目标顺序
+    });
+    Object.keys(rankMap).forEach(function(id){
+      var e = rankMap[id];
+      if(!e.parentNode || first[id]===undefined) return;
+      var d = first[id] - e.getBoundingClientRect().top;
+      if(Math.abs(d)>0.4){ e.style.transition='none'; e.style.transform='translateY('+d+'px)'; }
+    });
+    requestAnimationFrame(function(){
+      Object.keys(rankMap).forEach(function(id){
+        var e = rankMap[id];
+        if(!e.parentNode) return;
+        e.style.transition='';
+        e.style.transform='';
+      });
+    });
+    rankOrder = ids;
+  }
+}
+
+/* =====================================================================
+   渲染：告警
+   ===================================================================== */
+function renderAlerts(burst){
+  var list = $('#alertList');
+  if(!list.children.length){
+    list.innerHTML = '<div class="empty">暂无告警 · 全网链路平稳</div>';
+  }
+  // 常规每轮最多插入 3 条（避免刷屏）；首次可一次铺满
+  var n = Math.min(burst||3, pendingAlerts.length);
+  if(n>0) list.querySelectorAll('.empty').forEach(function(e){ e.remove(); });
+  for(var i=0;i<n;i++){
+    var a = pendingAlerts.shift();
+    var el = document.createElement('div');
+    el.className = 'alert ' + a.lv;
+    el.innerHTML = '<span class="ad"></span><div class="am"><div class="at"></div><div class="as"></div></div>'+
+      '<span class="atm num"></span>';
+    el.querySelector('.at').textContent = a.t;
+    el.querySelector('.as').textContent = a.s;
+    var tm = el.querySelector('.atm'); tm.textContent = timeStr(a.ts);
+    el.__ts = a.ts;
+    el.__atm = tm;
+    list.insertBefore(el, list.firstChild);
+    // 入场动画结束后彻底交还样式，避免任何情况下卡在 opacity:0
+    (function(x){ setTimeout(function(){ x.style.animation = 'none'; }, 760); })(el);
+  }
+  // 新告警始终置顶；只有用户自己滚动查看历史时才不打断
+  if(n>0 && list.__stick!==false){
+    list.scrollTop = 0;
+    requestAnimationFrame(function(){ if(list.__stick!==false) list.scrollTop = 0; });
+    setTimeout(function(){ if(list.__stick!==false) list.scrollTop = 0; }, 90);
+  }
+  if(!list.__bound){
+    list.__bound = true;
+    list.__stick = true;
+    list.addEventListener('scroll', function(){ if(list.scrollTop < 26) list.__stick = true; });
+    ['wheel','touchmove','mousedown','keydown'].forEach(function(ev){
+      list.addEventListener(ev, function(){ list.__stick = (list.scrollTop < 26); }, { passive:true });
+    });
+  }
+  // 时间片随时间刷新（缓存引用，且仅在秒数变化时写入）
+  var kids = list.children;
+  for(var k=0;k<kids.length;k++){
+    var row = kids[k];
+    if(row.__ts && row.__atm){
+      var s = timeStr(row.__ts);
+      if(row.__atm.__t !== s){ row.__atm.__t = s; row.__atm.textContent = s; }
+    }
+  }
+  // 上限裁剪：只对超出的行做一次淡出并异步移除。
+  // 注意：绝不能用 while(children.length > MAX) —— 异步移除不会让长度在同步循环里下降，会死循环。
+  var total = list.children.length;
+  for(var q=CFG.MAX_ALERTS; q<total; q++){
+    var die = list.children[q];
+    if(die && !die.__dying){
+      die.__dying = true;
+      die.classList.add('out');
+      (function(x){ setTimeout(function(){ if(x.parentNode) x.parentNode.removeChild(x); }, 420); })(die);
+    }
+  }
+  $('#alertCount').textContent = total;
+}
+
+/* =====================================================================
+   渲染：走马灯（无缝循环 + 条目回收）
+   ===================================================================== */
+var MARQ = { track:null, items:[], cursor:0, x:0, step:0, queue:[] };
+function initMarquee(){
+  MARQ.track = $('#mqTrack');
+  var html = '';
+  for(var i=0;i<CFG.MARQ_ITEMS;i++){
+    html += '<div class="mq-item"><span class="st"></span><span class="nm"></span>'+
+            '<span class="ms num">&nbsp;<em>ms</em></span></div>';
+  }
+  MARQ.track.innerHTML = html;
+  MARQ.items = Array.prototype.slice.call(MARQ.track.children);
+  MARQ.queue = NODES.slice().sort(function(){ return Math.random()-0.5; });
+  MARQ.cursor = 0;
+  MARQ.items.forEach(function(el,i){ assignMarqueeItem(el, i); });
+  measureMarquee();
+}
+function assignMarqueeItem(el, seed){
+  var node = MARQ.queue[(MARQ.cursor++) % MARQ.queue.length];
+  el.__node = node;
+  el.querySelector('.nm').innerHTML = node.name + '<s></s>';
+  el.__seed = seed;
+  paintMarqueeItem(el, true);
+}
+function paintMarqueeItem(el, instant){
+  var n = el.__node; if(!n) return;
+  var ms = el.querySelector('.ms');
+  var txt = n.online ? n.ms.toFixed(1) : '--';
+  if(instant){ ms.innerHTML = txt + '<em>ms</em>'; ms.__last = txt; }
+  else if(ms.__last !== txt){ ms.__last = txt; ms.innerHTML = txt + '<em>ms</em>'; }
+  var sub = el.querySelector('.nm s');
+  var stxt = (n.prov||'') + n.city + ' · ' + (n.online ? '在线' : '离线');
+  if(sub.textContent !== stxt) sub.textContent = stxt;
+  el.className = 'mq-item' + (!n.online ? ' off' : (n.level===2 ? ' crit' : (n.level===1 ? ' warn' : '')));
+}
+function measureMarquee(){
+  if(!MARQ.items.length) return;
+  var a = MARQ.items[0].getBoundingClientRect(), b = MARQ.items[1].getBoundingClientRect();
+  MARQ.step = MARQ.items.length>1 ? (b.left-a.left) : (a.width+12);
+}
+function stepMarquee(dt){
+  if(!MARQ.items.length || !MARQ.step) return;
+  MARQ.x -= CFG.MARQ_SPEED*dt/1000;
+  var guard = 0;
+  while(MARQ.x <= -MARQ.step && guard++ < 12){
+    MARQ.x += MARQ.step;
+    var first = MARQ.track.firstChild;
+    if(first){
+      assignMarqueeItem(first, first.__seed||0);
+      MARQ.track.appendChild(first);
+    }
+  }
+  MARQ.track.style.transform = 'translate3d('+MARQ.x.toFixed(2)+'px,-50%,0)';
+}
+function refreshMarquee(){
+  for(var i=0;i<MARQ.items.length;i++) paintMarqueeItem(MARQ.items[i], false);
+}
+
+/* =====================================================================
+   背景星空
+   ===================================================================== */
+var Stars = {
+  cv:null, ctx:null, list:[], w:0, h:0, dpr:1, t:0, acc:0, step:34,
+  init:function(){
+    this.cv = $('#stars'); this.ctx = this.cv.getContext('2d');
+    this.resize(); this.build();
+  },
+  resize:function(){
+    this.dpr = 1;   // 星点仅 1-2px，固定 1 倍即可，省下大量全屏绘制开销
+    this.w = window.innerWidth; this.h = window.innerHeight;
+    this.cv.width = Math.round(this.w*this.dpr); this.cv.height = Math.round(this.h*this.dpr);
+    this.cv.style.width = this.w+'px'; this.cv.style.height = this.h+'px';
+  },
+  build:function(){
+    var n = (CFG.STAR_COUNT>0) ? CFG.STAR_COUNT : Math.round(clamp(this.w*this.h/13000, 80, 190));
+    this.list = [];
+    for(var i=0;i<n;i++){
+      this.list.push({
+        x:Math.random()*this.w, y:Math.random()*this.h,
+        s:0.5+Math.random()*1.5, a:0.12+Math.random()*0.5,
+        v:0.004+Math.random()*0.02, p:Math.random()*6.283
+      });
+    }
+  },
+  draw:function(dt){
+    var c = this.ctx; if(!c) return;
+    // 星空是慢速视差，全屏画布按 ~30fps 重绘即可，省下大量纹理上传
+    this.acc += dt;
+    if(this.acc < this.step) return;
+    var step = this.acc; this.acc = 0;
+    if(document.body.classList.contains('lite')) this.step = 100; else this.step = 34;
+    c.setTransform(this.dpr,0,0,this.dpr,0,0);
+    c.clearRect(0,0,this.w,this.h);
+    var t = this.t += step/1000;
+    for(var i=0;i<this.list.length;i++){
+      var s = this.list[i];
+      s.y -= s.v*step*0.06;
+      if(s.y < -4){ s.y = this.h+4; s.x = Math.random()*this.w; }
+      var a = s.a*(0.55+0.45*Math.sin(t*0.9+s.p));
+      var ai = clamp((a*15)|0, 0, 15);
+      c.fillStyle = i%7===0 ? THEME.starA[ai] : THEME.starB[ai];
+      c.fillRect(s.x, s.y, s.s, s.s);
+    }
+  }
+};
+
+/* =====================================================================
+   地图：三档底图（高德 → ECharts 矢量 → 内置引擎）
+   ===================================================================== */
+var BOUNDS = { minLng:73.2, maxLng:135.6, minLat:17.2, maxLat:53.9 };
+var OUTLINE = [
+  [121.2,53.3],[124.0,53.4],[126.5,52.9],[127.5,50.3],[127.4,49.6],[130.7,48.9],[133.5,48.3],[134.8,48.4],
+  [134.3,47.3],[133.1,45.1],[131.3,43.6],[130.4,42.9],[131.2,42.9],[130.6,42.4],[129.9,41.0],[129.0,39.9],
+  [127.8,39.7],[126.5,38.5],[125.4,37.8],[124.4,37.5],[124.8,36.0],[122.8,36.5],[121.0,36.9],[122.7,37.3],
+  [120.9,36.0],[119.2,35.0],[120.3,33.5],[121.9,32.2],[121.5,31.3],[122.1,30.4],[121.0,28.6],[119.6,26.2],
+  [118.6,24.6],[117.2,23.6],[115.5,22.8],[113.6,22.2],[110.6,21.2],[110.0,20.2],[109.9,21.4],[108.5,21.6],
+  [106.7,22.0],[104.0,22.5],[102.1,22.4],[101.1,21.2],[99.2,22.1],[97.5,23.9],[98.7,25.9],[97.5,28.3],
+  [95.4,29.1],[92.0,27.5],[90.5,28.1],[88.9,27.3],[85.8,28.2],[81.0,30.3],[78.7,31.5],[78.0,34.5],
+  [78.9,35.5],[74.5,37.0],[75.0,39.5],[73.5,39.3],[74.9,42.0],[80.2,42.2],[80.5,45.0],[82.5,45.2],
+  [85.0,47.0],[87.3,49.1],[90.0,47.8],[96.4,42.8],[100.0,42.6],[105.0,41.8],[110.0,45.0],[114.5,45.4],
+  [117.5,47.7],[119.7,50.1],[120.7,53.5],[121.2,53.3]
+];
+var ISLANDS = [
+  [[109.3,19.9],[110.6,20.1],[111.0,19.6],[110.5,18.6],[109.5,18.2],[108.7,19.3],[109.3,19.9]],
+  [[121.0,25.3],[122.0,25.0],[121.6,22.6],[120.9,21.9],[120.1,22.6],[120.2,24.5],[121.0,25.3]]
+];
+
+function mercX(lng){ return lng*0.0174532925199433; }
+function mercY(lat){ return Math.log(Math.tan(0.7853981633974483 + lat*0.008726646259971648)); }
+function fitProjector(w,h,pad){
+  var x0=mercX(BOUNDS.minLng), x1=mercX(BOUNDS.maxLng);
+  var y0=mercY(BOUNDS.maxLat), y1=mercY(BOUNDS.minLat);
+  var s = Math.min((w-pad*2)/(x1-x0), (h-pad*2)/(y1-y0));
+  var ox = (w-(x1-x0)*s)/2, oy = (h-(y1-y0)*s)/2;
+  return function(lng,lat){ return { x: ox+(mercX(lng)-x0)*s, y: oy+(mercY(lat)-y0)*s }; };
+}
+
+var FX = {
+  cv:null, ctx:null, w:0, h:0, dpr:1,
+  projector:null, tier:'builtin', outlineAlpha:1,
+  pts:[], outlinePath:null, dotBuckets:[[],[],[],[]],
+  links:[], cities:[], hubPt:null, hub:CFG.HUB,
+  sprites:{}, t:0, sweep:0, hover:null, focus:[], focusT:0,
+
+  init:function(){
+    this.cv = $('#mapFx');
+    this.ctx = this.cv.getContext('2d');
+    this.buildSprites();
+    this.resize();
+  },
+  buildSprites:function(){
+    var L = (THEME && THEME.lv) ? THEME.lv : { fast:'#35e0a1', good:'#38f0ff', mid:'#6ea8ff', warn:'#ffb547', crit:'#ff4f6d', off:'#5a6a80' };
+    var pal = [L.fast, L.good, L.mid, L.warn, L.crit, L.off,
+               (THEME && THEME.base ? THEME.base.violet : '#7c5cff'),
+               (THEME && THEME.base ? THEME.base.cyan : '#38f0ff'), '#ffffff'];
+    this.sprites.core = this.glow([255,255,255]);
+    for(var i=0;i<pal.length;i++) this.sprites[pal[i]] = this.glow(hex2rgb(pal[i]));
+  },
+  glow:function(rgb){
+    var s = 64, c = document.createElement('canvas'); c.width=c.height=s;
+    var g = c.getContext('2d');
+    var grd = g.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+    grd.addColorStop(0, rgba(rgb,1));
+    grd.addColorStop(0.18, rgba(rgb,0.72));
+    grd.addColorStop(0.42, rgba(rgb,0.24));
+    grd.addColorStop(0.72, rgba(rgb,0.06));
+    grd.addColorStop(1, rgba(rgb,0));
+    g.fillStyle = grd; g.fillRect(0,0,s,s);
+    return c;
+  },
+  spriteFor:function(col){ return this.sprites[col] || this.sprites['#38f0ff']; },
+  roundRect:function(c,x,y,w,h,r){
+    c.beginPath();
+    c.moveTo(x+r,y);
+    c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r);
+    c.lineTo(x+w,y+h-r); c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    c.lineTo(x+r,y+h); c.quadraticCurveTo(x,y+h,x,y+h-r);
+    c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y);
+    c.closePath();
+  },
+  resize:function(){
+    var panel = $('#mapPanel');
+    var r = panel.getBoundingClientRect();
+    this.w = Math.max(10, r.width); this.h = Math.max(10, r.height);
+    // 地图光晕层用 1.5 倍足够清晰，比 2 倍少约 44% 的逐帧填充量
+    this.dpr = Math.min(1.5, window.devicePixelRatio||1);
+    this.cv.width = Math.round(this.w*this.dpr);
+    this.cv.height = Math.round(this.h*this.dpr);
+    this.cv.style.width = this.w+'px'; this.cv.style.height = this.h+'px';
+    this.nl = null; this.sweepGrad = null;
+    this.build();
+    measureMarquee();
+  },
+  build:function(){
+    if(!this.projector) this.projector = fitProjector(this.w, this.h, 34);
+    var p = this.projector, i, n;
+    // 节点投影
+    this.pts = [];
+    for(i=0;i<NODES.length;i++){
+      var q = p(NODES[i].lon, NODES[i].lat);
+      this.pts.push(q && isFinite(q.x) ? { x:q.x, y:q.y } : null);
+    }
+    // 城市代表点
+    var byCity = {};
+    for(i=0;i<NODES.length;i++){
+      var nd = NODES[i];
+      if(!byCity[nd.city]) byCity[nd.city] = { city:nd.city, n:0, lat:0, lon:0, node:nd };
+      byCity[nd.city].n++; byCity[nd.city].lat += nd.lat; byCity[nd.city].lon += nd.lon;
+    }
+    var allCities = Object.keys(byCity).map(function(k){
+      var c = byCity[k];
+      c.lat /= c.n; c.lon /= c.n;
+      c.pt = p(c.lon, c.lat);
+      return c;
+    }).filter(function(c){ return c.pt && c.n>=2; });
+
+    // 标签城市：节点最多的 10 个
+    this.cities = allCities.slice().sort(function(a,b){ return b.n-a.n; }).slice(0,10);
+
+    // 连线目标：节点最多的城市 + 地理极值城市 + 基准延迟最高的城市（保证链路铺满画面）
+    var picks = allCities.slice().sort(function(a,b){ return b.n-a.n; }).slice(0,7);
+    function extreme(fn){
+      var best=null, bv=-1e9;
+      for(var z=0;z<allCities.length;z++){
+        var v = fn(allCities[z]);
+        if(v>bv){ bv=v; best=allCities[z]; }
+      }
+      return best;
+    }
+    var extra = [
+      extreme(function(c){ return c.lat; }),                      // 最北
+      extreme(function(c){ return -c.lat; }),                     // 最南
+      extreme(function(c){ return c.lon; }),                      // 最东
+      extreme(function(c){ return -c.lon; }),                     // 最西
+      extreme(function(c){ return c.lon*0.6 - c.lat; }),          // 西南
+      extreme(function(c){ return c.lon*0.6 + c.lat; }),          // 东北
+      extreme(function(c){ return c.node.base; }),
+      extreme(function(c){ return c.n*0.6 + c.node.base*1.4; })
+    ];
+    for(var e2=0;e2<extra.length;e2++) if(extra[e2]) picks.push(extra[e2]);
+    var seenCity = {}, linkCities = [];
+    for(var q3=0;q3<picks.length;q3++){
+      var cc = picks[q3];
+      if(!cc || seenCity[cc.city]) continue;
+      seenCity[cc.city] = 1; linkCities.push(cc);
+    }
+    this.linkCities = linkCities;
+
+    // 主控中心
+    var hq = p(this.hub.lo, this.hub.la);
+    this.hubPt = hq;
+    // 数据连线：控制中心 → 各城市代表节点
+    this.links = [];
+    var self = this;
+    linkCities.forEach(function(c){
+      if(!c.pt || !self.hubPt) return;
+      var mx = (self.hubPt.x + c.pt.x)/2, my = (self.hubPt.y + c.pt.y)/2;
+      var dx = c.pt.x - self.hubPt.x, dy = c.pt.y - self.hubPt.y;
+      var dist = Math.sqrt(dx*dx+dy*dy)||1;
+      var bow = clamp(dist*0.17, 14, 92);
+      var cx = mx - dy/dist*bow, cy = my + dx/dist*bow;
+      var col = nodeColor(c.node);
+      var grad = self.ctx.createLinearGradient(self.hubPt.x, self.hubPt.y, c.pt.x, c.pt.y);
+      grad.addColorStop(0, THEME.fx.linkFrom);
+      grad.addColorStop(0.45, rgba(hex2rgb(col),0.34));
+      grad.addColorStop(1, rgba(hex2rgb(col),0.1));
+      self.links.push({
+        p0:self.hubPt, p1:{x:cx,y:cy}, p2:c.pt, grad:grad,
+        col:col, phase:Math.random(), speed:0.11+Math.random()*0.13,
+        parts:2+((Math.random()*2)|0), w:0.9+Math.random()*0.7, node:c.node, city:c.city
+      });
+    });
+    LINK_COUNT = this.links.length;
+    // 内置底图：轮廓 + 点阵
+    this.buildOutline();
+    // 静态节点层（深色分离圈 + 亮核）：每轮巡检才需要重画一次，逐帧直接贴图
+    this.buildNodeLayer();
+  },
+  // 把不逐帧变化的部分（节点本体）画到离屏画布，主循环只做一次 drawImage
+  buildNodeLayer:function(){
+    if(!this.cv.width || !this.cv.height) return;
+    if(!this.nl){ this.nl = document.createElement('canvas'); this.nlc = this.nl.getContext('2d'); }
+    if(this.nl.width !== this.cv.width || this.nl.height !== this.cv.height){
+      this.nl.width = this.cv.width; this.nl.height = this.cv.height;
+    }
+    var c = this.nlc;
+    c.setTransform(this.dpr,0,0,this.dpr,0,0);
+    c.clearRect(0,0,this.w,this.h);
+    for(var i=0;i<NODES.length;i++){
+      var n = NODES[i], pt = this.pts[i];
+      if(!pt) continue;
+      if(pt.x<-15||pt.y<-15||pt.x>this.w+15||pt.y>this.h+15) continue;
+      var cr = n.online ? (n.level===2 ? 2.5 : 1.95) : 1.35;
+      c.beginPath(); c.arc(pt.x, pt.y, cr+1.5, 0, 6.28318);
+      c.fillStyle = 'rgba(3,9,18,0.72)'; c.fill();
+      c.beginPath(); c.arc(pt.x, pt.y, cr, 0, 6.28318);
+      c.fillStyle = n.online ? (n.level===2 ? '#ffd9e0' : '#ffffff') : '#93a4ba';
+      c.fill();
+    }
+  },
+  buildOutline:function(){
+    var p = this.projector, i, path = new Path2D();
+    var self = this;
+    function poly(arr){
+      for(var k=0;k<arr.length;k++){
+        var q = p(arr[k][0], arr[k][1]);
+        if(k===0) path.moveTo(q.x,q.y); else path.lineTo(q.x,q.y);
+      }
+      path.closePath();
+    }
+    poly(OUTLINE);
+    for(i=0;i<ISLANDS.length;i++) poly(ISLANDS[i]);
+    this.outlinePath = path;
+    // 点阵（裁剪后填充，营造数字陆地）
+    var ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    var buckets = [[],[],[],[]];
+    var step = clamp(Math.min(this.w,this.h)/26, 16, 30);
+    var bi = 0;
+    for(var x=8;x<this.w;x+=step){
+      for(var y=8;y<this.h;y+=step){
+        if(ctx.isPointInPath(path, x*this.dpr, y*this.dpr)){
+          buckets[(bi++)%4].push([x,y]);
+        }
+      }
+    }
+    ctx.restore();
+    this.dotBuckets = buckets;
+  },
+  setProjector:function(fn, tier){
+    this.projector = fn;
+    this.tier = tier;
+    this.build();
+  },
+  setOutlineTarget:function(v){ this.outlineTarget = v; },
+  draw:function(dt){
+    var c = this.ctx; if(!c) return;
+    var t = this.t += dt/1000;
+    c.setTransform(this.dpr,0,0,this.dpr,0,0);
+    c.clearRect(0,0,this.w,this.h);
+
+    // 内置底图淡入淡出
+    if(this.outlineTarget!==undefined){
+      this.outlineAlpha += (this.outlineTarget-this.outlineAlpha)*Math.min(1,dt/420);
+    }
+    if(this.outlineAlpha>0.012){
+      c.save(); c.globalAlpha = clamp(this.outlineAlpha,0,1);
+      var grd = c.createLinearGradient(0,0,0,this.h);
+      grd.addColorStop(0,THEME.land.f1);
+      grd.addColorStop(0.55,THEME.land.f2);
+      grd.addColorStop(1,THEME.land.f3);
+      c.fillStyle = grd; c.fill(this.outlinePath);
+      c.save(); c.clip(this.outlinePath);
+      for(var b=0;b<4;b++){
+        var arr = this.dotBuckets[b];
+        c.fillStyle = THEME.dotA[b];
+        for(var d=0; d<arr.length; d++) c.fillRect(arr[d][0], arr[d][1], 1.7, 1.7);
+      }
+      c.restore();
+      c.lineJoin='round'; c.lineCap='round';
+      c.strokeStyle='rgba(255,255,255,0.06)'; c.lineWidth=7; c.stroke(this.outlinePath);
+      c.strokeStyle=THEME.land.stroke; c.lineWidth=1.15;
+      c.shadowColor=THEME.land.glow; c.shadowBlur=7; c.stroke(this.outlinePath);
+      c.shadowBlur=0;
+      c.restore();
+    }
+
+    this.drawLinks(c,t);
+    this.drawNodes(c,t);
+    this.drawSweep(c,t);
+    this.drawLabels(c,t);
+  },
+  drawLinks:function(c,t){
+    if(!CFG.SHOW_FLOW_LINES || !this.links.length) return;
+    c.save();
+    c.lineCap='round';
+    for(var i=0;i<this.links.length;i++){
+      var l = this.links[i];
+      c.globalAlpha = 0.44;
+      c.strokeStyle = l.grad;
+      c.lineWidth = l.w;
+      c.beginPath();
+      c.moveTo(l.p0.x,l.p0.y);
+      c.quadraticCurveTo(l.p1.x,l.p1.y,l.p2.x,l.p2.y);
+      c.stroke();
+    }
+    c.globalCompositeOperation = 'lighter';
+    for(var k=0;k<this.links.length;k++){
+      var lk = this.links[k], spr = this.spriteFor(lk.col);
+      for(var j=0;j<lk.parts;j++){
+        var u = (t*lk.speed + lk.phase + j/lk.parts) % 1;
+        var iu = 1-u;
+        var x = iu*iu*lk.p0.x + 2*iu*u*lk.p1.x + u*u*lk.p2.x;
+        var y = iu*iu*lk.p0.y + 2*iu*u*lk.p1.y + u*u*lk.p2.y;
+        var a = Math.sin(u*Math.PI);
+        var s = 4.0 + a*3.2;
+        c.globalAlpha = a*0.55;
+        c.drawImage(spr, x-s, y-s, s*2, s*2);
+      }
+    }
+    c.restore();
+  },
+  drawNodes:function(c,t){
+    var i, pt, n, spr;
+    // ① 光晕：半径收紧、透明度降低，避免密集节点叠成一片光斑
+    c.save();
+    c.globalCompositeOperation='lighter';
+    for(i=0;i<NODES.length;i++){
+      n = NODES[i]; pt = this.pts[i];
+      if(!pt) continue;
+      if(pt.x<-30||pt.y<-30||pt.x>this.w+30||pt.y>this.h+30) continue;
+      var col = nodeColor(n);
+      spr = this.spriteFor(col);
+      var pulse = 0.5+0.5*Math.sin(t*1.5*n.tw + n.phase);
+      var rad = (n.online?2.6:1.5) + pulse*0.5 + (n.level===2?1.2:0);
+      var a = n.online ? (0.26+0.18*pulse) : 0.16;
+      if(n.level===2) a += 0.16;
+      c.globalAlpha = a;
+      c.drawImage(spr, pt.x-rad*2.0, pt.y-rad*2.0, rad*4.0, rad*4.0);
+    }
+    c.globalCompositeOperation='source-over';
+    // ② 涟漪：更细更淡，只做呼吸点缀（lite 模式直接省略）
+    var lite = document.body.classList.contains('lite');
+    c.lineWidth = 1;
+    for(i=0;i<NODES.length;i++){
+      if(lite && (i%2)) continue;
+      n = NODES[i]; pt = this.pts[i];
+      if(!pt || !n.online) continue;
+      if(pt.x<-30||pt.y<-30||pt.x>this.w+30||pt.y>this.h+30) continue;
+      var per = 3.4 + n.tw*1.9 + (n.level===2?1.2:0);
+      var ph = ((t/per) + n.phase) % 1;
+      if(ph>0.62) continue;
+      var rr = 2.2 + ph*11.0*(n.level===2?1.35:1);
+      c.globalAlpha = Math.pow(1-ph/0.62,2)*(n.level===2?0.4:0.2);
+      c.strokeStyle = nodeColor(n);
+      c.beginPath(); c.arc(pt.x, pt.y, rr, 0, 6.28318); c.stroke();
+    }
+    // ③ 节点本体：直接贴静态层（深色分离圈 + 实心亮核），逐帧零绘制成本
+    if(this.nl) c.drawImage(this.nl, 0, 0, this.w, this.h);
+    // ④ 告警节点外环
+    for(i=0;i<NODES.length;i++){
+      n = NODES[i]; pt = this.pts[i];
+      if(!pt || n.level<2) continue;
+      var pp = 0.5+0.5*Math.sin(t*3.4+n.phase);
+      c.globalAlpha = 0.4+0.5*pp;
+      c.strokeStyle = THEME.lv.crit;
+      c.lineWidth = 1.2;
+      c.beginPath(); c.arc(pt.x, pt.y, 6.2+pp*2.4, 0, 6.28318); c.stroke();
+    }
+    // ⑤ 主控中心
+    if(this.hubPt){
+      var hp = this.hubPt;
+      var hpulse = 0.5+0.5*Math.sin(t*1.9);
+      c.globalCompositeOperation='lighter';
+      c.globalAlpha=0.62;
+      c.drawImage(this.spriteFor(THEME.base.cyan), hp.x-30, hp.y-30, 60, 60);
+      c.globalCompositeOperation='source-over';
+      c.globalAlpha=1; c.lineWidth=1.5; c.strokeStyle=THEME.base.cyan;
+      c.beginPath();
+      var ang = t*0.9;
+      for(var k2=0;k2<4;k2++){
+        var a2 = ang + k2*Math.PI/2, r1 = 8.5, r2 = 15;
+        c.moveTo(hp.x+Math.cos(a2)*r1, hp.y+Math.sin(a2)*r1);
+        c.lineTo(hp.x+Math.cos(a2)*r2, hp.y+Math.sin(a2)*r2);
+      }
+      c.stroke();
+      c.beginPath(); c.arc(hp.x,hp.y,5.6,0,6.28318);
+      c.fillStyle='rgba(3,9,18,0.8)'; c.fill();
+      c.beginPath(); c.arc(hp.x,hp.y,4.0,0,6.28318);
+      c.fillStyle='#ffffff'; c.fill();
+      c.globalAlpha=0.7; c.strokeStyle=THEME.base.cyan; c.lineWidth=1;
+      c.beginPath(); c.arc(hp.x,hp.y,8+hpulse*3,0,6.28318); c.stroke();
+      c.font='600 11px Inter, "PingFang SC", sans-serif';
+      c.textAlign='left'; c.textBaseline='middle';
+      var htxt = 'CONTROL CENTER · 武汉';
+      var htw = c.measureText(htxt).width;
+      // 标签放在中心点正下方居中，避开上方城市名与右侧节点名
+      var bx = clamp(hp.x - htw/2, 12, this.w - htw - 12);
+      var by = hp.y + 27;
+      c.globalAlpha = 1;
+      c.fillStyle = 'rgba(3,10,22,0.92)';
+      this.roundRect(c, bx-8, by-10, htw+16, 20, 6);
+      c.fill();
+      c.strokeStyle=THEME.base.cyan; c.globalAlpha=0.6; c.lineWidth=1; c.stroke();
+      c.globalAlpha=1;
+      c.fillStyle=THEME.label.city;
+      c.fillText(htxt, bx, by+0.5);
+      this.hubLabelRect = { x0:bx-10, y0:by-12, x1:bx+htw+10, y1:by+12 };
+    }
+    // ⑥ 悬停高亮：十字准星 + 双环 + 名称，让"鼠标指到哪个点"一目了然
+    if(this.hover!=null && this.pts[this.hover]){
+      var hq2 = this.pts[this.hover], hn = NODES[this.hover];
+      var hpl = 0.5+0.5*Math.sin(t*4);
+      c.globalAlpha=1; c.lineWidth=1.5; c.strokeStyle=THEME.base.cyan;
+      c.beginPath(); c.arc(hq2.x,hq2.y,9.5,0,6.28318); c.stroke();
+      c.globalAlpha=0.45; c.lineWidth=1;
+      c.beginPath(); c.arc(hq2.x,hq2.y,14+hpl*2.5,0,6.28318); c.stroke();
+      c.globalAlpha=0.5; c.beginPath();
+      c.moveTo(hq2.x-26,hq2.y); c.lineTo(hq2.x-13,hq2.y);
+      c.moveTo(hq2.x+13,hq2.y); c.lineTo(hq2.x+26,hq2.y);
+      c.moveTo(hq2.x,hq2.y-26); c.lineTo(hq2.x,hq2.y-13);
+      c.moveTo(hq2.x,hq2.y+13); c.lineTo(hq2.x,hq2.y+26);
+      c.stroke();
+      c.globalAlpha=1;
+      this.text(c, hn.name, hq2.x+18, hq2.y+22, '#ffffff', 'rgba(2,7,15,0.95)', 'left', 11.5, 700);
+    }
+    // 声呐
+    var sonar = (t%3.6)/3.6;
+    if(this.hubPt && sonar<0.85){
+      c.globalAlpha = (1-sonar)*0.22;
+      c.strokeStyle=THEME.fx.sonar;
+      c.lineWidth=1.2;
+      c.beginPath(); c.arc(this.hubPt.x,this.hubPt.y, sonar*Math.max(this.w,this.h)*0.42, 0, 6.28318); c.stroke();
+    }
+    c.restore();
+  },
+  drawSweep:function(c,t){
+    var y = ((t*0.085)%1.3-0.12)*this.h;
+    if(!this.sweepGrad){
+      var g = c.createLinearGradient(0,-110,0,110);
+      g.addColorStop(0,'rgba(255,255,255,0)');
+      g.addColorStop(0.5,THEME.fx.sweep1);
+      g.addColorStop(1,'rgba(255,255,255,0)');
+      this.sweepGrad = g;
+    }
+    c.save();
+    c.globalCompositeOperation='lighter';
+    c.translate(0,y);
+    c.fillStyle=this.sweepGrad; c.fillRect(0,-110,this.w,220);
+    c.fillStyle=THEME.fx.sweep2; c.fillRect(0,-0.5,this.w,1);
+    c.restore();
+  },
+  // 描边文字：先描深色轮廓再填充，保证任何背景上都清晰可读
+  text:function(c,str,x,y,fill,stroke,align,size,weight){
+    c.textAlign = align||'left';
+    c.font = (weight||600)+' '+(size||11)+'px Inter, "PingFang SC", sans-serif';
+    c.lineJoin = 'round';
+    c.lineWidth = 3;
+    c.strokeStyle = stroke||THEME.label.stroke;
+    c.strokeText(str,x,y);
+    c.fillStyle = fill;
+    c.fillText(str,x,y);
+  },
+  drawLabels:function(c,t){
+    var i;
+    c.save();
+    c.textBaseline='middle';
+    // 城市名（节点数 Top10）：单行、贴同一侧、带简单避让，避免密集区文字打架
+    var placed = [];
+    if(this.hubLabelRect) placed.push(this.hubLabelRect);
+    for(i=0;i<this.cities.length;i++){
+      var ct = this.cities[i];
+      if(!ct.pt) continue;
+      if(ct.pt.x<12||ct.pt.y<20||ct.pt.y>this.h-12) continue;
+      var lbl = ct.city.replace('市','') + ' · ' + ct.n;
+      c.font = '700 11.5px Inter, "PingFang SC", sans-serif';
+      var lw = c.measureText(lbl).width;
+      var right = (ct.pt.x - 14 - lw > 10);
+      var bx0 = right ? (ct.pt.x - 14 - lw) : (ct.pt.x + 14);
+      var by0 = ct.pt.y - 21;
+      var box = { x0:bx0-3, y0:by0-2, x1:bx0+lw+3, y1:by0+16 };
+      var clash = false;
+      for(var q=0;q<placed.length;q++){
+        var p0 = placed[q];
+        if(!(box.x1 < p0.x0 || box.x0 > p0.x1 || box.y1 < p0.y0 || box.y0 > p0.y1)){ clash = true; break; }
+      }
+      if(clash) continue;
+      placed.push(box);
+      c.globalAlpha=0.95;
+      this.text(c, lbl, right ? (ct.pt.x-14) : (ct.pt.x+14), ct.pt.y-14, THEME.label.city, THEME.label.stroke, right?'right':'left', 11.5, 700);
+    }
+    // 聚焦节点名（每 2.6s 轮换）
+    if(t-this.focusT>2.6){
+      this.focusT = t;
+      var pool = NODES.filter(function(n){ return n.online && n.level>=1; });
+      if(pool.length<6) pool = NODES.filter(function(n){ return n.online; });
+      for(var k=pool.length-1;k>0;k--){ var j=(Math.random()*(k+1))|0; var tmp=pool[k]; pool[k]=pool[j]; pool[j]=tmp; }
+      this.focus = pool.slice(0,7);
+    }
+    for(i=0;i<this.focus.length;i++){
+      var n = this.focus[i];
+      var pt = this.pts[n.id];
+      if(!pt) continue;
+      if(pt.x<12||pt.y<14||pt.x>this.w-150||pt.y>this.h-12) continue;
+      var a = 0.78+0.22*Math.sin(t*1.6+n.phase);
+      c.globalAlpha = a;
+      this.text(c, n.name.replace('.your-service.','·').replace('.cn','').replace('.top',''),
+                pt.x+9, pt.y-7, nodeColor(n), THEME.label.stroke, 'left', 11, 600);
+      this.text(c, n.ms.toFixed(1)+' ms', pt.x+9, pt.y+7, THEME.label.node, THEME.label.stroke, 'left', 10.5, 600);
+    }
+    c.restore();
+  },
+  hitTest:function(mx,my){
+    var best=-1, bd=1e9;
+    for(var i=0;i<this.pts.length;i++){
+      var p = this.pts[i]; if(!p) continue;
+      var dx=p.x-mx, dy=p.y-my, d=dx*dx+dy*dy;
+      if(d<bd){ bd=d; best=i; }
+    }
+    return bd<420 ? best : -1;
+  }
+};
+
+var LINK_COUNT = 0;
+var HOVER = { x:0, y:0, has:false, active:false, idx:-1, w:186, h:126, tx:-1, ty:-1 };
+
+/* ---------- 底图档位：高德 ---------- */
+function loadScript(src, timeout){
+  return new Promise(function(res,rej){
+    var s = document.createElement('script');
+    s.src = src; s.async = true;
+    var to = setTimeout(function(){ cleanup(); rej(new Error('timeout')); }, timeout||7000);
+    function cleanup(){ clearTimeout(to); s.onload=null; s.onerror=null; }
+    s.onload = function(){ cleanup(); res(src); };
+    s.onerror = function(){ cleanup(); rej(new Error('error')); };
+    document.head.appendChild(s);
+  });
+}
+function loadFirst(urls, check, timeout){
+  var i = 0;
+  function next(){
+    if(check()) return Promise.resolve(true);
+    if(i>=urls.length) return Promise.resolve(check());
+    var u = urls[i++];
+    return loadScript(u, timeout).then(function(){ return check()?true:next(); }, function(){ return next(); });
+  }
+  return next();
+}
+function setTier(tier, label){
+  var badge = $('#tierBadge');
+  badge.className = 'tier ' + tier;
+  badge.querySelector('b').textContent = label;
+}
+function activateBase(projector, tier, label){
+  var base = $('#mapBase');
+  base.classList.add('on');
+  FX.setOutlineTarget(0);
+  FX.setProjector(projector, tier);
+  setTier(tier, label);
+}
+function setupAMap(){
+  var url = 'https://webapi.amap.com/maps?v=2.0&key='+CFG.AMAP_KEY;
+  return loadFirst([url], function(){ return !!window.AMap; }, 6000).then(function(ok){
+    if(!ok || !window.AMap) return false;
+    return new Promise(function(resolve){
+      var done = false;
+      var to = setTimeout(function(){ if(!done){ done=true; resolve(false); } }, CFG.AMAP_WAIT);
+      try{
+        var host = $('#mapBase');
+        var map = new AMap.Map(host, {
+          zoom: 4, center: [104.5, 35.5], mapStyle: 'amap://styles/darkblue',
+          viewMode: '2D', resizeEnable: true, zooms: [3,10], showLabel: true,
+          features: ['bg','road','building','point']
+        });
+        map.on('complete', function(){
+          if(done) return;
+          try{
+            map.setStatus({ dragEnable:false, zoomEnable:false, rotateEnable:false,
+              doubleClickZoom:false, keyboardEnable:false, scrollWheel:false, touchZoom:false });
+            fitAMap(map);
+            var bj = map.lngLatToContainer(new AMap.LngLat(116.4,39.9));
+            var hz = map.lngLatToContainer(new AMap.LngLat(120.15,30.27));
+            var ur = map.lngLatToContainer(new AMap.LngLat(87.6,43.8));
+            if(!bj||!hz||!ur){ done=true; clearTimeout(to); return resolve(false); }
+            if(!(hz.x>bj.x && hz.y>bj.y && ur.x<bj.x)){ done=true; clearTimeout(to); return resolve(false); }
+            done = true; clearTimeout(to);
+            AMAP_MAP = map;
+            resolve({
+              project: function(lng,lat){
+                var p = map.lngLatToContainer(new AMap.LngLat(lng,lat));
+                return p ? { x:p.x, y:p.y } : null;
+              }
+            });
+          }catch(e){ done=true; clearTimeout(to); resolve(false); }
+        });
+        map.on('error', function(){ if(!done){ done=true; clearTimeout(to); resolve(false); } });
+      }catch(e){ done=true; clearTimeout(to); resolve(false); }
+    });
+  });
+}
+var AMAP_MAP = null;
+function fitAMap(map){
+  try{
+    map.setBounds(new AMap.Bounds(new AMap.LngLat(BOUNDS.minLng, BOUNDS.minLat),
+                                 new AMap.LngLat(BOUNDS.maxLng, BOUNDS.maxLat)), true, 0);
+  }catch(e){}
+}
+
+/* ---------- 底图档位：ECharts 中国地图 ---------- */
+function setupECharts(){
+  return loadFirst(CFG.ECHARTS_CDN, function(){ return !!window.echarts; }, 8000).then(function(ok){
+    if(!ok || !window.echarts) return false;
+    function tryGeo(i){
+      if(i>=CFG.GEO_CDN.length) return Promise.resolve(false);
+      return fetch(CFG.GEO_CDN[i]).then(function(r){
+        if(!r.ok) throw new Error('bad');
+        return r.json();
+      }).then(function(geo){
+        if(!geo || !(geo.features||geo.geometries)) throw new Error('bad geo');
+        // 剔除南海诸岛等超远要素，避免把主图顶到画面上方、底部留白
+        if(geo.features && geo.features.length){
+          geo.features = geo.features.filter(function(f){
+            var nm = (f.properties && (f.properties.name || f.properties.NAME || '')) || '';
+            return nm.indexOf('南海') < 0 && nm.indexOf('南沙') < 0 && nm.indexOf('曾母') < 0;
+          });
+        }
+        window.echarts.registerMap('china-rt', geo);
+        var chart = window.echarts.init($('#mapBase'), null, { renderer:'canvas' });
+        var opt = {
+          backgroundColor: 'transparent',
+          animation: true,
+          geo: {
+            map: 'china-rt', roam: false, silent: true,
+            left: '2%', right: '2%', top: '3%', bottom: '3%', zoom: 1.0,
+            itemStyle: {
+              areaColor: THEME.echarts.area,
+              borderColor: THEME.echarts.border,
+              borderWidth: 0.95,
+              shadowColor: THEME.echarts.glow,
+              shadowBlur: 8, shadowOffsetY: 4
+            },
+            emphasis: { disabled:true, itemStyle:{ areaColor:THEME.echarts.area } },
+            label: { show: true, color:THEME.echarts.label, fontSize: 9.6 },
+            regions: [ { name:'南海诸岛', itemStyle:{ opacity:0 }, label:{ show:false } } ]
+          }
+        };
+        try{ opt.geo.boundingCoords = [[73.4,53.8],[135.4,17.9]]; }catch(e2){}
+        chart.setOption(opt);
+        var test = chart.convertToPixel({ geoIndex: 0 }, [116.4, 39.9]);
+        if(!test || !isFinite(test[0])){ chart.dispose(); throw new Error('proj'); }
+        ECHART = chart;
+        return {
+          project: function(lng,lat){
+            var q = chart.convertToPixel({ geoIndex: 0 }, [lng,lat]);
+            return (q && isFinite(q[0])) ? { x:q[0], y:q[1] } : null;
+          }
+        };
+      }).catch(function(){ return tryGeo(i+1); });
+    }
+    return tryGeo(0);
+  });
+}
+var ECHART = null;
+
+function bootBasemap(){
+  // 立即启用内置引擎（保证任何网络状况下 0 秒起就有画面）
+  FX.setProjector(fitProjector(FX.w, FX.h, 34), 'builtin');
+  FX.setOutlineTarget(1);
+  setTier('builtin','内置矢量引擎');
+  var upgraded = false, vectorTried = false, amapTried = false;
+
+  function backToBuiltin(){
+    upgraded = false;
+    var host = $('#mapBase');
+    host.classList.remove('on');
+    host.innerHTML = '';
+    AMAP_MAP = null; ECHART = null;
+    FX.setProjector(fitProjector(FX.w, FX.h, 34), 'builtin');
+    FX.setOutlineTarget(1);
+    setTier('builtin','内置矢量引擎');
+  }
+
+  // 档位 1：ECharts 中国地图（矢量、稳定、不依赖 Key）
+  function tryVector(){
+    if(vectorTried || upgraded) return;
+    vectorTried = true;
+    setupECharts().then(function(res){
+      if(upgraded) return;
+      if(!res){ tryAmap(); return; }
+      upgraded = true;
+      activateBase(res.project, 'vec', '矢量地图 · ECharts');
+    });
+  }
+
+  // 档位 2：高德 JS API（瓦片底图）
+  function tryAmap(){
+    if(amapTried || upgraded) return;
+    amapTried = true;
+    setupAMap().then(function(res){
+      if(upgraded) return;
+      if(!res) return;                       // 全部失败 → 保持内置引擎
+      upgraded = true;
+      activateBase(res.project, 'amap', '高德地图 · AMap');
+      setTimeout(function(){ if(AMAP_MAP) fitAMap(AMAP_MAP); FX.build(); }, 320);
+      // 兜底校验：若高德没有真正画出任何图层/瓦片，则回滚到内置引擎，避免空白底图
+      setTimeout(function(){
+        if(FX.tier!=='amap') return;
+        var host = $('#mapBase');
+        var hasDom = !!host.querySelector('.amap-container');
+        var hasDraw = !!host.querySelector('canvas, img');
+        if(!hasDom || !hasDraw) backToBuiltin();
+      }, 2400);
+    });
+  }
+
+  // 稍微让内置底图先完成首帧，再无缝升级
+  setTimeout(tryVector, 240);
+}
+
+/* =====================================================================
+   HUD 迷你走势图
+   ===================================================================== */
+var Spark = {
+  cv:null, ctx:null, w:430, h:58, dpr:1, disp:[],
+  init:function(){
+    this.cv = $('#hudSpark');
+    this.ctx = this.cv.getContext('2d');
+    this.dpr = Math.min(2, window.devicePixelRatio||1);
+    this.resize();
+  },
+  resize:function(){
+    var r = this.cv.getBoundingClientRect();
+    this.w = Math.max(120, r.width); this.h = Math.max(30, r.height);
+    this.cv.width = Math.round(this.w*this.dpr);
+    this.cv.height = Math.round(this.h*this.dpr);
+  },
+  draw:function(dt){
+    var c = this.ctx; if(!c) return;
+    c.setTransform(this.dpr,0,0,this.dpr,0,0);
+    c.clearRect(0,0,this.w,this.h);
+    var src = AGG.avgHist;
+    if(!src.length) return;
+    while(this.disp.length < src.length) this.disp.push(src[0]);
+    while(this.disp.length > src.length) this.disp.shift();
+    var k = Math.min(1, dt/240);
+    for(var i=0;i<src.length;i++) this.disp[i] += (src[i]-this.disp[i])*k;
+
+    var n = this.disp.length, min=1e9, max=-1e9;
+    for(i=0;i<n;i++){ if(this.disp[i]<min) min=this.disp[i]; if(this.disp[i]>max) max=this.disp[i]; }
+    if(max-min<3){ var m=(max+min)/2; min=m-1.6; max=m+1.6; }
+    var pad = 8, H = this.h-pad*2;
+    function X(i){ return n<2?0:(i/(n-1))*this.w; }
+    function Y(v){ return pad + (1-(v-min)/(max-min))*H; }
+    var self = this;
+    // 网格
+    c.strokeStyle=THEME.css.fill; c.lineWidth=1;
+    for(i=1;i<3;i++){
+      var yy = pad + H*i/3;
+      c.beginPath(); c.moveTo(0,yy); c.lineTo(this.w,yy); c.stroke();
+    }
+    // 面积
+    var grd = c.createLinearGradient(0,0,0,this.h);
+    grd.addColorStop(0, rgba(hex2rgb(THEME.base.cyan), 0.30));
+    grd.addColorStop(1, rgba(hex2rgb(THEME.base.cyan), 0));
+    c.beginPath();
+    c.moveTo(0, this.h);
+    for(i=0;i<n;i++) c.lineTo(X.call(this,i), Y.call(this,this.disp[i]));
+    c.lineTo(this.w, this.h);
+    c.closePath(); c.fillStyle=grd; c.fill();
+    // 线
+    c.beginPath();
+    for(i=0;i<n;i++){
+      var px = X.call(this,i), py = Y.call(this,this.disp[i]);
+      if(i===0) c.moveTo(px,py); else c.lineTo(px,py);
+    }
+    c.strokeStyle = rgba(hex2rgb(THEME.base.cyan), 0.95);
+    c.lineWidth=1.6; c.lineJoin='round';
+    c.shadowColor=rgba(hex2rgb(THEME.base.cyan), 0.65); c.shadowBlur=5;
+    c.stroke();
+    c.shadowBlur=0;
+    // 头部光点
+    var lx = X.call(this,n-1), ly = Y.call(this,this.disp[n-1]);
+    var pulse = 0.5+0.5*Math.sin(performance.now()/260);
+    c.beginPath(); c.arc(lx,ly, 2.2+pulse*1.2, 0, 6.28318);
+    c.fillStyle='#ffffff'; c.fill();
+    c.globalAlpha=0.5; c.strokeStyle=rgba(hex2rgb(THEME.base.cyan), 0.9); c.lineWidth=1;
+    c.beginPath(); c.arc(lx,ly, 6+pulse*4, 0, 6.28318); c.stroke();
+    c.globalAlpha=1;
+    // 极值标注
+    c.font='500 10px Inter, monospace';
+    c.fillStyle = THEME.css['txt-mute'];
+    c.textAlign='left';
+    c.fillText(max.toFixed(1), 2, 10);
+    c.fillText(min.toFixed(1), 2, this.h-3);
+  }
+};
+
+/* =====================================================================
+   时钟 / FPS
+   ===================================================================== */
+var WEEK = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];
+var lastSec = -1;
+function clockTick(){
+  var d = new Date();
+  if(d.getSeconds()===lastSec) return;
+  lastSec = d.getSeconds();
+  $('#clockT').innerHTML = pad2(d.getHours())+':'+pad2(d.getMinutes())+'<span>:</span>'+pad2(d.getSeconds());
+  $('#clockD').textContent = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'  '+WEEK[d.getDay()];
+}
+var Fps = { frames:0, t0:performance.now(), val:60, low:0 };
+function fpsTick(){
+  var now = performance.now();
+  Fps.frames++;
+  var span = now-Fps.t0;
+  if(span>=500){
+    // 切回前台/系统卡顿时 span 会异常大，此时的采样不作数（避免误判降级）
+    if(span < 1600){
+      Fps.val = Math.round(Fps.frames*1000/span);
+      var el = $('#fpsVal');
+      el.textContent = Fps.val;
+      el.className = Fps.val<48?'warn':'';
+      // 连续两拍低于 50fps 就自动降级特效，保证不卡
+      if(Fps.val<50){ Fps.low++; if(Fps.low>=2) document.body.classList.add('lite'); }
+      else if(Fps.val>55){ Fps.low=0; }
+    }
+    Fps.frames=0; Fps.t0=now;
+  }
+}
+
+/* =====================================================================
+   后端对接：数据 / 配置 / 告警（公开模式与后台预览模式）
+   ===================================================================== */
+var LIVE = { on:false, at:0, ok:0, fail:0, hit:0 };
+function chipSrc(txt){ var e=$('#chipSrc'); if(e) e.textContent = txt; }
+function topWin(){ try{ return window.top || window; }catch(e){ return window; } }
+function readToken(){
+  var t = null;
+  try{ t = localStorage.getItem('token'); }catch(e){}
+  if(!t){ try{ t = topWin().localStorage.getItem('token'); }catch(e){} }
+  return t;
+}
+function apiFetch(path){
+  var h = {}, t = readToken();
+  if(t) h['Authorization'] = 'Bearer ' + t;
+  return fetch(path + (path.indexOf('?')<0?'?':'&') + '_=' + Date.now(),
+               { cache:'no-store', credentials:'same-origin', headers:h });
+}
+var THEME_BY_COLOR = { blue:'cyan', green:'matrix', purple:'magenta', red:'crimson', orange:'amber' };
+var CFG_APPLIED = false;
+function applyScreenConfig(sc){
+  if(!sc || CFG_APPLIED) return;
+  CFG_APPLIED = true;
+  if(sc.brand_name){
+    var bt = $('#brandTitle');
+    if(bt) bt.textContent = String(sc.brand_name).toUpperCase() + ' 节点实时监控中心';
+  }
+  if(typeof sc.refresh_interval === 'number' && sc.refresh_interval > 0){
+    CFG.TICK = Math.max(1000, sc.refresh_interval * 1000);
+    var ot = $('#ovTick');
+    if(ot) ot.textContent = (CFG.TICK % 1000 === 0 ? (CFG.TICK/1000) : (CFG.TICK/1000).toFixed(1)) + 's';
+  }
+  if(typeof sc.show_flow_lines === 'boolean') CFG.SHOW_FLOW_LINES = sc.show_flow_lines;
+  if(typeof sc.particle_count === 'number' && sc.particle_count >= 0){
+    CFG.STAR_COUNT = sc.particle_count; Stars.build();
+  }
+  if(sc.theme_color){
+    var want = THEME_BY_COLOR[sc.theme_color];
+    var userPicked = false;
+    try{ userPicked = !!localStorage.getItem('ping-theme'); }catch(e){}
+    if(want && !userPicked) applyTheme(want, true);
+  }
+}
+
+/* ---------- 真实告警记录（/api/public/alerts 或 /api/alerts） ---------- */
+var REAL_ALERT_SEEN = 0, REAL_ALERTS_LOADED = false;
+function alertFacts(a){
+  var type = a.alert_type || '';
+  var txt = String(a.message || '')
+    .replace(/\[(.*?)\]\((.*?)\)/g,'$1')
+    .replace(/<br\s*\/?>/gi,'\n')
+    .replace(/<\/(p|div|h\d)>/gi,'\n')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/\r/g,'');
+  var lines = txt.split('\n').map(function(l){
+    return l.replace(/[#>*`|_]+/g,' ').replace(/\s+/g,' ').trim();
+  }).filter(Boolean);
+  function pick(label){
+    for(var i=0;i<lines.length;i++){
+      if(lines[i].replace(/\s+/g,'').indexOf(label)===0){
+        return lines[i].split(/[：:]/).slice(1).join(':').replace(/\s+/g,' ').trim();
+      }
+    }
+    return '';
+  }
+  var loss = pick('丢包率'), rtt = pick('平均延迟'), lvl = pick('告警级别');
+  var tone = (type==='recovery'||type==='info') ? 'ok' : (type==='packet_loss' ? 'warn' : 'crit');
+  var title = (type==='recovery') ? ('节点已恢复' + (rtt?(' · '+rtt):''))
+            : (type==='packet_loss') ? ('丢包告警' + (loss?(' · 丢包 '+loss):''))
+            : ((lvl || '异常提醒') + (rtt?(' · '+rtt):''));
+  var sub = (a.host_name || '系统状态') + (loss?(' · 丢包 '+loss):'') + (rtt?(' · 延迟 '+rtt):'');
+  return { lv:tone, t:title, s:sub };
+}
+function syncRealAlerts(){
+  var path = CFG.PREVIEW
+    ? CFG.API_ALERTS_PREVIEW + '?hours=24&page=1&page_size=' + CFG.MAX_ALERT_FETCH
+    : CFG.API_ALERTS + '?hours=24&limit=' + CFG.MAX_ALERT_FETCH;
+  return apiFetch(path)
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(d){
+      var items = d.items || [];
+      if(!items.length) return;
+      var arr = items.slice().sort(function(x,y){
+        return new Date(x.created_at) - new Date(y.created_at);
+      });
+      if(!REAL_ALERTS_LOADED){
+        REAL_ALERTS_LOADED = true;
+        pendingAlerts.length = 0;
+        var lst = $('#alertList'); if(lst) lst.innerHTML = '';
+      }
+      for(var i=0;i<arr.length;i++){
+        var a = arr[i], aid = a.id || 0;
+        if(aid && aid <= REAL_ALERT_SEEN) continue;
+        if(aid) REAL_ALERT_SEEN = aid;
+        var f = alertFacts(a);
+        pendingAlerts.push({ id:++alertSeq, lv:f.lv, t:f.t, s:f.s,
+          ts: new Date(a.created_at).getTime() || Date.now(),
+          name:a.host_name, city:'' });
+      }
+      renderAlerts(CFG.MAX_ALERT_FETCH);
+    })
+    .catch(function(){});
+}
+
+/* ---------- 节点状态（/api/public/datascreen 或 /api/datascreen/preview） ---------- */
+function syncReal(){
+  if(!CFG.LIVE) return;
+  apiFetch(CFG.PREVIEW ? CFG.API_PREVIEW : CFG.API)
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(d){
+      applyScreenConfig(d.screen_config);
+      if(d.control_center && d.control_center.city){
+        var hub = $('#chipHub');
+        if(hub) hub.textContent = String(d.control_center.city).replace(/市$/,'');
+      }
+      var hs = d.host_status || [], map = {}, i, h, n;
+      for(i=0;i<hs.length;i++) map[hs[i].name] = hs[i];
+      var hit = 0;
+      for(i=0;i<NODES.length;i++){
+        n = NODES[i];
+        if(!n.real) continue;
+        h = map[n.name];
+        if(!h) continue;
+        hit++;
+        var first = !n.live, wasOn = n.online;
+        var rtt = (typeof h.avg_rtt === 'number') ? h.avg_rtt : n.base;
+        n.live = true;
+        if(rtt>0) n.base = rtt;
+        if(first) n.ms = h.is_online ? (rtt>0?rtt:n.base) : 0;
+        n.online = !!h.is_online;
+        n.loss = (typeof h.packet_loss === 'number') ? h.packet_loss : 0;
+        n.level = levelOf(n);
+        if(!first && wasOn !== n.online){
+          if(n.online){
+            pendingAlerts.push({ id:++alertSeq, lv:'ok',
+              t:'节点已恢复 · '+(rtt>0?rtt.toFixed(1):'--')+'ms',
+              s:n.name+' · '+n.city+' · 链路重新可用', ts:Date.now(), name:n.name, city:n.city });
+          } else {
+            pendingAlerts.push({ id:++alertSeq, lv:'crit', t:'节点离线',
+              s:n.name+' · '+n.city+' · 无法建立探测连接', ts:Date.now(), name:n.name, city:n.city });
+          }
+        }
+      }
+      LIVE.on = true; LIVE.at = Date.now(); LIVE.ok++; LIVE.hit = hit;
+      chipSrc((CFG.PREVIEW ? '预览模式' : '实时 API') + ' · ' + timeStr(LIVE.at));
+    })
+    .catch(function(){
+      LIVE.on = false; LIVE.fail++;
+      var t = readToken();
+      chipSrc(t ? '数据不可达 · 请重新登录' : '数据不可达 · 公开访问已关闭');
+    });
+}
+
+/* ---------- 顶栏：全屏 / 管理后台 ---------- */
+function initHeaderButtons(){
+  var fsBtn = $('#btnFullscreen'), adBtn = $('#btnAdmin'), fsTxt = $('#btnFullscreenTxt');
+  function doc(){ return topWin().document; }
+  function fsEl(){ var d = doc(); return d.fullscreenElement || d.webkitFullscreenElement; }
+  function syncTxt(){ if(fsTxt) fsTxt.textContent = fsEl() ? '退出全屏' : '全屏'; }
+  if(fsBtn) fsBtn.addEventListener('click', function(){
+    try{
+      var d = doc(), el = d.documentElement;
+      if(fsEl()){
+        var ex = d.exitFullscreen || d.webkitExitFullscreen;
+        if(ex) ex.call(d);
+      } else {
+        var rq = el.requestFullscreen || el.webkitRequestFullscreen;
+        if(rq) rq.call(el);
+      }
+    }catch(e){}
+    setTimeout(syncTxt, 300);
+  });
+  if(adBtn) adBtn.addEventListener('click', function(){
+    try{ topWin().location.href = '/admin'; }catch(e){ location.href = '/admin'; }
+  });
+  try{
+    var d = doc();
+    ['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){ d.addEventListener(ev, syncTxt); });
+  }catch(e){}
+  syncTxt();
+}
+
+/* =====================================================================
+   巡检节拍
+   ===================================================================== */
+function tickRound(){
+  AGG.prevAvg = AGG.avg;
+  AGG.round++;
+  var wasOnline = {}, i;
+  for(i=0;i<NODES.length;i++) wasOnline[NODES[i].id] = NODES[i].online;
+  physics();
+  FX.buildNodeLayer();      // 节点颜色/状态变了，重画一次静态层
+  // 事件告警
+  for(i=0;i<NODES.length;i++){
+    var n = NODES[i];
+    if(n.recovered){ n.recovered=false; n.lastAlert=AGG.round;
+      pendingAlerts.push({ id:++alertSeq, lv:'ok', t:'节点已恢复 · '+n.ms.toFixed(1)+'ms',
+        s:n.name+' · '+n.city+' · 链路重新可用', ts:Date.now(), name:n.name, city:n.city }); continue; }
+    if(n.event==='offline' && wasOnline[n.id]){ n.event=null; n.lastAlert=AGG.round; pushAlert(n); continue; }
+    if(n.event==='spike' && n.spike>34 && AGG.round-n.lastAlert>4){ n.event=null; n.lastAlert=AGG.round; pushAlert(n); continue; }
+    n.event = null;
+    if(!n.real && AGG.round - n.lastAlert > 26 && n.level===2 && Math.random()<0.4){
+      n.lastAlert = AGG.round; pushAlert(n);
+    }
+  }
+  renderStats();
+  renderRegion();
+  renderRank();
+  renderAlerts();
+  refreshMarquee();
+}
+
+/* =====================================================================
+   启动
+   ===================================================================== */
+function addCorners(){
+  var panels = document.querySelectorAll('.panel, .map-panel');
+  for(var i=0;i<panels.length;i++){
+    ['tl','tr','bl','br'].forEach(function(c){
+      var s = document.createElement('span');
+      s.className = 'corner '+c;
+      panels[i].appendChild(s);
+    });
+  }
+}
+function buildGaugeTicks(){
+  var g = $('#gaugeTicks'), html='';
+  for(var i=0;i<=10;i++){
+    var a = Math.PI - (i/10)*Math.PI;
+    var cx = 60, cy = 68, r1 = 41, r2 = i%5===0?34:37;
+    var x1 = cx+Math.cos(a)*r1, y1 = cy-Math.sin(a)*r1;
+    var x2 = cx+Math.cos(a)*r2, y2 = cy-Math.sin(a)*r2;
+    html += '<line class="tick" x1="'+x1.toFixed(1)+'" y1="'+y1.toFixed(1)+'" x2="'+x2.toFixed(1)+'" y2="'+y2.toFixed(1)+'"/>';
+  }
+  g.innerHTML = html;
+}
+function warmup(rounds){
+  for(var i=0;i<rounds;i++){
+    physics();
+    for(var k=0;k<3;k++){
+      var n = NODES[(Math.random()*NODES.length)|0];
+      if(!n.real && n.online && n.level>=1 && Math.random()<0.5){
+        pendingAlerts.push({ id:++alertSeq, lv:n.level===2?'crit':'warn', t:alertText(n).t, s:alertText(n).s,
+          ts: Date.now()-(rounds-i)*9000 - k*1400, name:n.name, city:n.city });
+      }
+    }
+  }
+  var seen = {}, uniq = [];
+  for(var j=pendingAlerts.length-1;j>=0 && uniq.length<16;j--){
+    var a = pendingAlerts[j];
+    if(seen[a.s]) continue;
+    seen[a.s]=1; uniq.push(a);
+  }
+  pendingAlerts = uniq.reverse();
+  AGG.round = 0;
+  AGG.prevAvg = AGG.avg;
+}
+var REAL_COUNT = 0, SIM_COUNT = 0;
+
+function main(){
+  var real = hostData();
+  REAL_COUNT = real.length;
+  buildNodes();
+  SIM_COUNT = NODES.length - REAL_COUNT;
+
+  addCorners();
+  buildGaugeTicks();
+  initThemePicker();
+  applyTheme(savedTheme(), true);   // 先定主题，再建环形图/精灵图，避免二次重建
+  buildDonut();
+  highlightRegion(null, false);     // 初始化环形图中心副标题（实测 / 演示）
+  Stars.init();
+  Spark.init();
+  FX.init();
+  initMarquee();
+
+  warmup(46);
+  renderStats();
+  renderRegion();
+  renderRank();
+  renderAlerts(15);      // 首屏铺满告警列表
+  refreshMarquee();
+  clockTick();
+
+  bootBasemap();
+
+  // 顶栏按钮（全屏 / 管理后台）
+  initHeaderButtons();
+
+  // 真实数据：节点状态与巡检同频；告警记录每 5 轮拉一次
+  syncReal();
+  syncRealAlerts();
+  var liveRound = 0;
+  (function liveLoop(){
+    setTimeout(function(){
+      liveRound++;
+      syncReal();
+      if(liveRound % 5 === 0) syncRealAlerts();
+      liveLoop();
+    }, CFG.TICK);
+  })();
+
+  // 主循环
+  var last = performance.now();
+  var acc = 0, nextTick = CFG.TICK*0.55;
+  function frame(now){
+    var dt = clamp(now-last, 0, 60); last = now;
+    Stars.draw(dt);
+    FX.draw(dt);
+    Spark.draw(dt);
+    stepMarquee(dt);
+    stepTweens();
+    fpsTick();
+    clockTick();
+    if(window.__processHover) window.__processHover();
+    acc += dt;
+    if(acc>=nextTick){ acc = 0; nextTick = CFG.TICK + (Math.random()*260-130); tickRound(); }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // 首次巡检稍快，让画面立刻"活"起来
+  setTimeout(function(){ tickRound(); }, 700);
+
+  // 尺寸变化：保留当前底图档位的投影方式，仅用新的画布尺寸重建几何
+  var onResize = debounce(function(){
+    Stars.resize(); Stars.build();
+    Spark.resize();
+    var wasBuiltin = (FX.tier === 'builtin');
+    if(FX.tier === 'vec' && ECHART) ECHART.resize();
+    if(FX.tier === 'amap' && AMAP_MAP) fitAMap(AMAP_MAP);
+    FX.resize();
+    if(wasBuiltin) FX.setProjector(fitProjector(FX.w, FX.h, 34), 'builtin');
+    setTimeout(function(){
+      if(FX.tier === 'vec' && ECHART) ECHART.resize();
+      if(FX.tier === 'amap' && AMAP_MAP) fitAMap(AMAP_MAP);
+      FX.build();
+      measureMarquee();
+    }, 340);
+  }, 220);
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
+
+  // 地图悬停提示：mousemove 只记录坐标，真正的命中检测/写 DOM 放到主循环里，每帧最多一次
+  var panel = $('#mapPanel'), tip = $('#mapTip');
+  var tipName=$('#tipName'), tipMs=$('#tipMs'), tipLoss=$('#tipLoss'), tipLoc=$('#tipLoc'), tipIsp=$('#tipIsp');
+  panel.addEventListener('mousemove', function(e){
+    HOVER.x = e.clientX; HOVER.y = e.clientY; HOVER.has = true;
+  });
+  panel.addEventListener('mouseleave', function(){
+    HOVER.has = false;
+    if(HOVER.active){ tip.classList.remove('on'); FX.hover = null; HOVER.active = false; HOVER.idx = -1; }
+  });
+  window.__processHover = function(){
+    if(!HOVER.has) return;
+    HOVER.has = false;
+    var r = panel.getBoundingClientRect();
+    var mx = HOVER.x - r.left, my = HOVER.y - r.top;
+    var idx = FX.hitTest(mx,my);
+    if(idx<0){
+      if(HOVER.active){ tip.classList.remove('on'); FX.hover = null; HOVER.active = false; HOVER.idx = -1; }
+      return;
+    }
+    var n = NODES[idx];
+    FX.hover = idx;
+    if(!HOVER.active){ tip.classList.add('on'); HOVER.active = true; HOVER.idx = -1; }
+    if(HOVER.idx !== idx){                       // 换节点时才做布局测量（offsetWidth 会触发重排）
+      HOVER.idx = idx;
+      tipName.textContent = n.name;
+      tipLoc.textContent = (n.prov||'')+n.city;
+      tipIsp.textContent = n.isp||'—';
+      HOVER.w = tip.offsetWidth || 186;
+      HOVER.h = tip.offsetHeight || 126;
+    }
+    var msv = n.online ? n.ms.toFixed(1)+' ms' : '离线';
+    if(tipMs.__v !== msv){ tipMs.__v = msv; tipMs.textContent = msv; }
+    tipMs.style.color = n.online ? nodeColor(n) : '#93a4ba';
+    var lsv = n.online ? n.loss.toFixed(2)+' %' : '100 %';
+    if(tipLoss.__v !== lsv){ tipLoss.__v = lsv; tipLoss.textContent = lsv; }
+    // 贴边收拢，避免卡片被面板裁掉
+    var tx = clamp(mx, HOVER.w/2+8, Math.max(HOVER.w/2+8, r.width-HOVER.w/2-8));
+    var ty = clamp(my, HOVER.h+14, Math.max(HOVER.h+14, r.height-14));
+    if(tx !== HOVER.tx || ty !== HOVER.ty){
+      HOVER.tx = tx; HOVER.ty = ty;
+      tip.style.left = tx+'px';
+      tip.style.top = ty+'px';
+    }
+  };
+
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden){
+      last = performance.now();
+      Fps.frames = 0; Fps.t0 = performance.now();   // 重新计时，避免把后台停顿算成掉帧
+    }
+  });
+}
+
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', main);
+else main();
+
+})();
+</script>
+</body>
+</html>
