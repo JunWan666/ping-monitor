@@ -635,6 +635,11 @@ body.lite .pulse-ring{display:none}
   .map-tools button:hover,.map-tools button.on{color:var(--txt);border-color:var(--line-hi);background:rgba(12,26,44,.86)}
   .map-tools button svg{display:block}
 
+  /* 旋转合成时 backdrop-filter 成本很高，牺牲一点毛玻璃换流畅度 */
+  body[data-mv-rot="1"] .hud,
+  body[data-mv-rot="1"] .map-tools button{backdrop-filter:none;background:rgba(6,14,26,.86)}
+  body[data-mv-rot="1"] .map-tools button{background:rgba(8,16,28,.9)}
+
   /* 沉浸全屏：只留地图 */
   body.map-immersive .topbar,
   body.map-immersive .mobile-tabbar{display:none}
@@ -2129,8 +2134,9 @@ var FX = {
     var bw = panel.offsetWidth, bh = panel.offsetHeight;
     if(!bw || !bh){ var rr = panel.getBoundingClientRect(); bw = rr.width; bh = rr.height; }
     this.w = Math.max(10, bw); this.h = Math.max(10, bh);
-    // 地图光晕层用 1.5 倍足够清晰，比 2 倍少约 44% 的逐帧填充量
-    this.dpr = Math.min(1.5, window.devicePixelRatio||1);
+    // 地图光晕层用 1.5 倍足够清晰，比 2 倍少约 44% 的逐帧填充量；
+    // 竖屏地图是整块旋转合成的，再降一档避免手机掉帧
+    this.dpr = (document.body.getAttribute('data-mv-rot') === '1') ? 1 : Math.min(1.5, window.devicePixelRatio||1);
     this.cv.width = Math.round(this.w*this.dpr);
     this.cv.height = Math.round(this.h*this.dpr);
     this.cv.style.width = this.w+'px'; this.cv.style.height = this.h+'px';
@@ -2138,9 +2144,30 @@ var FX = {
     this.build();
     measureMarquee();
   },
+  proj:function(){
+    // 关键：底图由 ECharts / 高德渲染时，光点必须用它们的坐标变换定位。
+    // 否则底图 zoom 变化后光点留在原地——两套投影（fitProjector vs geo）不一致。
+    if(this.tier === 'vec' && ECHART){
+      return function(lon, lat){
+        var q = null;
+        try{ q = ECHART.convertToPixel({ geoIndex:0 }, [lon, lat]); }catch(e){ q = null; }
+        return (q && isFinite(q[0]) && isFinite(q[1])) ? { x:q[0], y:q[1] } : null;
+      };
+    }
+    if(this.tier === 'amap' && AMAP_MAP){
+      return function(lon, lat){
+        try{
+          var q = AMAP_MAP.lngLatToContainer(new window.AMap.LngLat(lon, lat));
+          var x = q.getX(), y = q.getY();
+          return (isFinite(x) && isFinite(y)) ? { x:x, y:y } : null;
+        }catch(e){ return null; }
+      };
+    }
+    return this.projector;
+  },
   build:function(){
     if(!this.projector) this.projector = fitProjector(this.w, this.h, 34);
-    var p = this.projector, i, n;
+    var p = this.proj(), i, n;
     // 节点投影
     this.pts = [];
     for(i=0;i<NODES.length;i++){
@@ -3049,27 +3076,24 @@ function touchDist(t){
   var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
   return Math.sqrt(dx*dx + dy*dy);
 }
-function syncNodePositions(){
-  // 底图缩放后，节点是按投影算的屏幕坐标，必须用 ECharts 的坐标变换重新对齐
-  if(!ECHART || FX.tier !== 'vec') return;
-  try{
-    for(var i=0;i<NODES.length;i++){
-      var n = NODES[i];
-      var px = ECHART.convertToPixel({ geoIndex:0 }, [n.lon, n.lat]);
-      if(px) FX.pts[n.id] = { x:px[0], y:px[1] };
-    }
-    this.__x = 0;
-    FX.buildNodeLayer();
-  }catch(e){}
+var zoomRaf = 0;
+function scheduleMapRebuild(){
+  if(zoomRaf) return;                        // 手势连续缩放时按帧合并，别每帧算两遍
+  zoomRaf = requestAnimationFrame(function(){
+    zoomRaf = 0;
+    try{ FX.build(); }catch(e){}             // 节点/城市/连线全部按底图新坐标系重算
+  });
 }
 function applyMapZoom(z){
   z = clamp(z, MAPZOOM.MIN, MAPZOOM.MAX);
   MAPZOOM.z = z;
   if(FX.tier === 'vec' && ECHART){
     try{ ECHART.setOption({ geo:{ zoom:z } }); }catch(e){}
-    syncNodePositions();
+    scheduleMapRebuild();
+    setTimeout(scheduleMapRebuild, 130);     // 兜底：ECharts 布局更新后再对齐一次
   } else if(FX.tier === 'amap' && AMAP_MAP){
     try{ AMAP_MAP.setZoom(Math.max(3, Math.min(12, 4 + (z-1)*3))); }catch(e){}
+    setTimeout(scheduleMapRebuild, 340);
   }
 }
 function initMapTools(){
@@ -3079,13 +3103,8 @@ function initMapTools(){
   if(zin) zin.addEventListener('click', function(){ applyMapZoom(MAPZOOM.z * 1.35); });
   if(zout) zout.addEventListener('click', function(){ applyMapZoom(MAPZOOM.z / 1.35); });
   if(zreset) zreset.addEventListener('click', function(){
-    MAPZOOM.z = 1;
-    if(FX.tier === 'vec' && ECHART){
-      try{ ECHART.setOption({ geo:{ zoom:1 } }); }catch(e){}
-      syncNodePositions();
-    } else if(FX.tier === 'amap' && AMAP_MAP){
-      try{ fitAMap(AMAP_MAP); }catch(e){}
-    }
+    if(FX.tier === 'amap' && AMAP_MAP){ try{ fitAMap(AMAP_MAP); }catch(e){} MAPZOOM.z = 1; setTimeout(scheduleMapRebuild, 340); return; }
+    applyMapZoom(1);
   });
 
   // 滚轮 / 双指缩放
@@ -3098,7 +3117,14 @@ function initMapTools(){
     }, { passive:false });
     var pinch = null;
     panel.addEventListener('touchstart', function(e){
-      if(e.touches.length === 2) pinch = { d: touchDist(e.touches), z: MAPZOOM.z };
+      if(e.touches.length === 2){
+        pinch = { d: touchDist(e.touches), z: MAPZOOM.z };
+      } else if(e.touches.length === 1){
+        // 手机上点节点：没有 mousemove，这里补一次 hover 采样让详情卡弹出来
+        HOVER.x = e.touches[0].clientX;
+        HOVER.y = e.touches[0].clientY;
+        HOVER.has = true;
+      }
     }, { passive:true });
     panel.addEventListener('touchmove', function(e){
       if(e.touches.length === 2 && pinch){
@@ -3456,6 +3482,11 @@ function main(){
     HOVER.has = false;
     var r = panel.getBoundingClientRect();
     var mx = HOVER.x - r.left, my = HOVER.y - r.top;
+    if(document.body.getAttribute('data-mv-rot') === '1'){
+      // 地图页 rotate(90deg)：布局(x,y) → 视觉(W-y, x)，这里反向换算回布局坐标
+      var W = panel.offsetWidth, tmpv = mx;
+      mx = my; my = W - tmpv;
+    }
     var idx = FX.hitTest(mx,my);
     if(idx<0){
       if(HOVER.active){ tip.classList.remove('on'); FX.hover = null; HOVER.active = false; HOVER.idx = -1; }
