@@ -2091,7 +2091,7 @@ function fitProjector(w,h,pad){
 var FX = {
   cv:null, ctx:null, w:0, h:0, dpr:1,
   projector:null, tier:'builtin', outlineAlpha:1,
-  pts:[], outlinePath:null, dotBuckets:[[],[],[],[]],
+  pts:[], outlinePath:null, dotBuckets:[[],[],[],[]], frozen:false,
   links:[], cities:[], hubPt:null, hub:CFG.HUB,
   sprites:{}, t:0, sweep:0, hover:null, focus:[], focusT:0,
 
@@ -3082,17 +3082,20 @@ function touchDist(t){
 }
 var PAN = { x:0, y:0 };
 function applyPan(px, py){
-  // 拖动过程中底图和节点层一起做 CSS 平移：合成器同一帧生效，
-  // 不会出现「节点先动、地图随后跟上」的滞后感
+  // 拖动过程中底图和节点层一起做 CSS 平移：合成器同一帧生效，两层不可能错开。
+  // 同时冻结节点层的绘制——只要它每帧还在重画，浏览器就不会把它当静态层走
+  // GPU 快路径，transform 又会退化成重绘，表现为"慢半拍"。
   var t = 'translate3d(' + px.toFixed(1) + 'px,' + py.toFixed(1) + 'px,0)';
   var base = $('#mapBase'), fx = $('#mapFx');
-  if(base) base.style.transform = t;
-  if(fx) fx.style.transform = t;
+  if(base){ base.style.willChange = 'transform'; base.style.transform = t; }
+  if(fx){ fx.style.willChange = 'transform'; fx.style.transform = t; }
+  FX.frozen = true;
 }
 function clearPan(){
   var base = $('#mapBase'), fx = $('#mapFx');
-  if(base) base.style.transform = '';
-  if(fx) fx.style.transform = '';
+  if(base){ base.style.transform = ''; base.style.willChange = ''; }
+  if(fx){ fx.style.transform = ''; fx.style.willChange = ''; }
+  FX.frozen = false;
 }
 function panMapBy(dvx, dvy){
   // 单指拖动：把位移（布局坐标系）换算成经纬度偏移，更新 geo.center
@@ -3500,7 +3503,7 @@ function main(){
   function frame(now){
     var dt = clamp(now-last, 0, 60); last = now;
     Stars.draw(dt);
-    FX.draw(dt);
+    if(!FX.frozen) FX.draw(dt);      // 拖地图时定格，交给合成器平移
     Spark.draw(dt);
     stepMarquee(dt);
     stepTweens();
