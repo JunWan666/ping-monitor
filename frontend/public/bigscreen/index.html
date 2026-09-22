@@ -3080,12 +3080,23 @@ function touchDist(t){
   var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
   return Math.sqrt(dx*dx + dy*dy);
 }
+var PAN = { x:0, y:0 };
+function applyPan(px, py){
+  // 拖动过程中底图和节点层一起做 CSS 平移：合成器同一帧生效，
+  // 不会出现「节点先动、地图随后跟上」的滞后感
+  var t = 'translate3d(' + px.toFixed(1) + 'px,' + py.toFixed(1) + 'px,0)';
+  var base = $('#mapBase'), fx = $('#mapFx');
+  if(base) base.style.transform = t;
+  if(fx) fx.style.transform = t;
+}
+function clearPan(){
+  var base = $('#mapBase'), fx = $('#mapFx');
+  if(base) base.style.transform = '';
+  if(fx) fx.style.transform = '';
+}
 function panMapBy(dvx, dvy){
-  // 单指拖动：把屏幕位移换算成经纬度偏移，更新 geo.center
+  // 单指拖动：把位移（布局坐标系）换算成经纬度偏移，更新 geo.center
   if(FX.tier !== 'vec' || !ECHART) return;
-  if(document.body.getAttribute('data-mv-rot') === '1'){   // 旋转状态下视觉位移 → 布局位移
-    var t = dvx; dvx = dvy; dvy = -t;
-  }
   if(!dvx && !dvy) return;
   var o = null;
   try{ o = ECHART.getOption().geo[0]; }catch(e){ return; }
@@ -3168,13 +3179,27 @@ function initMapTools(){
         if(!drag.moved && (Math.abs(cx - drag.sx) > 8 || Math.abs(cy - drag.sy) > 8)) drag.moved = true;
         if(drag.moved){
           e.preventDefault();
-          panMapBy(cx - drag.x, cy - drag.y);   // 单指拖动平移地图
+          var dvx = cx - drag.x, dvy = cy - drag.y;
+          if(document.body.getAttribute('data-mv-rot') === '1'){   // 视觉位移 → 布局位移
+            var tp = dvx; dvx = dvy; dvy = -tp;
+          }
+          PAN.x += dvx; PAN.y += dvy;
+          applyPan(PAN.x, PAN.y);
           drag.x = cx; drag.y = cy;
         }
       }
     }, { passive:false });
     panel.addEventListener('touchend', function(){
-      if(drag && drag.moved) HOVER.has = false;  // 拖动不算点击，不弹详情
+      if(drag && drag.moved){
+        HOVER.has = false;                       // 拖动不算点击，不弹详情
+        var px = PAN.x, py = PAN.y;
+        PAN.x = 0; PAN.y = 0;
+        panMapBy(px, py);                        // 把累计位移一次性提交给 ECharts
+        setTimeout(function(){                   // 等底图渲染完，再按新坐标系对齐节点层
+          clearPan();
+          try{ FX.build(); }catch(e){}
+        }, 140);
+      }
       pinch = null; drag = null;
     }, { passive:true });
     panel.addEventListener('touchcancel', function(){ pinch = null; drag = null; }, { passive:true });
