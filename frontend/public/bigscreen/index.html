@@ -541,8 +541,9 @@ body.lite .pulse-ring{display:none}
 .mobile-tabbar{display:none}
 @media (max-width:768px), (max-width:950px) and (max-height:520px){
   html,body{height:100%;overflow:hidden;-webkit-text-size-adjust:100%}
-  .app{height:100vh;min-height:0;grid-template-columns:minmax(0,1fr);
-    grid-template-rows:auto minmax(0,1fr) auto;padding:8px 8px 0;gap:8px}
+  .app{height:100vh;height:100dvh;min-height:0;grid-template-columns:minmax(0,1fr);
+    grid-template-rows:auto minmax(0,1fr);
+    padding:8px 8px calc(60px + env(safe-area-inset-bottom,0px));gap:8px}
 
   /* 顶栏两行：品牌 + 操作按钮 / 状态胶囊 */
   .topbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:2px 0 7px}
@@ -677,10 +678,11 @@ body.lite .pulse-ring{display:none}
   .marquee{display:none}
 
   /* 底部导航条 */
+  /* 固定在视口底部：不依赖 100vh 计算，地址栏收起/展开都能看到 */
   .mobile-tabbar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;
-    padding:5px 6px calc(5px + env(safe-area-inset-bottom));
-    background:rgba(7,14,25,.94);backdrop-filter:blur(14px);
-    border-top:1px solid var(--line);border-radius:14px 14px 0 0}
+    position:fixed;left:0;right:0;bottom:0;z-index:30;
+    padding:5px 6px calc(5px + env(safe-area-inset-bottom,0px));
+    background:rgba(7,14,25,.96);border-top:1px solid var(--line)}
   .mobile-tabbar button{position:relative;display:flex;align-items:center;justify-content:center;
     padding:9px 4px 8px;border:1px solid transparent;border-radius:10px;background:transparent;
     color:var(--txt-mute);font:inherit;font-size:12px;letter-spacing:.06em;cursor:pointer;transition:.18s}
@@ -3078,6 +3080,27 @@ function touchDist(t){
   var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
   return Math.sqrt(dx*dx + dy*dy);
 }
+function panMapBy(dvx, dvy){
+  // 单指拖动：把屏幕位移换算成经纬度偏移，更新 geo.center
+  if(FX.tier !== 'vec' || !ECHART) return;
+  if(document.body.getAttribute('data-mv-rot') === '1'){   // 旋转状态下视觉位移 → 布局位移
+    var t = dvx; dvx = dvy; dvy = -t;
+  }
+  if(!dvx && !dvy) return;
+  var o = null;
+  try{ o = ECHART.getOption().geo[0]; }catch(e){ return; }
+  var c = (o && o.center) ? o.center.slice() : [104.4, 35.9];
+  var p0 = null, p1 = null;
+  try{
+    p0 = ECHART.convertFromPixel({ geoIndex:0 }, [0, 0]);
+    p1 = ECHART.convertFromPixel({ geoIndex:0 }, [dvx, dvy]);
+  }catch(e){ return; }
+  if(!p0 || !p1) return;
+  var nc = [ c[0] + (p0[0] - p1[0]), c[1] + (p0[1] - p1[1]) ];
+  if(!isFinite(nc[0]) || !isFinite(nc[1])) return;
+  try{ ECHART.setOption({ geo:{ center: nc } }); }catch(e){}
+  scheduleMapRebuild();
+}
 var zoomRaf = 0;
 function scheduleMapRebuild(){
   if(zoomRaf) return;                        // 手势连续缩放时按帧合并，别每帧算两遍
@@ -3106,7 +3129,8 @@ function initMapTools(){
   if(zout) zout.addEventListener('click', function(){ applyMapZoom(MAPZOOM.z / 1.35); });
   if(zreset) zreset.addEventListener('click', function(){
     if(FX.tier === 'amap' && AMAP_MAP){ try{ fitAMap(AMAP_MAP); }catch(e){} MAPZOOM.z = 1; setTimeout(scheduleMapRebuild, 340); return; }
-    applyMapZoom(1);
+    if(FX.tier === 'vec' && ECHART){ try{ ECHART.setOption({ geo:{ center: null } }); }catch(e){} }
+    applyMapZoom(1);                        // 复位 = 缩放回 1 且居中
   });
 
   // 滚轮 / 双指缩放
@@ -3117,26 +3141,43 @@ function initMapTools(){
       e.preventDefault();
       applyMapZoom(MAPZOOM.z * (e.deltaY < 0 ? 1.12 : 0.89));
     }, { passive:false });
-    var pinch = null;
+    var pinch = null, drag = null;
     panel.addEventListener('touchstart', function(e){
       if(e.touches.length === 2){
         pinch = { d: touchDist(e.touches), z: MAPZOOM.z };
+        drag = null;
       } else if(e.touches.length === 1){
         // 手机上点节点：没有 mousemove，这里补一次 hover 采样让详情卡弹出来
-        HOVER.x = e.touches[0].clientX;
-        HOVER.y = e.touches[0].clientY;
+        drag = { sx: e.touches[0].clientX, sy: e.touches[0].clientY,
+                 x: e.touches[0].clientX, y: e.touches[0].clientY, moved: false };
+        HOVER.x = drag.x;
+        HOVER.y = drag.y;
         HOVER.has = true;
       }
     }, { passive:true });
     panel.addEventListener('touchmove', function(e){
       if(e.touches.length === 2 && pinch){
         e.preventDefault();                 // 关键：不拦住浏览器就会把整个网页一起缩放
+        drag = null;
         var d = touchDist(e.touches);
         if(d > 6) applyMapZoom(pinch.z * (d / pinch.d));
+        return;
+      }
+      if(e.touches.length === 1 && drag){
+        var cx = e.touches[0].clientX, cy = e.touches[0].clientY;
+        if(!drag.moved && (Math.abs(cx - drag.sx) > 8 || Math.abs(cy - drag.sy) > 8)) drag.moved = true;
+        if(drag.moved){
+          e.preventDefault();
+          panMapBy(cx - drag.x, cy - drag.y);   // 单指拖动平移地图
+          drag.x = cx; drag.y = cy;
+        }
       }
     }, { passive:false });
-    panel.addEventListener('touchend', function(){ pinch = null; }, { passive:true });
-    panel.addEventListener('touchcancel', function(){ pinch = null; }, { passive:true });
+    panel.addEventListener('touchend', function(){
+      if(drag && drag.moved) HOVER.has = false;  // 拖动不算点击，不弹详情
+      pinch = null; drag = null;
+    }, { passive:true });
+    panel.addEventListener('touchcancel', function(){ pinch = null; drag = null; }, { passive:true });
   }
 
   // 全屏（沉浸模式：隐藏顶栏与底栏，只留地图）
