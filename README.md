@@ -17,6 +17,11 @@
     <img src="https://img.shields.io/badge/Release-v1.6.0-2EA44F?style=flat-square" alt="Release v1.6.0" />
   </p>
   <p>
+    <b>简体中文</b>
+    ·
+    <a href="README_EN.md">English</a>
+  </p>
+  <p>
     <a href="https://ping.774966.xyz"><b>🚀 在线演示</b></a>
     ·
     <a href="#快速开始">快速开始</a>
