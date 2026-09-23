@@ -1147,12 +1147,13 @@ var CFG = {
   MAX_ALERTS: 34,          // 告警列表上限
   MARQ_ITEMS: 34,          // 走马灯常驻条目
   MARQ_SPEED: 96,          // 走马灯速度 px/s
-  // 高德 Key 不写进仓库（开源项目）：需要时用 URL 参数注入，
-  // 例如 https://your-host/?amapkey=你的Key；留空则只用 ECharts 矢量底图
+  // 高德 Key 的来源优先级：URL 参数 > 后台「可视化大屏设置」（由后端下发并缓存在本地）
+  // 仓库里不携带任何密钥；留空则只用 ECharts 矢量底图（免费、无依赖）
   AMAP_KEY: (function(){
     try{
       var m = /[?&]amapkey=([^&]+)/.exec(location.search);
-      return m ? decodeURIComponent(m[1]) : '';
+      if(m) return decodeURIComponent(m[1]);
+      return localStorage.getItem('ping-amap-key') || '';
     }catch(e){ return ''; }
   })(),
   AMAP_WAIT: 3400,         // 等待高德就绪的时限
@@ -2957,6 +2958,10 @@ function applyScreenConfig(sc){
   if(typeof sc.show_flow_lines === 'boolean') CFG.SHOW_FLOW_LINES = sc.show_flow_lines;
   if(typeof sc.particle_count === 'number' && sc.particle_count >= 0){
     CFG.STAR_COUNT = sc.particle_count; Stars.build();
+  }
+  if(typeof sc.amap_key === 'string' && sc.amap_key){
+    // 后台配置的 Key 缓存到本地：底图升级在页面启动时就要用到，等不到这轮接口
+    try{ localStorage.setItem('ping-amap-key', sc.amap_key); }catch(e){}
   }
   if(sc.theme_color){
     var want = THEME_BY_COLOR[sc.theme_color];

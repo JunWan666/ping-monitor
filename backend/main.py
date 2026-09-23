@@ -592,6 +592,7 @@ def build_datascreen_payload(db: Session, screen_config: DataScreenConfig) -> di
         "show_flow_lines": screen_config.show_flow_lines,
         "theme_color": screen_config.theme_color,
         "public_enabled": screen_config.public_enabled,
+        "amap_key": screen_config.amap_key or "",
     }
     payload["control_center"] = get_control_center_payload()
     return payload
@@ -1993,6 +1994,7 @@ class DataScreenConfigUpdate(BaseModel):
     show_flow_lines: Optional[bool] = None
     theme_color: Optional[str] = None
     public_enabled: Optional[bool] = None
+    amap_key: Optional[str] = None
 
 
 class DataScreenConfigResponse(BaseModel):
@@ -2006,6 +2008,7 @@ class DataScreenConfigResponse(BaseModel):
     show_flow_lines: bool
     theme_color: str
     public_enabled: bool
+    amap_key: str = ""
     updated_at: datetime
 
     class Config:
@@ -2062,6 +2065,12 @@ async def update_datascreen_config(
 
     if config_update.public_enabled is not None:
         config.public_enabled = config_update.public_enabled
+
+    if config_update.amap_key is not None:
+        amap_key = config_update.amap_key.strip()
+        if len(amap_key) > 120:
+            raise HTTPException(status_code=400, detail="高德 Key 不能超过 120 个字符")
+        config.amap_key = amap_key
 
     config.updated_at = datetime.now()
     db.commit()

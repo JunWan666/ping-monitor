@@ -56,6 +56,18 @@
           </el-radio-group>
         </el-form-item>
 
+        <el-form-item label="高德地图 Key">
+          <el-input
+            v-model="config.amap_key"
+            placeholder="留空即可，默认使用免费的 ECharts 矢量底图"
+            clearable
+          />
+          <span class="form-tip">
+            可选。申请「Web端(JS API)」Key 并在高德控制台配置域名白名单；
+            留空则只用 ECharts 矢量底图（无需 Key、断网也能显示）。填完后刷新大屏生效。
+          </span>
+        </el-form-item>
+
         <el-divider content-position="left">3D 效果</el-divider>
 
         <el-form-item label="启用 3D 效果">
@@ -126,7 +138,8 @@ const defaultConfig = {
   particle_count: 100,
   show_flow_lines: true,
   theme_color: 'blue',
-  public_enabled: true
+  public_enabled: true,
+  amap_key: ''
 }
 
 const config = ref({ ...defaultConfig })
@@ -141,7 +154,8 @@ const normalizeConfig = (payload = {}) => ({
   particle_count: payload.particle_count ?? defaultConfig.particle_count,
   show_flow_lines: payload.show_flow_lines ?? defaultConfig.show_flow_lines,
   theme_color: payload.theme_color ?? defaultConfig.theme_color,
-  public_enabled: payload.public_enabled ?? defaultConfig.public_enabled
+  public_enabled: payload.public_enabled ?? defaultConfig.public_enabled,
+  amap_key: payload.amap_key ?? defaultConfig.amap_key
 })
 
 const loadConfig = async () => {

@@ -188,6 +188,9 @@ class DataScreenConfig(Base):
     show_flow_lines = Column(Boolean, default=True, nullable=False)
     theme_color = Column(String(20), default="blue", nullable=False)
     public_enabled = Column(Boolean, default=True, nullable=False)
+    # 高德 JS API Key：开源仓库不携带任何第三方密钥，由部署者在后台自行填写；
+    # 留空则仅使用 ECharts 矢量底图（免费、无需 Key）
+    amap_key = Column(String(120), default="", nullable=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
 
