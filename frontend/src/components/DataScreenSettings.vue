@@ -57,14 +57,22 @@
         </el-form-item>
 
         <el-form-item label="高德地图 Key">
-          <el-input
-            v-model="config.amap_key"
-            placeholder="留空即可，默认使用免费的 ECharts 矢量底图"
-            clearable
-          />
+          <div class="amap-row">
+            <el-input
+              v-model="config.amap_key"
+              placeholder="留空即可，默认使用免费的 ECharts 矢量底图"
+              clearable
+            />
+            <el-button link type="primary" @click="openAmapConsole">
+              去申请 Key
+              <el-icon class="el-icon--right"><TopRight /></el-icon>
+            </el-button>
+          </div>
           <span class="form-tip">
-            可选。申请「Web端(JS API)」Key 并在高德控制台配置域名白名单；
-            留空则只用 ECharts 矢量底图（无需 Key、断网也能显示）。填完后刷新大屏生效。
+            可选。在高德开放平台创建应用并申请「Web端(JS API)」Key，
+            记得在控制台配置域名白名单（例如 your-domain.com）；
+            留空则只用 ECharts 矢量底图（无需 Key、断网也能显示）。保存后刷新大屏生效。
+            <el-link type="primary" :underline="false" @click="openAmapConsole">打开高德控制台 →</el-link>
           </span>
         </el-form-item>
 
@@ -126,8 +134,11 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { View } from '@element-plus/icons-vue'
+import { TopRight, View } from '@element-plus/icons-vue'
 import api from '../api'
+
+const AMAP_CONSOLE_URL = 'https://console.amap.com/dev/key/app'
+const openAmapConsole = () => window.open(AMAP_CONSOLE_URL, '_blank', 'noopener')
 
 const defaultConfig = {
   brand_name: '',
@@ -210,6 +221,18 @@ onMounted(() => {
   margin-left: 10px;
   color: #909399;
   font-size: 12px;
+  line-height: 1.7;
+}
+
+.amap-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.amap-row .el-input {
+  flex: 1 1 auto;
 }
 
 .el-divider {
