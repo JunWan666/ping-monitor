@@ -17,6 +17,8 @@
     <img src="https://img.shields.io/badge/Release-v1.6.0-2EA44F?style=flat-square" alt="Release v1.6.0" />
   </p>
   <p>
+    <a href="https://ping.774966.xyz"><b>🚀 在线演示</b></a>
+    ·
     <a href="#快速开始">快速开始</a>
     ·
     <a href="#功能概览">功能概览</a>
@@ -25,7 +27,28 @@
     ·
     <a href="#更新日志">更新日志</a>
   </p>
+  <p>
+    <a href="https://github.com/JunWan666/ping-monitor/stargazers"><img src="https://img.shields.io/github/stars/JunWan666/ping-monitor?style=flat-square&color=ffb547&logo=github" alt="Stars" /></a>
+    <a href="https://hub.docker.com/r/tannic666/ping-monitor"><img src="https://img.shields.io/docker/pulls/tannic666/ping-monitor?style=flat-square&logo=docker&logoColor=white" alt="Docker Pulls" /></a>
+    <img src="https://img.shields.io/badge/License-Apache--2.0-2EA44F?style=flat-square" alt="License" />
+  </p>
 </div>
+
+---
+
+![Ping Monitor 可视化大屏](docs/images/datascreen.png)
+
+<sub>可视化大屏 · 节点地域分布、实时延迟、区域染色、飞线链路、延迟 TOP 排行与实时告警</sub>
+
+## 界面预览
+
+| 管理后台 · 概览 | 主机管理 |
+|:---:|:---:|
+| ![概览](docs/images/dashboard.png) | ![主机管理](docs/images/hosts.png) |
+
+| 数据看板 | 告警记录 |
+|:---:|:---:|
+| ![数据看板](docs/images/databoard.png) | ![告警记录](docs/images/alerts.png) |
 
 ## 项目亮点
 
@@ -361,4 +384,14 @@ docker buildx build \
 
 ## 许可证
 
-MIT License
+Apache-2.0 License
+
+---
+
+<div align="center">
+
+**如果这个项目对你有帮助，欢迎点个 ⭐ Star 支持一下～**
+
+[![Star History Chart](https://api.star-history.com/svg?repos=JunWan666/ping-monitor&type=Date)](https://star-history.com/#JunWan666/ping-monitor&Date)
+
+</div>
