@@ -132,7 +132,7 @@ ping-monitor/
 已发布镜像：
 
 - `tannic666/ping-monitor:latest`
-- `tannic666/ping-monitor:v1.6.0`
+- `tannic666/ping-monitor:v1.7.0`
 - `tannic666/ping-monitor:v1.5.0`
 
 镜像平台：
@@ -186,14 +186,14 @@ docker compose -f docker/docker-compose.yml up -d --build
 如果要使用预构建镜像，可先设置环境变量：
 
 ```bash
-export PING_MONITOR_IMAGE=tannic666/ping-monitor:v1.6.0
+export PING_MONITOR_IMAGE=tannic666/ping-monitor:v1.7.0
 docker compose -f docker/docker-compose.yml up -d
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:PING_MONITOR_IMAGE="tannic666/ping-monitor:v1.6.0"
+$env:PING_MONITOR_IMAGE="tannic666/ping-monitor:v1.7.0"
 docker compose -f docker/docker-compose.yml up -d
 ```
 
@@ -321,7 +321,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\sync-prod-to-local.ps1
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -f docker/Dockerfile \
-  -t tannic666/ping-monitor:v1.6.0 \
+  -t tannic666/ping-monitor:v1.7.0 \
   -t tannic666/ping-monitor:latest \
   --provenance=false \
   --sbom=false \
@@ -331,9 +331,18 @@ docker buildx build \
 
 ## 更新日志
 
+### v1.7.0 (2026-09-23)
+
+- 大屏通用化：移除生产环境敏感信息与第三方品牌标识，控制中心按节点重心自动计算。
+- 节点数据加载路径修正，示例数据与文案不再出现真实服务域名。
+- PC 端交互补齐（鼠标拖拽 / 双击放大），移动端底部导航改固定定位，地图支持拖动平移。
+- 修复内置矢量引擎地图左右镜像、刷新闪烁、滚轮缩放与高德视野重置问题。
+- 新增 GitHub Actions 自动构建 `linux/amd64` / `linux/arm64` 双架构镜像。
+- 文档：新增在线演示入口与界面截图。
+
 ### v1.6.0 (2026-05-18)
 
-- 发布 `tannic666/ping-monitor:v1.6.0` 双架构镜像，支持 `linux/amd64` 与 `linux/arm64`。
+- 发布 `tannic666/ping-monitor:v1.7.0` 双架构镜像，支持 `linux/amd64` 与 `linux/arm64`。
 - 仪表盘与主机管理改为优先读取 `hosts` 表上的最新 Ping 指标，避免每次从百万级明细表回查最新记录。
 - Ping 写入链路同步维护 `last_packet_loss`、`last_avg_rtt`、`last_check`，旧库启动时会自动回填历史最新状态。
 - 数据看板在命中 `ping_statistics` 聚合数据后不再额外回扫原始 `ping_records`，大幅降低 1d/7d 等统计接口耗时。
