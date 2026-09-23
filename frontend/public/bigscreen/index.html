@@ -3240,9 +3240,9 @@ function initMapTools(){
   var panel = $('#mapPanel');
   if(panel){
     panel.addEventListener('wheel', function(e){
-      if(FX.tier !== 'vec') return;
+      if(FX.tier === 'builtin') return;      // 内置引擎不支持缩放；ECharts 与高德都要响应滚轮
       e.preventDefault();
-      applyMapZoom(MAPZOOM.z * (e.deltaY < 0 ? 1.12 : 0.89));
+      applyMapZoom(MAPZOOM.z * (e.deltaY < 0 ? 1.15 : 0.87));
     }, { passive:false });
     var pinch = null, drag = null;
     panel.addEventListener('touchstart', function(e){
@@ -3398,7 +3398,7 @@ function refreshMapGeometry(){
     Spark.resize();
     var wasBuiltin = (FX.tier === 'builtin');
     if(FX.tier === 'vec' && ECHART) ECHART.resize();
-    if(FX.tier === 'amap' && AMAP_MAP) fitAMap(AMAP_MAP);
+    if(FX.tier === 'amap' && AMAP_MAP){ try{ AMAP_MAP.resize(); }catch(e){} }   // 保持当前视野，别 setBounds 弹回全国
     FX.resize();
     if(wasBuiltin) FX.setProjector(fitProjector(FX.w, FX.h, 34), 'builtin');   // 关键：投影不重建，地图会缩成一小块
     FX.build();
@@ -3651,12 +3651,12 @@ function main(){
     Spark.resize();
     var wasBuiltin = (FX.tier === 'builtin');
     if(FX.tier === 'vec' && ECHART) ECHART.resize();
-    if(FX.tier === 'amap' && AMAP_MAP) fitAMap(AMAP_MAP);
+    if(FX.tier === 'amap' && AMAP_MAP){ try{ AMAP_MAP.resize(); }catch(e){} }   // 保持当前视野，别 setBounds 弹回全国
     FX.resize();
     if(wasBuiltin) FX.setProjector(fitProjector(FX.w, FX.h, 34), 'builtin');
     setTimeout(function(){
       if(FX.tier === 'vec' && ECHART) ECHART.resize();
-      if(FX.tier === 'amap' && AMAP_MAP) fitAMap(AMAP_MAP);
+      if(FX.tier === 'amap' && AMAP_MAP){ try{ AMAP_MAP.resize(); }catch(e){} }   // 保持当前视野，别 setBounds 弹回全国
       FX.build();
       measureMarquee();
     }, 340);
