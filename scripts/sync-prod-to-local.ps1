@@ -1,12 +1,13 @@
 param(
-    [string]$Remote = "root@YOUR_SERVER_IP",
+    [Parameter(Mandatory = $true)]
+    [string]$Remote,   # 例：root@你的服务器IP
     [string]$RemoteProjectDir = "/opt/ping-monitor",
     [string]$RemoteMysqlContainer = "ping-monitor-mysql",
     [string]$RemoteDatabase = "ping_monitor",
     [string]$LocalMysqlContainer = "ping-monitor-mysql",
     [string]$LocalRedisContainer = "ping-monitor-redis",
     [string]$LocalDatabase = "ping_monitor",
-    [string]$LocalMysqlRootPassword = "123456",
+    [string]$LocalMysqlRootPassword = "change-me",
     [switch]$SkipRemoteDump,
     [switch]$SkipAppStart
 )

@@ -69,7 +69,7 @@ services:
         condition: service_healthy
     environment:
       TZ: ${TZ:-Asia/Shanghai}
-      DATABASE_URL: mysql+pymysql://${MYSQL_USER:?set MYSQL_USER in .env}?charset=utf8mb4
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-ping_monitor}:${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}@mysql:3306/${MYSQL_DATABASE:-ping_monitor}?charset=utf8mb4
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
       ENABLE_CACHE: ${ENABLE_CACHE:-true}
       CACHE_TTL_DASHBOARD: ${CACHE_TTL_DASHBOARD:-15}

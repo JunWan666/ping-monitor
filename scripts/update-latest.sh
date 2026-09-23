@@ -248,7 +248,7 @@ run_sqlite_migration() {
         die "你启用了 --migrate-sqlite，但未找到 $sqlite_file"
     fi
 
-    local mysql_url="${DATABASE_URL:-mysql+pymysql://${MYSQL_USER:?set MYSQL_USER in .env}?charset=utf8mb4}"
+    local mysql_url="${DATABASE_URL:-mysql+pymysql://${MYSQL_USER:-ping_monitor}:${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}@mysql:3306/${MYSQL_DATABASE:-ping_monitor}?charset=utf8mb4}"
     local migrate_args=(
         python /app/scripts/migrate_sqlite_to_mysql.py
         --sqlite-path data/ping_monitor.db

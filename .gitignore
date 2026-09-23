@@ -85,3 +85,6 @@ test_*.py
 # 本地测试目录
 其他/
 vps/
+
+# 大屏节点数据（含生产信息，不入库）
+frontend/public/bigscreen/hosts_data.js
