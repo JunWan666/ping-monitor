@@ -1147,7 +1147,14 @@ var CFG = {
   MAX_ALERTS: 34,          // 告警列表上限
   MARQ_ITEMS: 34,          // 走马灯常驻条目
   MARQ_SPEED: 96,          // 走马灯速度 px/s
-  AMAP_KEY: '',   // ← 高德 Key（可替换）
+  // 高德 Key 不写进仓库（开源项目）：需要时用 URL 参数注入，
+  // 例如 https://your-host/?amapkey=你的Key；留空则只用 ECharts 矢量底图
+  AMAP_KEY: (function(){
+    try{
+      var m = /[?&]amapkey=([^&]+)/.exec(location.search);
+      return m ? decodeURIComponent(m[1]) : '';
+    }catch(e){ return ''; }
+  })(),
   AMAP_WAIT: 3400,         // 等待高德就绪的时限
   ECHARTS_CDN: [
     'https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js',
