@@ -756,7 +756,7 @@ body.lite .pulse-ring{display:none}
     </div>
     <div class="chips">
       <span class="chip"><i class="dot"></i>实时巡检中<b id="chipRound">#0</b></span>
-      <span class="chip"><i class="dot cy"></i>数据源 <b id="chipSrc">your-service 公开节点</b></span>
+      <span class="chip"><i class="dot cy"></i>数据源 <b id="chipSrc">公开节点</b></span>
       <span class="chip"><i class="dot vi"></i>控制中心 <b id="chipHub">武汉</b></span>
     </div>
     <div class="right-hd">
@@ -2448,7 +2448,7 @@ var FX = {
       if(!pt) continue;
       if(pt.x<12||pt.y<14||pt.x>this.w-150||pt.y>this.h-12) continue;
       // 聚焦节点标签原来没有避让，密集区域会糊成一团：与已放置标签做矩形碰撞后跳过
-      var nameTxt = n.name.replace('.your-service.','·').replace('.cn','').replace('.top','');
+      var nameTxt = n.name.replace(/\.[^.]+\.(cn|com|top|net)$/,'').replace(/\./g,'·');
       c.font = '600 11px Inter, "PingFang SC", sans-serif';
       var nlw = Math.max(c.measureText(nameTxt).width, c.measureText(n.ms.toFixed(1)+' ms').width);
       var nbox = { x0:pt.x+6, y0:pt.y-18, x1:pt.x+9+nlw+3, y1:pt.y+13 };
