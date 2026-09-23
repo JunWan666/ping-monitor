@@ -949,7 +949,7 @@ body.lite .pulse-ring{display:none}
 </div>
 
 <!-- 真实节点数据（存在时优先使用）；缺失时自动使用内置数据 -->
-<script src="hosts_data.js"></script>
+<script src="/bigscreen/hosts_data.js"></script>
 
 <!-- 内置节点数据（与 hosts_data.js 同源）：用 file:// 打开、或 hosts_data.js 缺失时自动启用 -->
 <script id="hosts-fallback">
@@ -1020,7 +1020,9 @@ var CFG = {
     'https://unpkg.com/echarts@4.9.0/map/json/china.json',
     'https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json'
   ],
-  HUB: { n:'CONTROL-CENTER', c:'武汉市', p:'湖北省', la:30.58333, lo:114.26685 }
+  /* 控制中心（大屏中心节点）：默认落在中国地理中心，运行时按在线节点重心自动校正。
+     如需固定在某个位置，直接改这里的 la / lo 即可 */
+  HUB: { n:'CONTROL-CENTER', c:'控制中心', p:'', la:35.0, lo:105.0 }
 };
 
 /* =====================================================================
@@ -1346,8 +1348,10 @@ function nodeName(city,i){
   return i===0 ? (code+'-node.example.com') : (code+(i+1)+'-node.example.com');
 }
 
-/* 节点数据来源：优先外链 hosts_data.js（window.__HOSTS），否则用内嵌兜底数据 */
+/* 节点数据来源：优先外链 hosts_data.js（HOSTS / window.__HOSTS），否则用内嵌兜底示例 */
 function hostData(){
+  // hosts_data.js 可能用 const HOSTS 或 window.__HOSTS 导出，两种都认
+  try{ if(typeof HOSTS !== 'undefined' && HOSTS && HOSTS.length) return HOSTS; }catch(e){}
   if(window.__HOSTS && window.__HOSTS.length) return window.__HOSTS;
   return window.__HOSTS_FALLBACK || [];
 }
@@ -1978,6 +1982,15 @@ var FX = {
     this.ctx = this.cv.getContext('2d');
     this.buildSprites();
     this.resize();
+    this.recenterHub();
+  },
+  /* 控制中心位置：取在线节点经纬度重心；节点为空时保持 CFG.HUB 的默认值 */
+  recenterHub:function(){
+    try{
+      var ct = (typeof nodeCentroid === 'function') ? nodeCentroid() : null;
+      if(ct && isFinite(ct.lat) && isFinite(ct.lng)){ CFG.HUB.la = ct.lat; CFG.HUB.lo = ct.lng; }
+    }catch(e){}
+    this.hub = CFG.HUB;
   },
   buildSprites:function(){
     var L = (THEME && THEME.lv) ? THEME.lv : { fast:'#35e0a1', good:'#38f0ff', mid:'#6ea8ff', warn:'#ffb547', crit:'#ff4f6d', off:'#5a6a80' };
@@ -2048,6 +2061,7 @@ var FX = {
     return this.projector;
   },
   build:function(){
+    this.recenterHub();          // 节点数据刷新后按重心重算控制中心位置
     if(!this.projector) this.projector = fitProjector(this.w, this.h, 34);
     var p = this.proj(), i, n;
     // 节点投影
