@@ -714,6 +714,20 @@ body.lite .pulse-ring{display:none}
 </head>
 <body>
 
+<!-- 提前确定移动端分页与旋转：脚本在 body 末尾执行，若不提前落属性，
+     首帧会先按「未旋转 + 地图隐藏」的布局渲染，随后再重建，看起来像是翻转了一下 -->
+<script>
+(function(){
+  try{
+    if(window.innerWidth <= 768 || window.innerHeight <= 520){
+      var t = localStorage.getItem('ping-mv-tab') || 'overview';
+      if(['overview','map','ranking','alerts'].indexOf(t) < 0) t = 'overview';
+      document.body.setAttribute('data-mv-tab', t);
+    }
+  }catch(e){}
+})();
+</script>
+
 <!-- ============ 背景 ============ -->
 <div class="bg">
   <div class="bg-base"></div>
@@ -3294,8 +3308,10 @@ function setMobileTab(tab, silent){
   }
   if(!silent){ try{ localStorage.setItem(MV.KEY, tab); }catch(e){} }
   // 地图在隐藏状态下尺寸为 0，切回来必须重建几何
+  // 立即定旋转（同步），不能等 90ms 后的重建：否则首帧仍按未旋转的尺寸绘制，
+  // 随后重建就会闪一下"翻转"；离开地图页时同样在这里清掉旋转
+  applyMapRotation();
   if(tab === 'map') setTimeout(refreshMapGeometry, 90);
-  else applyMapRotation();     // 离开地图页时清掉旋转
 }
 function updateTabBadge(){
   var b = $('#tabAlertBadge');
@@ -3461,6 +3477,9 @@ function main(){
   applyTheme(savedTheme(), true);   // 先定主题，再建环形图/精灵图，避免二次重建
   buildDonut();
   highlightRegion(null, false);     // 初始化环形图中心副标题（实测 / 演示）
+  // 先定分页与地图旋转，再初始化画布：否则地图会先按未旋转的尺寸画一遍再重建，
+  // 视觉上就是刷新瞬间的"翻转/变形"（画布尺寸相关逻辑都靠 try/catch 容错）
+  initMobileTabbar();
   Stars.init();
   Spark.init();
   FX.init();
@@ -3482,7 +3501,6 @@ function main(){
   // 顶栏按钮（全屏 / 管理后台）+ 移动端底部导航
   initHeaderButtons();
   initMapTools();
-  initMobileTabbar();
 
   // 真实数据：节点状态与巡检同频；告警记录每 5 轮拉一次
   syncReal();
