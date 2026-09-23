@@ -2096,10 +2096,13 @@ function mercX(lng){ return lng*0.0174532925199433; }
 function mercY(lat){ return Math.log(Math.tan(0.7853981633974483 + lat*0.008726646259971648)); }
 function fitProjector(w,h,pad){
   var x0=mercX(BOUNDS.minLng), x1=mercX(BOUNDS.maxLng);
+  // 墨卡托投影里纬度越大值越大，所以 y0(北) > y1(南)
   var y0=mercY(BOUNDS.maxLat), y1=mercY(BOUNDS.minLat);
-  var s = Math.min((w-pad*2)/(x1-x0), (h-pad*2)/(y1-y0));
-  var ox = (w-(x1-x0)*s)/2, oy = (h-(y1-y0)*s)/2;
-  return function(lng,lat){ return { x: ox+(mercX(lng)-x0)*s, y: oy+(mercY(lat)-y0)*s }; };
+  // 关键：分母要用正差值 (y0-y1)。用 (y1-y0) 会算出负的缩放系数，
+  // 坐标整体被水平翻转——内置引擎的地图会左右镜像（刷新瞬间看到的"反转"就是这个）
+  var s = Math.min((w-pad*2)/(x1-x0), (h-pad*2)/(y0-y1));
+  var ox = (w-(x1-x0)*s)/2, oy = (h-(y0-y1)*s)/2;
+  return function(lng,lat){ return { x: ox+(mercX(lng)-x0)*s, y: oy+(y0-mercY(lat))*s }; };
 }
 
 var FX = {
