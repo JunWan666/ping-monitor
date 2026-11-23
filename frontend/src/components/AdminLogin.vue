@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="admin-login">
     <div class="login-container">
       <div class="login-header">
@@ -44,11 +44,17 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
 const router = useRouter()
+const route = useRoute()
+const isSafeRedirect = (redirect) => typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+const redirectTarget = () => {
+  const redirect = typeof route.query?.redirect === 'string' ? route.query.redirect : ''
+  return isSafeRedirect(redirect) ? redirect : '/admin/dashboard'
+}
 const loginFormRef = ref(null)
 const loading = ref(false)
 
@@ -73,7 +79,7 @@ const handleLogin = async () => {
       const res = await axios.post('/api/auth/login', loginForm)
       localStorage.setItem('token', res.data.access_token)
       ElMessage.success('登录成功')
-      router.push('/admin')
+      router.push(redirectTarget())
     } catch (error) {
       ElMessage.error(error.response?.data?.detail || '登录失败')
     } finally {
@@ -89,43 +95,39 @@ const backToScreen = () => {
 
 <style scoped>
 .admin-login {
-  width: 100vw;
-  height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100vw;
+  min-height: 100vh;
+  padding: 32px 20px;
+  overflow: hidden;
+  background: #f5f8ff;
+}
+
+.admin-login::before {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.13), transparent 35%), radial-gradient(circle at 90% 85%, rgba(96, 165, 250, 0.12), transparent 30%);
+  content: '';
 }
 
 .login-container {
-  width: 400px;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 12px;
-  padding: 40px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  position: relative;
+  z-index: 1;
+  width: min(420px, 100%);
+  padding: 34px 34px 26px;
+  border: 1px solid #e6eaf0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(30, 64, 175, 0.1);
 }
 
-.login-header {
-  text-align: center;
-  margin-bottom: 30px;
-}
-
-.login-header h2 {
-  font-size: 24px;
-  color: #333;
-  margin: 0;
-}
-
-.login-form {
-  margin-top: 20px;
-}
-
-.login-button {
-  width: 100%;
-}
-
-.back-to-screen {
-  text-align: center;
-  margin-top: 20px;
-}
+.login-header { margin-bottom: 28px; text-align: center; }
+.login-header h2 { margin: 0; color: #1d2939; font-size: 24px; letter-spacing: -0.03em; }
+.login-form { margin-top: 20px; }
+.login-form :deep(.el-input__wrapper) { min-height: 44px; }
+.login-button { width: 100%; height: 44px; border-radius: 8px; }
+.back-to-screen { margin-top: 20px; text-align: center; }
 </style>

@@ -16,7 +16,13 @@
         :label-width="isMobile ? 'auto' : '120px'"
         class="profile-form"
       >
-        <section class="profile-section">
+        <el-radio-group v-if="useProfileTabs" v-model="profileSection" class="profile-tabs" size="small">
+          <el-radio-button value="account">账号</el-radio-button>
+          <el-radio-button value="verify">验证</el-radio-button>
+          <el-radio-button value="password">新密码</el-radio-button>
+        </el-radio-group>
+
+        <section v-show="!useProfileTabs || profileSection === 'account'" class="profile-section">
           <div class="profile-section__title">账号信息</div>
           <el-form-item label="当前用户名">
             <el-input v-model="currentUsername" disabled />
@@ -27,14 +33,14 @@
           </el-form-item>
         </section>
 
-        <section class="profile-section">
+        <section v-show="!useProfileTabs || profileSection === 'verify'" class="profile-section">
           <div class="profile-section__title">密码验证</div>
           <el-form-item label="原密码" prop="old_password">
             <el-input v-model="form.old_password" type="password" placeholder="请输入原密码" show-password clearable />
           </el-form-item>
         </section>
 
-        <section class="profile-section">
+        <section v-show="!useProfileTabs || profileSection === 'password'" class="profile-section">
           <div class="profile-section__title">新密码</div>
           <el-form-item label="新密码" prop="new_password">
             <el-input v-model="form.new_password" type="password" placeholder="至少5个字符，留空则不修改" show-password clearable />
@@ -70,7 +76,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import api from '../api'
@@ -80,7 +86,9 @@ const router = useRouter()
 const formRef = ref(null)
 const submitting = ref(false)
 const currentUsername = ref('')
-const { isMobile } = useViewport()
+const { isMobile, height } = useViewport()
+const useProfileTabs = computed(() => isMobile.value || height.value <= 740)
+const profileSection = ref('account')
 
 const form = reactive({
   old_password: '',
@@ -131,12 +139,16 @@ const submitForm = async () => {
 
   // 如果修改了密码，必须确认密码
   if (form.new_password && !form.confirm_password) {
+    profileSection.value = 'password'
     ElMessage.warning('请确认新密码')
     return
   }
 
   // 表单验证
-  const valid = await formRef.value.validate().catch(() => false)
+  const valid = await formRef.value.validate().catch((fields) => {
+    profileSection.value = fields.old_password ? 'verify' : fields.new_username ? 'account' : 'password'
+    return false
+  })
   if (!valid) {
     return
   }
@@ -201,7 +213,6 @@ onMounted(() => {
   height: 100%;
   min-height: 0;
   min-width: 0;
-  overflow-x: hidden;
   box-sizing: border-box;
 }
 
@@ -238,11 +249,14 @@ onMounted(() => {
   margin-top: 20px;
 }
 
-@media (max-width: 767px) {
+.profile-tabs {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 768px) {
   .user-profile-page {
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding-bottom: 4px;
+    overflow: hidden;
+    padding-bottom: 0;
   }
 
   .user-profile-page :deep(.el-card) {
@@ -285,6 +299,21 @@ onMounted(() => {
     font-size: 13px;
   }
 
+  .profile-tabs {
+    display: flex;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+
+  .profile-tabs :deep(.el-radio-button) {
+    flex: 1 1 0;
+  }
+
+  .profile-tabs :deep(.el-radio-button__inner) {
+    width: 100%;
+    padding: 8px 4px;
+  }
+
   .user-profile-page :deep(.el-form-item__label) {
     display: block;
     width: auto !important;
@@ -320,7 +349,7 @@ onMounted(() => {
   }
 
   .profile-alert {
-    margin-top: 12px;
+    margin-top: 8px;
     overflow-wrap: anywhere;
   }
 }

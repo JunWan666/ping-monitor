@@ -1,5 +1,5 @@
 <template>
-  <div class="alert-list-page">
+  <div ref="pageRoot" class="alert-list-page viewport-page">
     <div v-if="isMobile" class="alert-mobile">
       <el-card shadow="never" class="alert-mobile__toolbar">
         <div class="alert-mobile__chips-row">
@@ -23,7 +23,7 @@
         <div v-if="mobileFilterPanelVisible" class="alert-mobile__panel">
           <el-input
             v-model="searchKeyword"
-            placeholder="搜索主机名称或告警内容"
+            placeholder="搜索主机、域名或告警内容"
             clearable
             @clear="handleFilterChange"
             @keyup.enter="handleFilterChange"
@@ -38,9 +38,14 @@
             <el-option label="最近24小时" :value="24" />
             <el-option label="最近7天" :value="168" />
           </el-select>
+          <el-select v-model="sourceFilter" placeholder="告警来源" clearable @change="changeSource">
+            <el-option label="主机" value="host" />
+            <el-option label="域名" value="domain" />
+          </el-select>
           <el-select v-model="alertTypeFilter" placeholder="告警类型" clearable @change="handleFilterChange">
             <el-option label="丢包告警" value="packet_loss" />
             <el-option label="主机不可达" value="unreachable" />
+            <el-option v-for="(item, key) in domainTypes" :key="key" :label="item[0]" :value="key" />
           </el-select>
           <el-select v-model="sentStatusFilter" placeholder="发送状态" clearable @change="handleFilterChange">
             <el-option label="已发送" value="sent" />
@@ -50,54 +55,37 @@
       </el-card>
 
       <div class="alert-mobile__summary-row">
-        <span>共 {{ mobileAlerts.length }} 条告警</span>
+        <span>共 {{ totalAlerts }} 条告警</span>
         <el-select v-model="mobileSortOrder" size="small" class="alert-mobile__sort" @change="() => {}">
           <el-option label="按时间倒序" value="desc" />
           <el-option label="按时间正序" value="asc" />
         </el-select>
       </div>
 
-      <div class="alert-mobile__scroll">
-        <el-empty v-if="mobileAlertGroups.length === 0 && !loading" description="暂无告警" :image-size="72" />
-
-        <el-collapse v-else v-model="mobileCollapseActive" class="alert-mobile__groups">
-          <el-collapse-item
-            v-for="group in mobileAlertGroups"
-            :key="group.key"
-            :name="group.key"
-            class="alert-mobile__group"
-          >
-            <template #title>
-              <div class="alert-mobile__group-title">
-                <span class="alert-mobile__group-bar" :class="`is-${group.color}`"></span>
-                <span>{{ group.title }} ({{ group.items.length }})</span>
-              </div>
-            </template>
-
-            <div class="alert-mobile__group-list">
-              <div v-for="row in group.items" :key="row.id" class="alert-mobile__card">
-                <div class="alert-mobile__head">
-                  <div class="alert-mobile__dot-and-text">
-                    <span class="alert-mobile__dot" :class="`is-${group.color}`"></span>
-                    <div class="alert-mobile__text-block">
-                      <div class="alert-mobile__name">{{ row.host_name }}</div>
-                      <div class="alert-mobile__message">{{ cleanMarkdown(row.message) }}</div>
-                      <div class="alert-mobile__time">{{ new Date(row.created_at).toLocaleString() }}</div>
-                    </div>
-                  </div>
-                  <el-tag :type="group.color" effect="plain" size="small">{{ group.title }}</el-tag>
-                </div>
+      <div class="alert-mobile__list" data-page-rows-box>
+        <el-empty v-if="mobileAlerts.length === 0 && !loading" description="暂无告警" :image-size="72" />
+        <article v-for="(row, index) in mobileAlerts" :key="`${row.source}-${row.id}`" class="alert-mobile__card">
+          <div class="alert-mobile__head">
+            <div class="alert-mobile__dot-and-text">
+              <span class="alert-mobile__dot" :class="`is-${severityTypes[getAlertSeverity(row)]}`"></span>
+              <div class="alert-mobile__text-block">
+                <div class="alert-mobile__name"><span class="list-number">{{ (currentPage - 1) * pageSize + index + 1 }}</span> {{ row.host_name }}</div>
+                <div class="alert-mobile__message">{{ row.source === 'domain' ? row.message : cleanMarkdown(row.message) }}</div>
+                <div class="alert-mobile__time">{{ new Date(row.created_at).toLocaleString() }}</div>
+                <div v-if="row.source === 'domain'" class="alert-mobile__time">{{ deliveryLabels[row.delivery_status] || '已发送' }}</div>
               </div>
             </div>
-          </el-collapse-item>
-        </el-collapse>
+            <el-tag :type="severityTypes[getAlertSeverity(row)]" effect="plain" size="small">
+              {{ severityLabels[getAlertSeverity(row)] }}
+            </el-tag>
+          </div>
+        </article>
       </div>
 
       <div class="alert-mobile__pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100, 200]"
           :total="totalAlerts"
           layout="prev, next"
           @size-change="handleSizeChange"
@@ -108,14 +96,14 @@
     </div>
 
     <template v-else>
-    <el-card shadow="hover">
+    <el-card shadow="never" class="viewport-list-card">
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
           <span style="font-weight: bold">告警记录</span>
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
             <el-input
               v-model="searchKeyword"
-              placeholder="搜索主机名称或告警内容"
+              placeholder="搜索主机、域名或告警内容"
               clearable
               style="width: 260px"
               @clear="handleFilterChange"
@@ -131,9 +119,14 @@
               <el-option label="最近24小时" :value="24" />
               <el-option label="最近7天" :value="168" />
             </el-select>
+            <el-select v-model="sourceFilter" placeholder="告警来源" clearable style="width: 130px" @change="changeSource">
+              <el-option label="主机" value="host" />
+              <el-option label="域名" value="domain" />
+            </el-select>
             <el-select v-model="alertTypeFilter" placeholder="告警类型" clearable style="width: 140px" @change="handleFilterChange">
               <el-option label="丢包告警" value="packet_loss" />
               <el-option label="主机不可达" value="unreachable" />
+              <el-option v-for="(item, key) in domainTypes" :key="key" :label="item[0]" :value="key" />
             </el-select>
             <el-select v-model="sentStatusFilter" placeholder="发送状态" clearable style="width: 130px" @change="handleFilterChange">
               <el-option label="已发送" value="sent" />
@@ -146,46 +139,46 @@
         </div>
       </template>
 
-      <el-table :data="alerts" style="width: 100%" v-loading="loading">
-        <el-table-column prop="id" label="ID" width="70" align="center" header-align="center" />
-        <el-table-column prop="host_name" label="主机名称" width="160" align="center" header-align="center" />
-        <el-table-column label="告警类型" width="120" align="center" header-align="center">
+      <div class="viewport-table-area" data-page-rows-box>
+      <el-table :data="alerts" size="small" v-loading="loading" empty-text="当前筛选条件下暂无告警记录">
+          <el-table-column label="序号" width="48" align="center"><template #default="{ $index }">{{ (currentPage - 1) * pageSize + $index + 1 }}</template></el-table-column>
+        <el-table-column prop="host_name" label="监控对象" min-width="124" show-overflow-tooltip />
+        <el-table-column label="告警类型" min-width="102" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.alert_type === 'packet_loss'" type="warning">丢包告警</el-tag>
             <el-tag v-else-if="row.alert_type === 'unreachable'" type="danger">主机不可达</el-tag>
+            <el-tag v-else-if="domainTypes[row.alert_type]" :type="domainTypes[row.alert_type][1]">{{ domainTypes[row.alert_type][0] }}</el-tag>
             <el-tag v-else type="info">{{ row.alert_type }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="message" label="告警信息" min-width="320" align="center" header-align="center">
+        <el-table-column prop="message" label="告警信息" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
-            <div style="word-wrap: break-word; word-break: break-all; text-align: left">{{ cleanMarkdown(row.message) }}</div>
+            {{ row.source === 'domain' ? row.message : cleanMarkdown(row.message) }}
           </template>
         </el-table-column>
-        <el-table-column label="发送状态" width="100" align="center" header-align="center">
+        <el-table-column label="发送状态" width="96" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.is_sent" type="success">已发送</el-tag>
+            <el-tag v-else-if="row.delivery_status" :type="row.delivery_status === 'failed' ? 'danger' : 'info'">{{ deliveryLabels[row.delivery_status] || '未发送' }}</el-tag>
             <el-tag v-else type="info">未发送</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="告警时间" width="180" align="center" header-align="center">
+        <el-table-column label="告警时间" :width="width < 1000 ? 124 : 156" show-overflow-tooltip>
           <template #default="{ row }">
             {{ new Date(row.created_at).toLocaleString() }}
           </template>
         </el-table-column>
       </el-table>
-
-      <div v-if="alerts.length === 0 && !loading" style="text-align: center; padding: 40px; color: #909399">
-        <el-icon :size="60"><CircleCheck /></el-icon>
-        <div style="margin-top: 10px; font-size: 16px">当前筛选条件下暂无告警记录</div>
       </div>
 
-      <div v-if="totalAlerts > 0" style="margin-top: 20px; text-align: right">
+      <div class="viewport-table-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100, 200]"
           :total="totalAlerts"
-          layout="total, sizes, prev, pager, next, jumper"
+          layout="total, prev, pager, next"
+          :pager-count="5"
+          small
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
           background
@@ -197,10 +190,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { useViewport } from '../lib/useViewport'
+import { usePageRows } from '../lib/usePageRows'
 
 const alerts = ref([])
 const loading = ref(false)
@@ -208,18 +202,30 @@ const timeRange = ref(24)
 const searchKeyword = ref('')
 const alertTypeFilter = ref('')
 const sentStatusFilter = ref('')
+const sourceFilter = ref('')
+const domainTypes = {
+  domain_critical: ['域名严重告警', 'danger', 'urgent'],
+  domain_warning: ['域名告警', 'warning', 'warning'],
+  domain_expiry: ['到期提醒', 'warning', 'warning'],
+  domain_recovery: ['域名恢复', 'success', 'recovered'],
+}
+const deliveryLabels = {
+  pending: '待发送', failed: '失败，待重试', disabled: '已关闭',
+  no_channel: '无通知渠道', superseded: '已取消',
+}
 const currentPage = ref(1)
-const pageSize = ref(20)
+const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 430 ? 58 : 138 })
 const totalAlerts = ref(0)
 const mobileSeverityFilter = ref('all')
 const mobileFilterPanelVisible = ref(false)
 const mobileSortOrder = ref('desc')
-const mobileCollapseActive = ref(['urgent', 'important', 'warning', 'recovered'])
-const { isMobile } = useViewport()
+const { isMobile, width } = useViewport()
 
-const severityOrder = ['urgent', 'important', 'warning', 'recovered']
+const severityLabels = { urgent: '紧急', important: '重要', warning: '告警', recovered: '恢复' }
+const severityTypes = { urgent: 'danger', important: 'warning', warning: 'warning', recovered: 'success' }
 
 const getAlertSeverity = (row) => {
+  if (domainTypes[row?.alert_type]) return domainTypes[row.alert_type][2]
   const message = `${row?.message || ''} ${row?.alert_type || ''}`.toLowerCase()
   if (row?.alert_type === 'unreachable' || message.includes('离线') || message.includes('不可达')) {
     return 'urgent'
@@ -253,36 +259,6 @@ const mobileAlerts = computed(() => {
   })
 })
 
-const mobileAlertGroups = computed(() => {
-  const groups = new Map()
-  for (const row of mobileAlerts.value) {
-    const key = getAlertSeverity(row)
-    if (!groups.has(key)) {
-      groups.set(key, [])
-    }
-    groups.get(key).push(row)
-  }
-
-  return severityOrder
-    .map((key) => ({
-      key,
-      title: {
-        urgent: '紧急',
-        important: '重要',
-        warning: '警告',
-        recovered: '恢复'
-      }[key],
-      color: {
-        urgent: 'danger',
-        important: 'warning',
-        warning: 'warning',
-        recovered: 'success'
-      }[key],
-      items: groups.get(key) || []
-    }))
-    .filter((group) => group.items.length > 0)
-})
-
 const loadAlerts = async () => {
   loading.value = true
   try {
@@ -292,7 +268,8 @@ const loadAlerts = async () => {
       pageSize.value,
       searchKeyword.value.trim() || null,
       alertTypeFilter.value || null,
-      sentStatusFilter.value || null
+      sentStatusFilter.value || null,
+      sourceFilter.value || null
     )
     alerts.value = data.items || []
     totalAlerts.value = data.total || 0
@@ -306,6 +283,11 @@ const loadAlerts = async () => {
 const handleFilterChange = () => {
   currentPage.value = 1
   loadAlerts()
+}
+
+const changeSource = () => {
+  alertTypeFilter.value = ''
+  handleFilterChange()
 }
 
 const handleSizeChange = (val) => {
@@ -353,6 +335,8 @@ const cleanMarkdown = (text) => {
 
   return result.replace(/\s{2,}/g, ' ').trim()
 }
+
+watch(pageSize, () => { currentPage.value = 1; loadAlerts() })
 
 onMounted(() => {
   loadAlerts()
@@ -435,10 +419,13 @@ onMounted(() => {
 
 .alert-mobile__panel {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
   margin-top: 12px;
 }
+
+.alert-mobile__panel > :deep(.el-input) { grid-column: 1 / -1; }
+.alert-mobile__toolbar :deep(.el-card__body) { padding: 10px; }
 
 .alert-mobile__summary-row {
   display: flex;
@@ -456,11 +443,13 @@ onMounted(() => {
   flex: 0 0 auto;
 }
 
-.alert-mobile__scroll {
+.alert-mobile__list {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .alert-mobile__groups {
@@ -535,9 +524,11 @@ onMounted(() => {
 }
 
 .alert-mobile__card {
-  padding: 12px;
+  flex: 0 0 138px;
+  padding: 8px 10px;
   border-radius: 12px;
   background: #f8fafc;
+  overflow: hidden;
 }
 
 .alert-mobile__head {
@@ -564,7 +555,9 @@ onMounted(() => {
   font-size: 15px;
   font-weight: 700;
   color: #111827;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .alert-mobile__time {
@@ -578,6 +571,10 @@ onMounted(() => {
   font-size: 13px;
   line-height: 1.6;
   color: #374151;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
@@ -594,5 +591,25 @@ onMounted(() => {
 .alert-mobile__pager :deep(.el-pagination) {
   max-width: 100%;
   justify-content: center;
+}
+@media (max-width: 768px) and (max-height: 430px) {
+  .alert-mobile { gap: 4px; }
+  .alert-mobile__toolbar :deep(.el-card__body) { padding: 4px 6px; }
+  .alert-mobile__chips-row { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; }
+  .alert-mobile__chip { height: 25px; padding-inline: 3px; border-radius: 5px; font-size: 10px; }
+  .alert-mobile__filter-row { margin-top: 3px; text-align: right; }
+  .alert-mobile__filter-btn { width: auto; height: 24px; padding: 0 7px; border-radius: 5px; font-size: 11px; }
+  .alert-mobile__panel { margin-top: 4px; gap: 3px; }
+  .alert-mobile__summary-row { min-height: 20px; font-size: 10px; }
+  .alert-mobile__sort { width: 103px; }
+  .alert-mobile__list { gap: 2px; }
+  .alert-mobile__card { box-sizing: border-box; flex-basis: 58px; height: 58px; padding: 4px 6px; border-radius: 6px; }
+  .alert-mobile__head { align-items: center; gap: 6px; }
+  .alert-mobile__name { font-size: 12px; }
+  .alert-mobile__message { margin-top: 2px; font-size: 10px; line-height: 14px; -webkit-line-clamp: 1; white-space: nowrap; text-overflow: ellipsis; }
+  .alert-mobile__time { display: none; }
+  .alert-mobile__dot { width: 6px; height: 6px; margin-top: 4px; }
+  .alert-mobile__pager { padding-top: 0; }
+  .alert-mobile__pager :deep(.el-pagination) { min-height: 24px; }
 }
 </style>

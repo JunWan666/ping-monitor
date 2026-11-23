@@ -29,7 +29,8 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+    const status = error.response?.status
+    if (status === 401 || (status === 403 && !error.config?.keepSessionOnForbidden)) {
       const url = error.config?.url || ''
       if (!url.includes('/auth/')) {
         localStorage.removeItem('token')
@@ -57,6 +58,16 @@ export default {
   updatePassword: (data) => apiClient.put('/auth/update-password', data),
 
   getHosts: () => apiClient.get('/hosts'),
+  getDomains: () => apiClient.get('/domains', { keepSessionOnForbidden: true }),
+  getDomainSettings: () => apiClient.get('/domains/settings'),
+  updateDomainSettings: (data) => apiClient.put('/domains/settings', data),
+  getDomainNotification: () => apiClient.get('/domains/notification'),
+  updateDomainNotification: (data) => apiClient.put('/domains/notification', data),
+  testDomainNotification: () => apiClient.post('/domains/notification/test', null, { timeout: 15000 }),
+  discoverDomainNS: (name) => apiClient.post('/domains/discover', { name }, { timeout: 25000 }),
+  createDomain: (data) => apiClient.post('/domains', data),
+  updateDomain: (id, data) => apiClient.put(`/domains/${id}`, data),
+  deleteDomain: (id) => apiClient.delete(`/domains/${id}`),
   createHost: (data) => apiClient.post('/hosts', data),
   updateHost: (id, data) => apiClient.put(`/hosts/${id}`, data),
   deleteHost: (id) => apiClient.delete(`/hosts/${id}`),
@@ -67,9 +78,11 @@ export default {
     const params = background ? { background: true } : {}
     return apiClient.post(`/ping/${id}`, null, { params })
   },
-  pingStream: (id, onMessage, onError, onComplete) => {
+  pingStream: (id, onMessage, onError, onComplete, mode) => {
     const token = localStorage.getItem('token')
-    const eventSource = new EventSource(`/api/ping-stream/${id}?token=${token}`)
+    const params = new URLSearchParams({ token })
+    if (mode) params.set('mode', mode)
+    const eventSource = new EventSource(`/api/ping-stream/${id}?${params}`)
 
     eventSource.onmessage = (event) => {
       try {
@@ -115,8 +128,9 @@ export default {
   },
 
   getRecords: (id, hours = 24) => apiClient.get(`/records/${id}?hours=${hours}`),
-  getAlerts: (hours = 24, page = 1, pageSize = 20, keyword = null, alertType = null, sentStatus = null) => {
+  getAlerts: (hours = 24, page = 1, pageSize = 20, keyword = null, alertType = null, sentStatus = null, source = null) => {
     const params = { hours, page, page_size: pageSize }
+    if (source) params.source = source
     if (keyword) {
       params.keyword = keyword
     }

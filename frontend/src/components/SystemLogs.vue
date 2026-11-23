@@ -1,5 +1,5 @@
 <template>
-  <div class="system-logs-page">
+  <div ref="pageRoot" class="system-logs-page viewport-page">
     <div v-if="isMobile" class="system-logs-mobile">
       <el-card shadow="never" class="system-logs-mobile__toolbar">
         <el-input
@@ -41,14 +41,14 @@
         </div>
       </el-card>
 
-      <div class="system-logs-mobile__list">
+      <div class="system-logs-mobile__list" data-page-rows-box>
         <el-empty v-if="!logs.length && !loading" description="暂无系统日志" :image-size="72" />
-        <div v-for="row in logs" :key="row.id" class="system-logs-mobile__item">
+        <div v-for="(row, index) in logs" :key="row.id" class="system-logs-mobile__item">
           <div class="system-logs-mobile__head">
             <el-tag :type="getLogTypeTag(row.log_type)" effect="plain">{{ getLogTypeText(row.log_type) }}</el-tag>
             <span>{{ formatTime(row.created_at) }}</span>
           </div>
-          <div class="system-logs-mobile__module">{{ row.module }}</div>
+          <div class="system-logs-mobile__module"><span class="list-number">{{ (currentPage - 1) * pageSize + index + 1 }}</span> {{ row.module }}</div>
           <div class="system-logs-mobile__message" :style="getMessageStyle(row.message)">{{ row.message }}</div>
           <div class="system-logs-mobile__item-actions">
             <el-button size="small" plain @click="copyLogText(row)">复制</el-button>
@@ -71,7 +71,7 @@
     </div>
 
     <template v-else>
-    <el-card shadow="hover" style="margin-bottom: 20px">
+    <el-card shadow="never" class="viewport-toolbar-card">
       <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
         <div style="display: flex; gap: 10px; flex-wrap: wrap">
           <el-input
@@ -149,52 +149,46 @@
       </div>
     </el-card>
 
-    <el-card shadow="hover">
+    <el-card shadow="never" class="viewport-list-card">
       <template #header>
         <span style="font-weight: bold">系统日志</span>
       </template>
 
-      <el-table :data="logs" style="width: 100%" v-loading="loading">
-        <el-table-column label="ID" width="80" align="center" header-align="center">
-          <template #default="{ row }">
-            {{ row.id }}
-          </template>
-        </el-table-column>
-        <el-table-column label="时间" width="180" align="center" header-align="center">
+      <div class="viewport-table-area" data-page-rows-box>
+      <el-table :data="logs" size="small" v-loading="loading" empty-text="当前筛选条件下暂无系统日志">
+          <el-table-column label="序号" width="48" align="center"><template #default="{ $index }">{{ (currentPage - 1) * pageSize + $index + 1 }}</template></el-table-column>
+        <el-table-column label="时间" width="158" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="100" align="center" header-align="center">
+        <el-table-column label="类型" min-width="74" align="center">
           <template #default="{ row }">
-            <el-tag :type="getLogTypeTag(row.log_type)">{{ getLogTypeText(row.log_type) }}</el-tag>
+            <el-tag size="small" :type="getLogTypeTag(row.log_type)">{{ getLogTypeText(row.log_type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="module" label="模块" width="160" align="center" header-align="center" />
-        <el-table-column label="消息" min-width="320">
+        <el-table-column prop="module" label="模块" width="124" show-overflow-tooltip />
+        <el-table-column label="消息" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
             <span :style="getMessageStyle(row.message)">{{ row.message }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" align="center" header-align="center">
+        <el-table-column label="操作" width="78" align="center">
           <template #default="{ row }">
-            <el-button v-if="row.details" type="primary" size="small" @click="viewDetails(row)">查看详情</el-button>
-            <el-button size="small" @click="copyLogText(row)">复制消息</el-button>
+            <el-button v-if="row.details" type="primary" size="small" link @click="viewDetails(row)">详情</el-button>
+            <el-button type="info" size="small" link @click="copyLogText(row)">复制</el-button>
           </template>
         </el-table-column>
       </el-table>
-
-      <div v-if="!logs.length && !loading" style="padding: 36px 0; text-align: center; color: #909399">
-        当前筛选条件下暂无系统日志
       </div>
 
-      <div style="margin-top: 15px; display: flex; justify-content: center">
+      <div class="viewport-table-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100, 200]"
           :total="total"
-          layout="total, sizes, prev, pager, next, jumper"
+          layout="total, prev, pager, next"
+          :pager-count="5"
           :small="true"
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
@@ -225,17 +219,18 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { useViewport } from '../lib/useViewport'
+import { usePageRows } from '../lib/usePageRows'
 
 const loading = ref(false)
 const cleanupLoading = ref(false)
 const logs = ref([])
 const total = ref(0)
 const currentPage = ref(1)
-const pageSize = ref(20)
+const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 430 ? 58 : 154 })
 const keywordFilter = ref('')
 const timeRangeFilter = ref(null)
 const logTypeFilter = ref('')
@@ -428,6 +423,8 @@ const copyLogDetails = () => {
   copyToClipboard(formatDetails(selectedLog.value.details), '日志详情已复制')
 }
 
+watch(pageSize, () => { currentPage.value = 1; loadLogs() })
+
 onMounted(() => {
   loadLogs()
 })
@@ -454,6 +451,8 @@ onMounted(() => {
   border-radius: 14px;
 }
 
+.system-logs-mobile__toolbar :deep(.el-card__body) { padding: 10px; }
+
 .system-logs-mobile__filters,
 .system-logs-mobile__actions {
   display: grid;
@@ -465,15 +464,15 @@ onMounted(() => {
 .system-logs-mobile__list {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
 .system-logs-mobile__item {
-  flex: 0 0 auto;
-  padding: 12px;
+  flex: 0 0 154px;
+  padding: 8px 10px;
   border: 1px solid #edf2f7;
   border-radius: 14px;
   background: #fff;
@@ -489,7 +488,7 @@ onMounted(() => {
 }
 
 .system-logs-mobile__module {
-  margin-top: 10px;
+  margin-top: 4px;
   font-size: 12px;
   color: #2563eb;
 }
@@ -500,6 +499,10 @@ onMounted(() => {
   line-height: 1.5;
   color: #111827;
   word-break: break-word;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .system-logs-mobile__item-actions {
@@ -512,5 +515,20 @@ onMounted(() => {
   flex: 0 0 auto;
   display: flex;
   justify-content: center;
+}
+@media (max-width: 768px) and (max-height: 430px) {
+  .system-logs-mobile { gap: 5px; }
+  .system-logs-mobile__toolbar :deep(.el-card__body) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 6px; }
+  .system-logs-mobile__toolbar :deep(.el-card__header) { display: none; }
+  .system-logs-mobile__filters, .system-logs-mobile__actions { gap: 4px; margin-top: 0; }
+  .system-logs-mobile__filters :deep(.el-input), .system-logs-mobile__filters :deep(.el-select) { min-width: 0; }
+  .system-logs-mobile__list { gap: 3px; }
+  .system-logs-mobile__item { box-sizing: border-box; flex-basis: 58px; height: 58px; min-height: 0; padding: 3px 5px; border-radius: 6px; }
+  .system-logs-mobile__head { gap: 5px; font-size: 10px; }
+  .system-logs-mobile__head :deep(.el-tag) { height: 19px; padding-inline: 4px; }
+  .system-logs-mobile__module { display: none; }
+  .system-logs-mobile__message { margin-top: 3px; font-size: 11px; line-height: 15px; -webkit-line-clamp: 1; white-space: nowrap; text-overflow: ellipsis; }
+  .system-logs-mobile__item-actions { display: none; }
+  .system-logs-mobile__pager { min-height: 26px; }
 }
 </style>

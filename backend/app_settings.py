@@ -53,6 +53,7 @@ class AppSettings:
         self.enable_cache = _get_bool("ENABLE_CACHE", True)
         self.disable_notifications = _get_bool("DISABLE_NOTIFICATIONS", False)
         self.disable_scheduler = _get_bool("DISABLE_SCHEDULER", False)
+        self.disable_host_monitor = _get_bool("DISABLE_HOST_MONITOR", False)
 
         self.cache_ttl_dashboard = _get_int("CACHE_TTL_DASHBOARD", 15)
         self.cache_ttl_databoard = _get_int("CACHE_TTL_DATABOARD", 45)

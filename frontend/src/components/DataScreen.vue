@@ -13,11 +13,7 @@
 
 <script setup>
 /**
- * 后台预览外壳：/datascreen-preview 需要在登录态下看大屏。
- *
- * 正式首页（/）现在由 nginx 直接返回 /bigscreen/index.html，不再经过 SPA，
- * 所以这里只负责预览场景：带 ?preview=1 让内嵌页走鉴权接口（同域，可直接读 localStorage 的 token）。
- * 旧版 5111 行实现保留在 DataScreenLegacy.vue，回退时改 router.js 的引用即可。
+ * 公开首页和后台预览共用独立的大屏文档；预览参数让 iframe 改用鉴权接口。
  */
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
@@ -44,14 +40,22 @@ const onFrameLoad = () => {
 
 <style scoped>
 .ds-frame {
-  position: fixed;
-  inset: 0;
+  display: flex;
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md, 10px);
   background: #03060e;
 }
 
 .ds-iframe {
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   border: 0;
   display: block;
 }

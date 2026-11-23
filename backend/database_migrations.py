@@ -65,6 +65,8 @@ class DatabaseMigration:
             return 'INTEGER'
         elif 'DATETIME' in upper_type:
             return 'DATETIME'
+        elif upper_type == 'DATE':
+            return 'DATE'
         else:
             return 'TEXT'  # 默认使用TEXT
     
@@ -74,6 +76,16 @@ class DatabaseMigration:
         if column.default is not None:
             if hasattr(column.default, 'arg'):
                 default_value = column.default.arg
+                if callable(default_value):
+                    # SQLite can evaluate CURRENT_TIMESTAMP while adding a
+                    # required datetime column.  Do not render Python's
+                    # function object into ALTER TABLE SQL.
+                    if getattr(default_value, "__name__", "") in {"now", "utcnow"}:
+                        # SQLite rejects non-constant defaults in ALTER TABLE.
+                        # Existing rows only need a valid historical value;
+                        # SQLAlchemy applies the callable to future writes.
+                        return "DEFAULT '1970-01-01 00:00:00'"
+                    return ""
                 if isinstance(default_value, str):
                     return f"DEFAULT '{default_value}'"
                 elif isinstance(default_value, bool):
@@ -156,7 +168,15 @@ class DatabaseMigration:
             
             # 自动同步表结构
             migrations_executed = DatabaseMigration.auto_sync_table_structure()
-            
+            if DatabaseMigration.table_exists("system_config") and DatabaseMigration.column_exists(
+                "system_config", "dashboard_chart_points"
+            ):
+                with engine.begin() as connection:
+                    connection.execute(text(
+                        "UPDATE system_config SET dashboard_chart_points = 5 "
+                        "WHERE dashboard_chart_points > 5"
+                    ))
+
             # 迁移总结
             if migrations_executed:
                 logger.info(f"✅ 数据库迁移完成，共执行 {len(migrations_executed)} 个迁移:")

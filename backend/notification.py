@@ -99,7 +99,7 @@ class NotificationService:
             logger.info("Webhook 通知发送成功")
             return True
         except Exception as exc:
-            logger.error("Webhook 通知发送异常: %s", exc)
+            logger.error("Webhook 通知发送异常: %s", type(exc).__name__)
             return False
 
 

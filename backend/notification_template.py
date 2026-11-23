@@ -1,9 +1,118 @@
 """通知消息模板"""
 from datetime import datetime
+from html import escape
+import re
+from zoneinfo import ZoneInfo
+
+
+def _domain_detail(text: str) -> str:
+    """Keep useful DNS evidence while making probe errors readable."""
+    translations = {
+        "ConnectTimeout": "连接超时",
+        "ReadTimeout": "等待响应超时",
+        "LifetimeTimeout": "查询超时",
+        "Timeout": "查询超时",
+        "ConnectionError": "连接失败",
+        "SSLError": "安全连接失败",
+        "NoNameservers": "没有可用的 DNS 响应",
+        "NXDOMAIN": "域名不存在（NXDOMAIN）",
+        "SERVFAIL": "解析失败（SERVFAIL）",
+        "REFUSED": "查询被拒绝（REFUSED）",
+        "server hold": "注册局暂停解析（serverHold）",
+        "client hold": "注册商暂停解析（clientHold）",
+        "pending delete": "域名待删除（pendingDelete）",
+        "redemption period": "域名处于赎回期（redemptionPeriod）",
+    }
+    pattern = r"\b(?:" + "|".join(re.escape(key) for key in translations) + r")\b"
+    return re.sub(pattern, lambda match: translations[match[0]], text)
 
 
 class NotificationTemplate:
     """通知消息模板类"""
+
+    @staticmethod
+    def get_domain_alert(
+        domain_name: str,
+        alert_type: str,
+        message: str,
+        created_at: datetime | None = None,
+        use_markdown: bool = True,
+        is_test: bool = False,
+    ) -> dict:
+        styles = {
+            "domain_critical": ("🔴", "域名异常告警", "🔴 严重", "#FF0000", "已确认检测异常"),
+            "domain_warning": ("🟠", "域名监控提醒", "🟠 警告", "#FFA500", "部分检测异常"),
+            "domain_recovery": ("✅", "域名恢复正常", "🟢 已恢复", "#00FF00", "已恢复正常"),
+            "domain_expiry": ("🟡", "域名到期提醒", "🟡 提醒", "#FFA500", "请及时确认续费"),
+        }
+        icon, heading, severity, color, status = styles[alert_type]
+        title = f"{icon} {heading}"
+        if is_test:
+            title += "（模板测试）"
+
+        lines = [line.strip().removeprefix("- ").strip() for line in message.splitlines() if line.strip()]
+        details = []
+        for line in lines:
+            label, separator, body = line.partition("：")
+            if separator and len(label) <= 30:
+                details.append((label, body))
+            else:
+                details.append(("", line))
+
+        probe_only = alert_type == "domain_warning" and all(
+            label.endswith(("探测异常", "查询异常")) for label, _ in details
+        ) and bool(details)
+        if probe_only:
+            status = "探测未完成，状态待确认"
+
+        fields = [("监控域名", domain_name)]
+        if details and all(label for label, _ in details):
+            fields.append(("检查项目", "、".join(dict.fromkeys(label for label, _ in details))))
+        fields.append(("检测结果", status))
+        if probe_only:
+            fields.append(("影响说明", "探测结果暂缺，尚未确认域名故障"))
+
+        notification_time = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+        status_label = "状态" if alert_type == "domain_recovery" else "告警级别"
+        if not use_markdown:
+            content = f"{title}\n{status_label}：{severity}\n\n"
+            content += "\n".join(f"{key}：{value}" for key, value in fields) + "\n\n"
+            content += "\n".join(
+                f"{label + '：' if label else ''}{_domain_detail(body)}" for label, body in details
+            )
+            if is_test:
+                content += "\n\n模板验证消息，不代表新发生的故障。"
+            if created_at:
+                content += f"\n发现时间：{created_at:%Y-%m-%d %H:%M:%S}"
+            content += f"\n通知时间：{notification_time}"
+            return {"title": title, "content": content}
+
+        content = f"### {title}\n\n> **{status_label}：** {severity}\n\n---\n\n"
+        for key, value in fields:
+            if key == "监控域名":
+                value = f"[{domain_name}](https://{domain_name})"
+            elif key == "检测结果":
+                value = f"<font color={color}>**{value}**</font>"
+            content += f"**{key}：** {value}  \n"
+
+        if details:
+            content += "\n---\n\n"
+            section = "恢复说明" if alert_type == "domain_recovery" else "到期信息" if alert_type == "domain_expiry" else "异常详情"
+            content += f"**{section}**\n\n"
+            for label, body in details:
+                if label:
+                    content += f"**{escape(label)}**  \n"
+                for part in re.split(r"[；;]", _domain_detail(body)):
+                    if part.strip():
+                        content += f"- {escape(part.strip())}\n"
+                content += "\n"
+        if is_test:
+            content += "> 此消息用于验证新版通知模板，不代表新发生的故障。\n\n"
+        content += "---\n"
+        if created_at:
+            content += f"🕒 **发现时间：** {created_at:%Y-%m-%d %H:%M:%S}  \n"
+        content += f"📅 **通知时间：** {notification_time}"
+        return {"title": title, "content": content}
     
     @staticmethod
     def get_abnormal_alert(host_name: str, host_address: str, packet_loss: float, 

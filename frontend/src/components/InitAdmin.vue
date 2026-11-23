@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="init-container">
     <el-card class="init-card">
       <template #header>
@@ -59,11 +59,17 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 
 const router = useRouter()
+const route = useRoute()
+const isSafeRedirect = (redirect) => typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+const redirectTarget = () => {
+  const redirect = typeof route.query?.redirect === 'string' ? route.query.redirect : ''
+  return isSafeRedirect(redirect) ? redirect : '/'
+}
 const formRef = ref(null)
 const loading = ref(false)
 
@@ -111,9 +117,9 @@ const handleInit = async () => {
       
       localStorage.setItem('token', result.access_token)
       ElMessage.success('管理员创建成功，正在跳转...')
-      // 初始化后直接跳转到主页，因为token已经存在
+      // 初始化后回到原始目标地址；没有深链接时回公开入口
       setTimeout(() => {
-        window.location.href = '/'
+        router.replace(redirectTarget())
       }, 500)
     } catch (error) {
       ElMessage.error(error.response?.data?.detail || '创建失败')
@@ -126,29 +132,43 @@ const handleInit = async () => {
 
 <style scoped>
 .init-container {
+  position: relative;
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 32px 20px;
+  overflow: hidden;
+  background: #f5f8ff;
+}
+
+.init-container::before {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 16% 14%, rgba(37, 99, 235, 0.12), transparent 34%), radial-gradient(circle at 86% 90%, rgba(96, 165, 250, 0.12), transparent 30%);
+  content: '';
 }
 
 .init-card {
-  width: 450px;
+  position: relative;
+  z-index: 1;
+  width: min(460px, 100%);
+  border: 1px solid #e6eaf0;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(30, 64, 175, 0.1);
 }
 
-.card-header {
-  text-align: center;
-}
+.init-card :deep(.el-card__header) { padding: 28px 32px 0; border-bottom: 0; }
+.init-card :deep(.el-card__body) { padding: 20px 32px 30px; }
+.card-header { text-align: center; }
+.card-header h2 { margin: 0 0 10px; color: #1d2939; font-size: 24px; }
+.card-header p { margin: 0; color: #98a2b3; font-size: 13px; }
+.init-card :deep(.el-input__wrapper) { min-height: 44px; }
+.init-card :deep(.el-button) { height: 44px; border-radius: 8px; }
 
-.card-header h2 {
-  margin: 0 0 10px 0;
-  color: #409eff;
-}
-
-.card-header p {
-  margin: 0;
-  color: #909399;
-  font-size: 14px;
+@media (max-width: 520px) {
+  .init-container { padding: 18px 14px; }
+  .init-card :deep(.el-card__header) { padding-inline: 22px; }
+  .init-card :deep(.el-card__body) { padding: 18px 22px 24px; }
 }
 </style>

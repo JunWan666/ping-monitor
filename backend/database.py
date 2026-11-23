@@ -5,10 +5,12 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -102,6 +104,12 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
 
 
+DEFAULT_DOMAIN_DNS_INTERVAL = 1
+DEFAULT_DOMAIN_RDAP_INTERVAL = 5
+DEFAULT_DOMAIN_CONFIRMATION_COUNT = 2
+DEFAULT_DOMAIN_EXPIRY_DAYS = (60, 30, 15, 7, 1)
+
+
 class SystemConfig(Base):
     __tablename__ = "system_config"
 
@@ -116,8 +124,14 @@ class SystemConfig(Base):
     data_retention_days = Column(Integer, default=30, nullable=False)
     cleanup_time = Column(String(10), default="03:00", nullable=False)
     aggregate_interval = Column(Integer, default=1, nullable=False)
-    dashboard_chart_points = Column(Integer, default=12, nullable=False)
+    dashboard_chart_points = Column(Integer, default=5, nullable=False)
     auto_refresh_location = Column(Boolean, default=False, nullable=False)
+    domain_dns_interval = Column(Integer, default=DEFAULT_DOMAIN_DNS_INTERVAL, nullable=False)
+    domain_rdap_interval = Column(Integer, default=DEFAULT_DOMAIN_RDAP_INTERVAL, nullable=False)
+    domain_confirmation_count = Column(Integer, default=DEFAULT_DOMAIN_CONFIRMATION_COUNT, nullable=False)
+    domain_expiry_days = Column(String(64), default=','.join(map(str, DEFAULT_DOMAIN_EXPIRY_DAYS)), nullable=False)
+    domain_webhook_url = Column(String(1000), nullable=True)
+    domain_webhook_secret = Column(String(255), nullable=True)
     report_webhook_url = Column(String(1000), nullable=True)
     report_webhook_secret = Column(String(255), nullable=True)
     daily_report_enabled = Column(Boolean, default=False, nullable=False)
@@ -127,6 +141,41 @@ class SystemConfig(Base):
     monthly_report_enabled = Column(Boolean, default=False, nullable=False)
     monthly_report_time = Column(String(10), default="09:00", nullable=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+
+class MonitoredDomain(Base):
+    __tablename__ = "monitored_domains"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(253), unique=True, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    expected_ns = Column(JSON, default=list, nullable=False)
+    records = Column(JSON, default=list, nullable=False)
+    notify = Column(Boolean, default=True, nullable=False)
+    reminder_minutes = Column(Integer, default=30, nullable=False)
+    checks = Column(JSON, default=dict, nullable=False)
+    manual_expiry = Column(Date, nullable=True)
+    expiry = Column(DateTime, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    rdap_checked_at = Column(DateTime, nullable=True)
+    incident_level = Column(Integer, default=0, nullable=False)
+    last_incident_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class DomainAlert(Base):
+    __tablename__ = "domain_alerts"
+
+    id = Column(Integer, primary_key=True)
+    domain_id = Column(Integer, index=True, nullable=False)
+    domain_name = Column(String(253), nullable=False)
+    alert_type = Column(String(50), nullable=False)
+    message = Column(Text, nullable=False)
+    delivery_status = Column(String(20), nullable=False)
+    is_sent = Column(Boolean, default=False, nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    next_attempt_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
 
 
 class User(Base):

@@ -1377,7 +1377,7 @@ const fetchScreenData = async () => {
   loading.value = true
   try {
     const screenDataRequest = isPreviewMode.value ? api.getDataScreenPreview() : api.getPublicDataScreen()
-    const alertDataRequest = isPreviewMode.value ? api.getAlerts(24, 1, 12) : api.getPublicAlerts(24, 12)
+    const alertDataRequest = isPreviewMode.value ? api.getAlerts(24, 1, 12, null, null, null, 'host') : api.getPublicAlerts(24, 12)
     const [screenData, alertData, trendData] = await Promise.all([
       screenDataRequest,
       alertDataRequest,

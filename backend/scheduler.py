@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app_settings import settings
 from cache import cache_manager
 from database import Alert, Host, PingRecord, SessionLocal, SystemConfig, get_database_backend
+from domain_monitor import run_domain_monitor
 from ip_location_service import ip_location_service
 from notification_template import NotificationTemplate
 from ping_service import PingService
@@ -81,11 +82,16 @@ class MonitorScheduler:
         self.reload_config(initial=True)
 
         if not self.scheduler.running:
+            self.scheduler.add_job(
+                run_domain_monitor, "interval", seconds=10, id="monitor_domains",
+                next_run_time=datetime.now(self.scheduler.timezone), replace_existing=True,
+            )
             self.scheduler.start()
             logger.info("监控调度器已启动")
 
-        thread = threading.Thread(target=self.monitor_all_hosts, daemon=True)
-        thread.start()
+        if not settings.disable_host_monitor:
+            thread = threading.Thread(target=self.monitor_all_hosts, daemon=True)
+            thread.start()
 
     def stop(self) -> None:
         if self.scheduler.running:
@@ -247,6 +253,8 @@ class MonitorScheduler:
         logger.info("监控间隔已更新为 %s 分钟", minutes)
 
     def monitor_all_hosts(self) -> None:
+        if settings.disable_host_monitor:
+            return
         start_time = datetime.now()
         with self.alert_lock:
             self.alert_queue = []

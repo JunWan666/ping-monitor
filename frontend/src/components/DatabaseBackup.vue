@@ -8,7 +8,12 @@
       class="backup-alert"
     />
 
-    <el-card v-if="exporting || exportStatus || downloadingExport" shadow="never" class="import-status-card">
+    <el-radio-group v-model="backupMode" class="backup-mode-tabs" size="small">
+      <el-radio-button label="export">导出备份</el-radio-button>
+      <el-radio-button label="import">导入恢复</el-radio-button>
+    </el-radio-group>
+
+    <el-card v-if="showExportStatus" shadow="never" class="import-status-card">
       <template #header>
         <div class="card-header">
           <span>导出状态</span>
@@ -53,16 +58,18 @@
           <el-icon><Download /></el-icon>
           {{ downloadingExport ? `正在下载 ${exportDownloadProgress}%` : '下载 SQL 文件' }}
         </el-button>
+        <el-button v-if="!exporting && !downloadingExport" @click="exportStatus = ''">新建导出</el-button>
       </div>
 
-      <div ref="exportLogRef" class="import-log">
-        <div v-for="(line, index) in exportLogs" :key="index" class="import-log-line">
+      <div class="import-log">
+        <div v-for="(line, index) in visibleExportLogs" :key="index" class="import-log-line" :title="line">
           {{ line }}
         </div>
       </div>
+      <el-pagination v-if="exportLogs.length > jobLogPageSize" v-model:current-page="exportLogPage" :page-size="jobLogPageSize" :total="exportLogs.length" :pager-count="5" layout="prev, pager, next" small />
     </el-card>
 
-    <el-card v-if="importing || importStatus" shadow="never" class="import-status-card">
+    <el-card v-else-if="showImportStatus" shadow="never" class="import-status-card">
       <template #header>
         <div class="card-header">
           <span>导入状态</span>
@@ -80,15 +87,17 @@
         <span v-if="importCurrentTable">当前表：{{ importCurrentTable }}</span>
       </div>
 
-      <div ref="importLogRef" class="import-log">
-        <div v-for="(line, index) in importLogs" :key="index" class="import-log-line">
+      <div class="import-log">
+        <div v-for="(line, index) in visibleImportLogs" :key="index" class="import-log-line" :title="line">
           {{ line }}
         </div>
       </div>
+      <el-pagination v-if="importLogs.length > jobLogPageSize" v-model:current-page="importLogPage" :page-size="jobLogPageSize" :total="importLogs.length" :pager-count="5" layout="prev, pager, next" small />
+      <el-button v-if="!importing" size="small" @click="importStatus = ''">重新选择文件</el-button>
     </el-card>
 
-    <el-row :gutter="20" class="backup-grid">
-      <el-col :xs="24" :lg="12">
+    <el-row v-else class="backup-grid">
+      <el-col v-if="backupMode === 'export'" :span="24">
         <el-card shadow="hover" class="backup-card">
           <template #header>
             <div class="card-header">
@@ -108,7 +117,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :lg="12">
+      <el-col v-else :span="24">
         <el-card shadow="hover" class="backup-card">
           <template #header>
             <div class="card-header">
@@ -157,12 +166,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 const router = useRouter()
+const backupMode = ref('export')
 const ACTIVE_EXPORT_JOB_KEY = 'ping-monitor-active-export-job-id'
 const ACTIVE_IMPORT_JOB_KEY = 'ping-monitor-active-import-job-id'
 const IMPORT_SUMMARY_KEY = 'ping-monitor-import-summary'
@@ -179,14 +189,14 @@ const exportFileSize = ref(0)
 const exportFilename = ref('')
 const downloadingExport = ref(false)
 const exportDownloadProgress = ref(0)
-const exportLogRef = ref(null)
+const exportLogPage = ref(1)
 const importJobId = ref('')
 const importStatus = ref('')
 const importStage = ref('')
 const importProgress = ref(0)
 const importLogs = ref([])
 const importCurrentTable = ref('')
-const importLogRef = ref(null)
+const importLogPage = ref(1)
 const exportPollTimer = ref(null)
 const importPollTimer = ref(null)
 const fileList = ref([])
@@ -194,6 +204,13 @@ const selectedFile = ref(null)
 const resumingExport = ref(false)
 const resumingImport = ref(false)
 let componentUnmounted = false
+
+const jobLogPageSize = 4
+const pageJobLogs = (lines, page) => [...lines].reverse().slice((page - 1) * jobLogPageSize, page * jobLogPageSize)
+const visibleExportLogs = computed(() => pageJobLogs(exportLogs.value, exportLogPage.value))
+const visibleImportLogs = computed(() => pageJobLogs(importLogs.value, importLogPage.value))
+const showExportStatus = computed(() => backupMode.value === 'export' && (exporting.value || exportStatus.value || downloadingExport.value))
+const showImportStatus = computed(() => backupMode.value === 'import' && (importing.value || importStatus.value))
 
 const tableLabels = {
   hosts: '主机',
@@ -369,20 +386,6 @@ const rememberActiveImportJob = (jobId) => {
   }
 
   sessionStorage.removeItem(ACTIVE_IMPORT_JOB_KEY)
-}
-
-const scrollExportLogToBottom = async () => {
-  await nextTick()
-  if (exportLogRef.value) {
-    exportLogRef.value.scrollTop = exportLogRef.value.scrollHeight
-  }
-}
-
-const scrollImportLogToBottom = async () => {
-  await nextTick()
-  if (importLogRef.value) {
-    importLogRef.value.scrollTop = importLogRef.value.scrollHeight
-  }
 }
 
 const applyExportJob = (job) => {
@@ -633,6 +636,7 @@ const exportBackup = async () => {
   exportFileSize.value = 0
   exportFilename.value = ''
   exportDownloadProgress.value = 0
+  exportLogPage.value = 1
   exportLogs.value = ['正在创建 SQL 导出任务...']
 
   try {
@@ -698,6 +702,7 @@ const importBackup = async () => {
   importStage.value = 'queued'
   importProgress.value = 0
   importCurrentTable.value = ''
+  importLogPage.value = 1
   importLogs.value = ['正在上传 SQL 备份文件...']
 
   try {
@@ -732,8 +737,6 @@ onActivated(() => {
   resumeActiveImportJob()
 })
 
-watch(exportLogs, scrollExportLogToBottom)
-watch(importLogs, scrollImportLogToBottom)
 </script>
 
 <style scoped>
@@ -743,8 +746,10 @@ watch(importLogs, scrollImportLogToBottom)
 }
 
 .backup-alert {
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
+
+.backup-mode-tabs { margin-bottom: 8px; }
 
 .backup-grid {
   align-items: stretch;
@@ -798,18 +803,19 @@ watch(importLogs, scrollImportLogToBottom)
 }
 
 .import-log {
-  max-height: 180px;
-  overflow-y: auto;
-  padding: 12px;
+  padding: 6px 8px;
   border: 1px solid #ebeef5;
   border-radius: 6px;
   background: #fafafa;
 }
 
 .import-log-line {
+  overflow: hidden;
   font-size: 13px;
   line-height: 1.6;
   color: #606266;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sql-upload {
@@ -822,7 +828,10 @@ watch(importLogs, scrollImportLogToBottom)
 
 .sql-upload :deep(.el-upload-dragger) {
   width: 100%;
+  padding-block: 12px;
 }
+
+.sql-upload :deep(.el-icon--upload) { font-size: 28px; margin: 0 0 6px; }
 
 .upload-tip {
   color: #909399;
@@ -848,11 +857,60 @@ watch(importLogs, scrollImportLogToBottom)
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .database-backup {
+    display: flex;
+    flex-direction: column;
     height: 100%;
-    overflow-y: auto;
-    padding-bottom: 4px;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+
+  .backup-mode-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 8px 0;
+  }
+
+  .backup-mode-tabs :deep(.el-radio-button) {
+    flex: 1 1 0;
+  }
+
+  .backup-mode-tabs :deep(.el-radio-button__inner) {
+    width: 100%;
+    padding: 8px 4px;
+  }
+
+  .backup-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .backup-grid :deep(.el-col) {
+    display: flex;
+    min-height: 0;
+    margin-bottom: 0;
+  }
+
+  .backup-grid :deep(.backup-card) {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .import-status-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .import-status-card :deep(.el-card__body) {
+    min-height: 0;
+    overflow: hidden;
   }
 
   .database-backup :deep(.el-card) {

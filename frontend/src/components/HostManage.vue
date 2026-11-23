@@ -1,5 +1,5 @@
 <template>
-  <div class="host-manage-page">
+  <div ref="pageRoot" class="host-manage-page viewport-page">
     <div v-if="isMobile" class="host-mobile">
       <el-card shadow="never" class="host-mobile__toolbar">
         <div class="host-mobile__search-row">
@@ -40,28 +40,28 @@
         </div>
       </el-card>
 
-      <div class="host-mobile__cards">
+      <div class="host-mobile__cards" data-page-rows-box>
         <el-card v-for="row in filteredHosts" :key="row.id" shadow="never" class="host-mobile__card" @click="showMobileDetail(row)">
           <div class="host-mobile__card-head">
             <div class="host-mobile__title-block">
-              <span class="host-mobile__dot" :class="`is-${getStatusTagType(row.status)}`"></span>
+              <span class="host-mobile__dot" :class="`is-${getStatusTagType(getDisplayStatus(row))}`"></span>
               <div class="host-mobile__title-text">
-                <div class="host-mobile__name">{{ row.name }}</div>
-                <div class="host-mobile__ip">{{ row.resolved_ip || row.address }}</div>
+                <div class="host-mobile__name"><span class="list-number">{{ row.id }}</span> {{ row.name }}</div>
+                <div class="host-mobile__ip">{{ row.address }}</div>
               </div>
             </div>
             <div class="host-mobile__head-actions" @click.stop>
               <el-switch v-model="row.enabled" @change="updateHostStatus(row)" />
-              <button type="button" class="host-mobile__chevron" @click="showMobileDetail(row)">
+              <button type="button" class="host-mobile__chevron" aria-label="查看主机详情" @click="showMobileDetail(row)">
                 <el-icon><ArrowRight /></el-icon>
               </button>
             </div>
           </div>
 
           <div class="host-mobile__status-row">
-            <el-tag :type="getStatusTagType(row.status)" effect="plain">{{ row.status }}</el-tag>
-            <span>延迟 {{ row.avg_rtt !== null && row.avg_rtt !== undefined ? `${row.avg_rtt} ms` : '--' }}</span>
-            <span>丢包率 {{ row.packet_loss !== null && row.packet_loss !== undefined ? `${row.packet_loss}%` : '--' }}</span>
+            <el-tag :type="getStatusTagType(getDisplayStatus(row))" effect="plain">{{ getDisplayStatus(row) }}</el-tag>
+            <span>延迟 {{ metricLabel(row, 'avg_rtt', ' ms') }}</span>
+            <span>丢包率 {{ metricLabel(row, 'packet_loss', '%') }}</span>
           </div>
         </el-card>
       </div>
@@ -82,35 +82,38 @@
         />
       </div>
 
-      <el-drawer
+    </div>
+    <el-drawer
         v-model="mobileDetailVisible"
         :title="mobileDetailHost?.name || '主机详情'"
-        direction="btt"
-        size="76%"
+        :direction="isMobile ? 'btt' : 'rtl'"
+        :size="isMobile ? '76%' : '380px'"
         class="host-mobile__drawer"
       >
         <div v-if="mobileDetailHost" class="host-mobile-detail">
           <div class="host-mobile-detail__hero">
-            <span class="host-mobile__dot" :class="`is-${getStatusTagType(mobileDetailHost.status)}`"></span>
+            <span class="host-mobile__dot" :class="`is-${getStatusTagType(getDisplayStatus(mobileDetailHost))}`"></span>
             <div>
               <div class="host-mobile-detail__name">{{ mobileDetailHost.name }}</div>
-              <div class="host-mobile-detail__address">{{ mobileDetailHost.address }}</div>
+              <button type="button" class="host-desktop-address host-mobile-detail__address" title="复制监控地址" @click="copyAddress(mobileDetailHost.address)">
+                {{ mobileDetailHost.address }}
+              </button>
             </div>
-            <el-tag :type="getStatusTagType(mobileDetailHost.status)" effect="plain">{{ mobileDetailHost.status }}</el-tag>
+            <el-tag :type="getStatusTagType(getDisplayStatus(mobileDetailHost))" effect="plain">{{ getDisplayStatus(mobileDetailHost) }}</el-tag>
           </div>
 
           <div class="host-mobile-detail__grid">
             <div class="host-mobile-detail__cell">
               <span>解析 IP</span>
-              <strong>{{ mobileDetailHost.resolved_ip || '-' }}</strong>
+              <strong><el-button v-if="mobileDetailHost.resolved_ip" type="primary" size="small" link @click="copyAddress(mobileDetailHost.resolved_ip)">{{ mobileDetailHost.resolved_ip }}</el-button><span v-else>—</span></strong>
             </div>
             <div class="host-mobile-detail__cell">
               <span>平均延迟</span>
-              <strong>{{ mobileDetailHost.avg_rtt !== null && mobileDetailHost.avg_rtt !== undefined ? `${mobileDetailHost.avg_rtt} ms` : '-' }}</strong>
+              <strong>{{ metricLabel(mobileDetailHost, 'avg_rtt', ' ms') }}</strong>
             </div>
             <div class="host-mobile-detail__cell">
               <span>丢包率</span>
-              <strong>{{ mobileDetailHost.packet_loss !== null && mobileDetailHost.packet_loss !== undefined ? `${mobileDetailHost.packet_loss}%` : '-' }}</strong>
+              <strong>{{ metricLabel(mobileDetailHost, 'packet_loss', '%') }}</strong>
             </div>
             <div class="host-mobile-detail__cell">
               <span>告警阈值</span>
@@ -120,7 +123,7 @@
 
           <div class="host-mobile-detail__section">
             <div class="host-mobile-detail__label">位置</div>
-            <div class="host-mobile-detail__value">{{ formatLocation(mobileDetailHost) }}</div>
+            <div class="host-mobile-detail__value">{{ formatLocationLabel(mobileDetailHost) }}</div>
           </div>
           <div class="host-mobile-detail__section">
             <div class="host-mobile-detail__label">最后检查</div>
@@ -129,6 +132,10 @@
           <div class="host-mobile-detail__section">
             <div class="host-mobile-detail__label">描述</div>
             <div class="host-mobile-detail__value">{{ mobileDetailHost.description || '暂无描述' }}</div>
+          </div>
+          <div class="host-mobile-detail__section">
+            <div class="host-mobile-detail__label">创建时间</div>
+            <div class="host-mobile-detail__value">{{ mobileDetailHost.created_at ? new Date(mobileDetailHost.created_at).toLocaleString() : '暂无' }}</div>
           </div>
 
           <div class="host-mobile-detail__actions">
@@ -139,29 +146,51 @@
           </div>
         </div>
       </el-drawer>
-    </div>
-
-    <template v-else>
-    <el-card shadow="hover">
+    <template v-if="!isMobile">
+    <el-card shadow="never" class="viewport-list-card host-list-card">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
-          <span style="font-weight: bold">主机列表</span>
-          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap">
-            <el-input 
-              v-model="searchKeyword" 
-              placeholder="搜索名称、地址、IP、描述、地区或运营商" 
+        <div class="host-list-toolbar">
+          <div class="host-list-toolbar__top">
+            <div class="host-list-toolbar__heading">
+              <strong>主机列表</strong>
+              <span>{{ filteredAllHosts.length }} 台</span>
+            </div>
+            <div class="host-list-toolbar__actions">
+              <el-button v-if="selectedHosts.length" type="primary" plain :loading="batchPingLoading" :disabled="!selectedEnabledCount" @click="batchPing">
+                <el-icon><Promotion /></el-icon> 批量 Ping ({{ selectedEnabledCount }})
+              </el-button>
+              <el-button v-if="selectedHosts.length" type="danger" plain @click="batchDelete">
+                <el-icon><Delete /></el-icon> 批量删除 ({{ selectedHosts.length }})
+              </el-button>
+              <el-button v-if="selectedHosts.length" @click="batchRefreshLocation">
+                <el-icon><Refresh /></el-icon> 批量刷新位置 ({{ selectedHosts.length }})
+              </el-button>
+              <el-button @click="exportHosts">
+                <el-icon><Download /></el-icon> 导出
+              </el-button>
+              <el-button @click="showBatchImportDialog">
+                <el-icon><Upload /></el-icon> 批量导入
+              </el-button>
+              <el-button type="primary" @click="showAddDialog">
+                <el-icon><Plus /></el-icon> 添加主机
+              </el-button>
+            </div>
+          </div>
+          <div class="host-list-toolbar__filters">
+            <el-input
+              v-model="searchKeyword"
+              placeholder="搜索名称、地址、IP 或地区"
               clearable
-              style="width: 320px"
+              class="host-list-toolbar__search"
             >
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-select 
-              v-model="statusFilter" 
-              placeholder="状态筛选" 
+            <el-select
+              v-model="statusFilter"
+              placeholder="状态筛选"
               clearable
-              style="width: 130px"
             >
               <el-option label="正常" value="正常" />
               <el-option label="异常" value="异常" />
@@ -172,7 +201,6 @@
               v-model="enabledFilter"
               placeholder="启用状态"
               clearable
-              style="width: 120px"
             >
               <el-option label="已启用" value="enabled" />
               <el-option label="已停用" value="disabled" />
@@ -181,166 +209,96 @@
               v-model="locationFilter"
               placeholder="定位状态"
               clearable
-              style="width: 120px"
             >
               <el-option label="已定位" value="success" />
               <el-option label="获取失败" value="failed" />
               <el-option label="获取中" value="pending" />
             </el-select>
-            <el-button type="primary" @click="loadHosts">
+            <el-button @click="loadHosts">
               <el-icon><Refresh /></el-icon> 刷新
-            </el-button>
-            <el-button type="danger" @click="batchDelete" :disabled="selectedHosts.length === 0" v-if="selectedHosts.length > 0">
-              <el-icon><Delete /></el-icon> 批量删除 ({{ selectedHosts.length }})
-            </el-button>
-            <el-button type="info" @click="batchRefreshLocation" :disabled="selectedHosts.length === 0" v-if="selectedHosts.length > 0">
-              <el-icon><Refresh /></el-icon> 批量刷新位置 ({{ selectedHosts.length }})
-            </el-button>
-            <el-button type="warning" @click="exportHosts">
-              <el-icon><Download /></el-icon> 导出
-            </el-button>
-            <el-button type="success" @click="showBatchImportDialog">
-              <el-icon><Upload /></el-icon> 批量导入
-            </el-button>
-            <el-button type="primary" @click="showAddDialog">
-              <el-icon><Plus /></el-icon> 添加主机
             </el-button>
           </div>
         </div>
       </template>
 
-      <el-table :data="filteredHosts" style="width: 100%" @selection-change="handleSelectionChange">
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="id" label="ID" width="80" align="center" header-align="center" />
-        <el-table-column prop="name" label="主机名称" width="150" align="center" header-align="center" />
-        <el-table-column label="地址" width="200" align="center" header-align="center">
-          <template #default="{ row }">
-            <span
-              @click="copyAddress(row.address)"
-              style="cursor: pointer; color: #409eff; text-decoration: underline"
-              :title="'点击复制: ' + row.address"
-            >
-              {{ row.address }}
-            </span>
-            <el-icon
-              @click="copyAddress(row.address)"
-              style="margin-left: 5px; cursor: pointer; color: #409eff"
-              :title="'复制地址'"
-            >
-              <CopyDocument />
-            </el-icon>
-          </template>
-        </el-table-column>
-        <el-table-column label="IP地址" width="180" align="center" header-align="center">
-          <template #default="{ row }">
-            <span
-              v-if="row.resolved_ip"
-              @click="copyAddress(row.resolved_ip)"
-              style="cursor: pointer; color: #409eff; text-decoration: underline"
-              :title="'点击复制: ' + row.resolved_ip"
-            >
-              {{ row.resolved_ip }}
-            </span>
-            <span v-else style="color: #909399">未解析</span>
-            <el-icon
-              @click="refreshIp(row.id, row.name)"
-              style="margin-left: 5px; cursor: pointer; color: #67c23a"
-              :title="'刷新IP地址'"
-            >
-              <Refresh />
-            </el-icon>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100" align="center" header-align="center">
-          <template #default="{ row }">
-            <el-tag :type="getStatusTagType(row.status)">{{ row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="丢包率" width="100" align="center" header-align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.packet_loss !== null && row.packet_loss !== undefined" :type="getPacketLossTagType(row.packet_loss)">
-              {{ row.packet_loss }}%
-            </el-tag>
-            <span v-else style="color: #909399">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="平均延迟" width="110" align="center" header-align="center">
-          <template #default="{ row }">
-            <span v-if="row.avg_rtt !== null && row.avg_rtt !== undefined" :style="{ color: getRttColor(row.avg_rtt), fontWeight: '600' }">
-              {{ row.avg_rtt }}ms
-            </span>
-            <span v-else style="color: #909399">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="最后检查" width="180" align="center" header-align="center">
-          <template #default="{ row }">
-            <span v-if="row.last_check">{{ new Date(row.last_check).toLocaleString() }}</span>
-            <span v-else style="color: #909399">暂无</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="150" align="center" header-align="center" />
-        <el-table-column label="地理位置" width="200" align="center" header-align="center">
-          <template #default="{ row }">
-            <div v-if="row.location_status === 'success'" style="display: flex; align-items: center; justify-content: center; gap: 5px">
-              <el-icon style="color: #67c23a"><Location /></el-icon>
-              <span>{{ formatLocation(row) }}</span>
-              <el-icon
-                @click="refreshLocation(row.id, row.name)"
-                style="cursor: pointer; color: #409eff"
-                :title="'刷新地理位置'"
-              >
-                <Refresh />
-              </el-icon>
-            </div>
-            <div v-else-if="row.location_status === 'failed'" style="display: flex; align-items: center; justify-content: center; gap: 5px">
-              <el-icon style="color: #f56c6c"><WarningFilled /></el-icon>
-              <span style="color: #909399">获取失败</span>
-              <el-icon
-                @click="refreshLocation(row.id, row.name)"
-                style="cursor: pointer; color: #409eff"
-                :title="'重新获取'"
-              >
-                <Refresh />
-              </el-icon>
-            </div>
-            <div v-else style="display: flex; align-items: center; justify-content: center; gap: 5px">
-              <el-icon style="color: #909399"><Loading /></el-icon>
-              <span style="color: #909399">获取中...</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="告警阈值" width="120" align="center" header-align="center">
-          <template #default="{ row }">
-            {{ row.alert_threshold }}%
-          </template>
-        </el-table-column>
-        <el-table-column label="启用" width="100" align="center" header-align="center">
-          <template #default="{ row }">
-            <el-switch v-model="row.enabled" @change="updateHostStatus(row)" />
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="180" align="center" header-align="center">
-          <template #default="{ row }">
-            {{ new Date(row.created_at).toLocaleString() }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right" align="center" header-align="center">
-          <template #default="{ row }">
-            <el-button type="primary" size="small" @click="pingHost(row)">Ping</el-button>
-            <el-button type="warning" size="small" @click="showEditDialog(row)">编辑</el-button>
-            <el-button type="danger" size="small" @click="deleteHost(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div ref="hostTableArea" class="viewport-table-area" data-page-rows-box>
+        <el-table :data="filteredHosts" row-key="id" size="small" class="host-list-table" @selection-change="handleSelectionChange">
+          <el-table-column type="selection" :width="compactTable ? 32 : 36" />
+          <el-table-column prop="id" label="ID" :width="compactTable ? 42 : 52" align="center" />
+          <el-table-column :label="showAddressColumn ? '主机名称' : '监控目标'" :min-width="compactTable ? 110 : 124">
+            <template #default="{ row }">
+              <div class="host-desktop-identity">
+                <el-button type="primary" link :title="row.name" @click="showMobileDetail(row)">{{ row.name }}</el-button>
+                <button v-if="!showAddressColumn" type="button" class="host-desktop-address" :title="'复制地址 ' + row.address" @click="copyAddress(row.address)">
+                  {{ row.address }}
+                </button>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="showAddressColumn" label="监控地址" min-width="150">
+            <template #default="{ row }">
+              <button type="button" class="host-desktop-address" :title="'复制地址 ' + row.address" @click="copyAddress(row.address)">
+                {{ row.address }}
+              </button>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" min-width="64" align="center">
+            <template #default="{ row }"><el-tag size="small" effect="light" :type="getStatusTagType(getDisplayStatus(row))">{{ getDisplayStatus(row) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="平均延迟" :min-width="compactTable ? 68 : 82" align="center">
+            <template #default="{ row }">
+              <span :class="{ 'host-desktop-muted': row.avg_rtt == null && row.status !== '离线' }" :style="{ color: row.avg_rtt != null ? getRttColor(row.avg_rtt) : undefined }">{{ metricLabel(row, 'avg_rtt', ' ms') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="丢包率" :min-width="compactTable ? 58 : 76" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.packet_loss != null && row.packet_loss > 0" size="small" effect="plain" :type="getPacketLossTagType(row.packet_loss)">{{ metricLabel(row, 'packet_loss', '%') }}</el-tag><span v-else :class="{ 'host-desktop-muted': row.packet_loss == null && row.status !== '离线' }">{{ metricLabel(row, 'packet_loss', '%') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="showCheckTimeColumn" label="最近检查" width="148" align="center">
+            <template #default="{ row }">
+              <span :class="{ 'host-desktop-muted': !row.last_check }">{{ formatCheckTime(row.last_check) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="showIpColumn" label="解析 IP" min-width="120">
+            <template #default="{ row }">
+              <button v-if="row.resolved_ip" type="button" class="host-desktop-address" :title="'复制 IP ' + row.resolved_ip" @click="copyAddress(row.resolved_ip)">
+                {{ row.resolved_ip }}
+              </button>
+              <span v-else class="host-desktop-muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="showLocationColumn" label="位置" min-width="126" show-overflow-tooltip>
+            <template #default="{ row }">{{ formatLocationLabel(row) }}</template>
+          </el-table-column>
+          <el-table-column label="启用" :width="compactTable ? 46 : 52" align="center">
+            <template #default="{ row }"><el-switch v-model="row.enabled" size="small" :aria-label="`启用 ${row.name}`" @change="updateHostStatus(row)" /></template>
+          </el-table-column>
+          <el-table-column label="操作" width="116" align="center">
+            <template #default="{ row }">
+              <div class="host-desktop-actions">
+                <el-button type="primary" size="small" link @click="pingHost(row)">Ping</el-button>
+                <el-button type="primary" size="small" link @click="showEditDialog(row)">编辑</el-button>
+                <el-dropdown trigger="click" @command="deleteHost(row)">
+                  <el-button size="small" link :icon="MoreFilled" aria-label="更多主机操作" title="更多主机操作" />
+                  <template #dropdown>
+                    <el-dropdown-menu><el-dropdown-item command="delete">删除主机</el-dropdown-item></el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
       
       <!-- 分页 -->
-      <div style="margin-top: 15px; display: flex; justify-content: center">
+      <div class="viewport-table-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[10, 20, 50, 100]"
           :total="filteredAllHosts.length"
-          layout="total, sizes, prev, pager, next, jumper"
+          layout="total, prev, pager, next"
+          :pager-count="5"
           :small="true"
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
@@ -571,17 +529,17 @@
               </el-descriptions-item>
               <el-descriptions-item label="最小延迟" label-align="center" align="center">
                 <span :style="{ color: getDelayColor(pingSummary.min_rtt), fontSize: '14px', fontWeight: 'bold' }">
-                  {{ pingSummary.min_rtt ? pingSummary.min_rtt + 'ms' : '-' }}
+                  {{ pingSummary.min_rtt != null ? pingSummary.min_rtt + ' ms' : '—' }}
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="最大延迟" label-align="center" align="center">
                 <span :style="{ color: getDelayColor(pingSummary.max_rtt), fontSize: '14px', fontWeight: 'bold' }">
-                  {{ pingSummary.max_rtt ? pingSummary.max_rtt + 'ms' : '-' }}
+                  {{ pingSummary.max_rtt != null ? pingSummary.max_rtt + ' ms' : '—' }}
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="平均延迟" label-align="center" align="center">
                 <span :style="{ color: getDelayColor(pingSummary.avg_rtt), fontSize: '18px', fontWeight: 'bold' }">
-                  {{ pingSummary.avg_rtt ? pingSummary.avg_rtt + 'ms' : '-' }}
+                  {{ pingSummary.avg_rtt != null ? pingSummary.avg_rtt + ' ms' : '—' }}
                 </span>
               </el-descriptions-item>
             </el-descriptions>
@@ -603,13 +561,16 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight, Filter, UploadFilled, Download, Upload, Location, Refresh, WarningFilled, Loading, Plus } from '@element-plus/icons-vue'
+import { ArrowRight, Filter, UploadFilled, Download, Upload, Refresh, Plus, MoreFilled } from '@element-plus/icons-vue'
 import api from '../api'
 import { useViewport } from '../lib/useViewport'
+import { usePageRows } from '../lib/usePageRows'
 
 const hosts = ref([])
 const hostsWithStatus = ref([])
 const selectedHosts = ref([])
+const batchPingLoading = ref(false)
+const selectedEnabledCount = computed(() => selectedHosts.value.filter(host => host.enabled).length)
 const dialogVisible = ref(false)
 const batchDialogVisible = ref(false)
 const pingDialogVisible = ref(false)
@@ -635,9 +596,30 @@ const statusFilter = ref('')
 const enabledFilter = ref('')
 const locationFilter = ref('')
 const currentPage = ref(1)
-const pageSize = ref(10)
+const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 430 ? 76 : 108 })
 const mobileFiltersVisible = ref(false)
 const { isMobile } = useViewport()
+const hostTableArea = ref(null)
+const hostTableWidth = ref(0)
+const compactTable = computed(() => hostTableWidth.value < 600)
+const showCheckTimeColumn = computed(() => hostTableWidth.value >= 722)
+const showAddressColumn = computed(() => hostTableWidth.value >= 892)
+const showIpColumn = computed(() => hostTableWidth.value >= 1012)
+const showLocationColumn = computed(() => hostTableWidth.value >= 1142)
+const checkTimeFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short', hour12: false })
+const formatCheckTime = (value) => {
+  const date = value ? new Date(value) : null
+  return date && Number.isFinite(date.getTime()) ? checkTimeFormatter.format(date) : '—'
+}
+
+watch(hostTableArea, (area, _, onCleanup) => {
+  if (!area) return
+  const measure = () => { hostTableWidth.value = area.clientWidth }
+  const observer = new ResizeObserver(measure)
+  observer.observe(area)
+  measure()
+  onCleanup(() => observer.disconnect())
+}, { flush: 'post' })
 let xlsxModulePromise = null
 
 const getXLSX = async () => {
@@ -941,6 +923,36 @@ const handleSelectionChange = (selection) => {
   selectedHosts.value = selection
 }
 
+const batchPing = async () => {
+  const targets = selectedHosts.value.filter(host => host.enabled)
+  if (!targets.length) {
+    ElMessage.warning('请先选择已启用的主机')
+    return
+  }
+
+  batchPingLoading.value = true
+  let succeeded = 0
+  let failed = 0
+  try {
+    for (const host of targets) {
+      try {
+        await api.pingNow(host.id, true)
+        succeeded++
+      } catch {
+        failed++
+      }
+    }
+    const skipped = selectedHosts.value.length - targets.length
+    if (failed) {
+      ElMessage.warning('批量 Ping 完成：成功 ' + succeeded + ' 台，失败 ' + failed + ' 台，跳过停用 ' + skipped + ' 台')
+    } else {
+      ElMessage.success('批量 Ping 已启动：' + succeeded + ' 台' + (skipped ? '，跳过停用 ' + skipped + ' 台' : ''))
+    }
+  } finally {
+    batchPingLoading.value = false
+  }
+}
+
 const batchDelete = async () => {
   if (selectedHosts.value.length === 0) {
     ElMessage.warning('请选择要删除的主机')
@@ -1087,12 +1099,12 @@ const batchRefreshLocation = async () => {
 }
 
 // 格式化地理位置显示
-const formatLocation = (host) => {
-  const parts = []
-  if (host.country) parts.push(host.country)
-  if (host.province) parts.push(host.province)
-  if (host.city) parts.push(host.city)
-  return parts.length > 0 ? parts.join(' ') : '未知'
+const formatLocationLabel = (host) => {
+  const parts = [host.country, host.province, host.city].filter(Boolean)
+  if (parts.length) return parts.join(' ')
+  if (host.location_status === 'failed') return '获取失败'
+  if (host.location_status === 'pending') return '获取中'
+  return '未知'
 }
 
 const normalizeLocationStatus = (status) => {
@@ -1100,6 +1112,21 @@ const normalizeLocationStatus = (status) => {
     return status
   }
   return 'pending'
+}
+
+const metricLabel = (host, key, unit) => {
+  if (!host?.enabled) return '—'
+  if (key === 'avg_rtt' && (host.status === '离线' || Number(host.packet_loss) >= 100)) return '超时'
+  if (host[key] == null) return '尚未检测'
+  return `${host[key]}${unit}`
+}
+
+const getDisplayStatus = (host) => {
+  if (!host?.enabled) return '已停用'
+  if (host?.status === '正常') return '正常'
+  if (host?.status === '异常') return '异常'
+  if (host?.status === '离线') return '离线'
+  return '尚未检测'
 }
 
 const getStatusTagType = (status) => {
@@ -1127,12 +1154,11 @@ const getPacketLossTagType = (packetLoss) => {
 
 const getRttColor = (avgRtt) => {
   if (Number(avgRtt) >= 150) {
-    return '#f56c6c'
+    return 'var(--el-color-danger)'
   }
   if (Number(avgRtt) >= 80) {
-    return '#e6a23c'
+    return 'var(--el-color-warning)'
   }
-  return '#67c23a'
 }
 
 const submitBatchImport = async () => {
@@ -1485,6 +1511,8 @@ const handleFileChange = (file) => {
   }
 }
 
+watch(pageSize, () => { currentPage.value = 1 })
+
 onMounted(() => {
   loadHosts()
 })
@@ -1509,6 +1537,111 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+.host-list-toolbar {
+  display: grid;
+  gap: 9px;
+}
+
+.host-list-toolbar__top,
+.host-list-toolbar__heading,
+.host-list-toolbar__actions,
+.host-list-toolbar__filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.host-list-toolbar__top {
+  justify-content: space-between;
+}
+
+.host-list-toolbar__heading strong {
+  color: var(--el-text-color-primary);
+  font-size: 15px;
+}
+
+.host-list-toolbar__heading span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.host-list-toolbar__actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.host-list-toolbar__search {
+  width: clamp(180px, 18vw, 280px);
+}
+
+.host-list-toolbar__filters .el-select {
+  width: 98px;
+}
+
+.host-list-table :deep(.cell) {
+  font-size: 13px;
+}
+
+.host-desktop-identity {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+  line-height: 16px;
+}
+
+.host-desktop-identity :deep(.el-button) {
+  max-width: 100%;
+  padding: 0;
+  font-weight: 600;
+}
+
+.host-desktop-identity :deep(.el-button > span) {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.host-desktop-address {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.host-desktop-address:hover {
+  color: var(--el-color-primary);
+  text-decoration: underline;
+}
+
+.host-desktop-identity > .host-desktop-address {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.host-desktop-muted {
+  color: var(--el-text-color-secondary);
+}
+
+.host-desktop-actions {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+}
+
+.host-desktop-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .host-mobile {
@@ -1563,14 +1696,17 @@ onMounted(() => {
   gap: 10px;
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  padding-bottom: 8px;
+  overflow: hidden;
 }
 
 .host-mobile__card {
   border-radius: 14px;
-  flex: 0 0 auto;
+  flex: 0 0 108px;
 }
+
+.host-mobile__card :deep(.el-card__body) { padding: 10px; }
+.host-mobile__name,
+.host-mobile__ip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .host-mobile__card-head {
   display: flex;
@@ -1706,7 +1842,6 @@ onMounted(() => {
   margin-top: 4px;
   font-size: 12px;
   color: #6b7280;
-  word-break: break-all;
 }
 
 .host-mobile-detail__grid {
@@ -1778,5 +1913,28 @@ onMounted(() => {
   .host-ping-layout > div {
     min-width: 0 !important;
   }
+}
+@media (max-width: 768px) and (max-height: 430px) {
+  .host-mobile { gap: 3px; }
+  .host-mobile__toolbar :deep(.el-card__body) { padding: 4px 6px; }
+  .host-mobile__search-row { gap: 5px; }
+  .host-mobile__search-row :deep(.el-input__wrapper), .host-mobile__filter-btn { min-height: 27px; height: 27px; }
+  .host-mobile__filter-btn { width: 30px; min-width: 30px; border-radius: 5px; }
+  .host-mobile__count-row { margin-top: 2px; font-size: 10px; line-height: 12px; }
+  .host-mobile__cards { gap: 3px; }
+  .host-mobile__card { box-sizing: border-box; flex-basis: 76px; height: 76px; }
+  .host-mobile__card :deep(.el-card__body) { padding: 4px 6px; }
+  .host-mobile__card-head { align-items: center; gap: 5px; }
+  .host-mobile__title-block { gap: 5px; }
+  .host-mobile__name { font-size: 12px; line-height: 15px; }
+  .host-mobile__ip { margin-top: 0; font-size: 10px; line-height: 13px; }
+  .host-mobile__dot { width: 6px; height: 6px; margin-top: 0; }
+  .host-mobile__head-actions { gap: 2px; }
+  .host-mobile__head-actions .el-switch { transform: scale(.78); transform-origin: right center; }
+  .host-mobile__chevron { width: 18px; height: 20px; }
+  .host-mobile__status-row { gap: 5px; margin-top: 1px; font-size: 10px; line-height: 15px; }
+  .host-mobile__status-row :deep(.el-tag) { height: 19px; line-height: 17px; }
+  .host-mobile__pager { padding-block: 1px; }
+  .host-mobile__fab { right: 8px; bottom: 68px; width: 37px; height: 37px; }
 }
 </style>

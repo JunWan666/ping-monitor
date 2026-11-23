@@ -8,8 +8,9 @@ import os
 import re
 import socket
 import tempfile
+from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 import requests
 import uvicorn
@@ -17,8 +18,8 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from sqlalchemy import or_
+from pydantic import BaseModel, Field
+from sqlalchemy import literal, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from analytics_service import (
@@ -86,7 +87,11 @@ DATABASE_EXPORT_DIR = os.path.join(tempfile.gettempdir(), "ping-monitor-exports"
 database_import_jobs: dict[str, dict[str, Any]] = {}
 database_export_jobs: dict[str, dict[str, Any]] = {}
 
+from database import DomainAlert
+from domain_api import router as domain_router
+
 app = FastAPI(title="Ping 监控系统", version="2.0.0")
+app.include_router(domain_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,7 +176,7 @@ class SystemConfigUpdate(BaseModel):
     data_retention_days: Optional[int] = None
     cleanup_time: Optional[str] = None
     aggregate_interval: Optional[int] = None
-    dashboard_chart_points: Optional[int] = None
+    dashboard_chart_points: Optional[int] = Field(default=None, ge=3, le=5)
     auto_refresh_location: Optional[bool] = None
     report_webhook_url: Optional[str] = None
     report_webhook_secret: Optional[str] = None
@@ -1322,7 +1327,12 @@ async def ping_now(
 
 
 @app.get("/api/ping-stream/{host_id}")
-async def ping_stream(host_id: int, token: str, db: Session = Depends(get_db)):
+async def ping_stream(
+    host_id: int,
+    token: str,
+    mode: Literal["configured", "quick"] = "configured",
+    db: Session = Depends(get_db),
+):
     if not token:
         raise HTTPException(status_code=401, detail="缺少 token")
 
@@ -1338,12 +1348,18 @@ async def ping_stream(host_id: int, token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="主机不存在")
 
     packet_count, packet_timeout = get_runtime_ping_settings(db)
+    if mode == "quick":
+        packet_count = 10
 
     async def event_generator():
         stream_db = SessionLocal()
         summary_event = None
+        complete_event = None
         try:
             for event in PingService.ping_host_stream(host.address, count=packet_count, timeout=packet_timeout):
+                if event.get("type") == "complete":
+                    complete_event = event
+                    continue
                 if event.get("type") == "summary":
                     summary_event = event
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -1368,6 +1384,8 @@ async def ping_stream(host_id: int, token: str, db: Session = Depends(get_db)):
                     config = get_or_create_system_config(stream_db)
                     await maybe_sync_host_location_after_ping(stream_db, stream_host, config=config)
                 invalidate_runtime_cache()
+            if complete_event:
+                yield f"data: {json.dumps(complete_event, ensure_ascii=False)}\n\n"
         except Exception as exc:
             logger.error("流式 Ping 失败: %s", exc)
             yield f"data: {json.dumps({'type': 'error', 'message': f'Ping 失败: {exc}'}, ensure_ascii=False)}\n\n"
@@ -1446,37 +1464,57 @@ async def get_alerts(
     keyword: Optional[str] = None,
     alert_type: Optional[str] = None,
     sent_status: Optional[str] = None,
+    source: Optional[str] = None,
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    since = datetime.now() - timedelta(hours=hours)
-    query = db.query(Alert).filter(Alert.created_at >= since)
+    page, page_size = max(1, page), min(200, max(1, page_size))
+    since = datetime.now() - timedelta(hours=max(1, min(hours, 24 * 365)))
+    host_alerts = select(
+        Alert.id, Alert.host_id, Alert.host_name, Alert.alert_type, Alert.message, Alert.is_sent,
+        Alert.created_at, literal("host").label("source"), literal(None).label("delivery_status"),
+    ).where(Alert.created_at >= since)
+    domain_alerts = select(
+        DomainAlert.id, literal(None).label("host_id"), DomainAlert.domain_name.label("host_name"),
+        DomainAlert.alert_type, DomainAlert.message, DomainAlert.is_sent, DomainAlert.created_at,
+        literal("domain").label("source"), DomainAlert.delivery_status,
+    ).where(DomainAlert.created_at >= since)
+    if source == "domain" and not current_user:
+        raise HTTPException(401, "请登录查看域名告警")
+    if source == "domain":
+        rows = domain_alerts.subquery()
+    elif source == "host" or not current_user:
+        rows = host_alerts.subquery()
+    else:
+        rows = union_all(host_alerts, domain_alerts).subquery()
+    columns = rows.c
+    query = db.query(rows)
 
     if keyword:
         search = f"%{keyword.strip()}%"
         query = query.filter(
             or_(
-                Alert.host_name.ilike(search),
-                Alert.message.ilike(search),
+                columns.host_name.ilike(search),
+                columns.message.ilike(search),
             )
         )
 
     if alert_type:
-        query = query.filter(Alert.alert_type == alert_type)
+        query = query.filter(columns.alert_type == alert_type)
 
     if sent_status == "sent":
-        query = query.filter(Alert.is_sent.is_(True))
+        query = query.filter(columns.is_sent.is_(True))
     elif sent_status == "unsent":
-        query = query.filter(Alert.is_sent.is_(False))
+        query = query.filter(columns.is_sent.is_(False))
 
     total = query.count()
     items = (
-        query.order_by(Alert.created_at.desc(), Alert.id.desc())
+        query.order_by(columns.created_at.desc(), columns.source, columns.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
     )
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {"items": [dict(item._mapping) for item in items], "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/dashboard")
@@ -2087,6 +2125,9 @@ if frontend_dist.exists():
     assets_dir = frontend_dist / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+    bigscreen_dir = frontend_dist / "bigscreen"
+    if bigscreen_dir.exists():
+        app.mount("/bigscreen", StaticFiles(directory=str(bigscreen_dir)), name="bigscreen")
 
     @app.get("/")
     async def serve_frontend_root():
@@ -2100,6 +2141,10 @@ if frontend_dist.exists():
         file_path = frontend_dist / full_path
         if file_path.is_file():
             return FileResponse(str(file_path))
+
+        # Keep missing static assets as 404s; only extensionless URLs are SPA routes.
+        if Path(full_path).suffix:
+            raise HTTPException(status_code=404, detail="Static asset not found")
 
         index_path = frontend_dist / "index.html"
         if index_path.exists():
