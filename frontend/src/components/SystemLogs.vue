@@ -61,8 +61,9 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
+          :page-sizes="[15, 20, 50]"
           :total="total"
-          layout="prev, pager, next"
+          layout="sizes, prev, pager, next"
           :small="true"
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
@@ -155,7 +156,7 @@
       </template>
 
       <div class="viewport-table-area" data-page-rows-box>
-      <el-table :data="logs" size="small" v-loading="loading" empty-text="当前筛选条件下暂无系统日志">
+      <el-table :data="logs" height="100%" size="small" v-loading="loading" empty-text="当前筛选条件下暂无系统日志">
           <el-table-column label="序号" width="48" align="center"><template #default="{ $index }">{{ (currentPage - 1) * pageSize + $index + 1 }}</template></el-table-column>
         <el-table-column label="时间" width="158" show-overflow-tooltip>
           <template #default="{ row }">
@@ -186,8 +187,9 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
+          :page-sizes="[15, 20, 50, 100]"
           :total="total"
-          layout="total, prev, pager, next"
+          layout="total, sizes, prev, pager, next"
           :pager-count="5"
           :small="true"
           @size-change="handleSizeChange"
@@ -230,7 +232,7 @@ const cleanupLoading = ref(false)
 const logs = ref([])
 const total = ref(0)
 const currentPage = ref(1)
-const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 430 ? 58 : 154 })
+const { pageRoot, pageSize } = usePageRows({ initialPageSize: 15, rowHeight: 36, stretchTableRows: true })
 const keywordFilter = ref('')
 const timeRangeFilter = ref(null)
 const logTypeFilter = ref('')

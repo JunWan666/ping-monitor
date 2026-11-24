@@ -63,7 +63,7 @@ export default {
   updateDomainSettings: (data) => apiClient.put('/domains/settings', data),
   getDomainNotification: () => apiClient.get('/domains/notification'),
   updateDomainNotification: (data) => apiClient.put('/domains/notification', data),
-  testDomainNotification: () => apiClient.post('/domains/notification/test', null, { timeout: 15000 }),
+  testDomainNotification: (alertType = 'domain_warning') => apiClient.post('/domains/notification/test', { alert_type: alertType }, { timeout: 15000 }),
   discoverDomainNS: (name) => apiClient.post('/domains/discover', { name }, { timeout: 25000 }),
   createDomain: (data) => apiClient.post('/domains', data),
   updateDomain: (id, data) => apiClient.put(`/domains/${id}`, data),

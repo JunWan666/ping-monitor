@@ -33,7 +33,7 @@
           </el-select>
         </div>
         <div v-if="!isMobile" class="viewport-table-area databoard-table" data-page-rows-box v-loading="loading">
-          <el-table :data="filteredHostData" size="small" :empty-text="loadError || '暂无主机数据'" @sort-change="handleSortChange">
+          <el-table :data="filteredHostData" height="100%" size="small" :empty-text="loadError || '暂无主机数据'" @sort-change="handleSortChange">
             <el-table-column label="序号" width="48" align="center"><template #default="{ $index }">{{ numberAt($index) }}</template></el-table-column>
             <el-table-column label="监控目标" min-width="190" show-overflow-tooltip>
               <template #default="{ row }"><div class="table-identity"><strong>{{ row.name }}</strong><small>{{ row.address }}</small></div></template>
@@ -53,7 +53,7 @@
           <el-empty v-if="!loading && !filteredHostData.length" :description="loadError || '暂无主机数据'" :image-size="34" />
         </div>
         <div class="viewport-table-pager">
-          <el-pagination v-model:current-page="currentPage" :page-size="pageSize" :total="filteredAllHostData.length" layout="prev, pager, next" :pager-count="5" small />
+          <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :page-sizes="[15, 20, 50, 100]" :total="filteredAllHostData.length" layout="total, sizes, prev, pager, next" :pager-count="5" small />
         </div>
       </template>
     </el-card>
@@ -71,7 +71,7 @@ import { useViewport } from '../lib/useViewport'
 import { usePageRows } from '../lib/usePageRows'
 
 const { isMobile } = useViewport()
-const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 340 ? 42 : window.innerHeight <= 430 ? 48 : 72 })
+const { pageRoot, pageSize } = usePageRows({ initialPageSize: 15, rowHeight: 36, stretchTableRows: true })
 const ranges = [
   { value: '1h', label: '近 1 小时' }, { value: '1d', label: '近 24 小时' },
   { value: '3d', label: '近 3 天' }, { value: '7d', label: '近 7 天' },

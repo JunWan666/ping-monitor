@@ -38,7 +38,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
 .viewport-table-area {
   --table-cell-inset: 11px;
-  --table-row-height: 44px;
+  --table-row-height: 36px;
   flex: 1 1 0;
   min-height: 0;
   min-width: 0;
@@ -75,8 +75,17 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 .viewport-table-pager {
   display: flex;
   flex: 0 0 auto;
-  justify-content: flex-end;
-  padding-top: 6px;
+  justify-content: center;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--line);
+}
+
+.viewport-table-pager .el-pagination {
+  justify-content: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .list-number {
@@ -120,7 +129,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 .admin-settings {
   display: flex;
   flex: 1 1 0;
-  flex-direction: column;
+  flex-direction: row;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -129,11 +138,14 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 }
 
 .admin-settings__nav {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
+  display: flex;
+  flex: 0 0 184px;
+  flex-direction: column;
   align-items: stretch;
-  padding: 0 8px;
+  gap: 4px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -142,13 +154,16 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 .admin-settings__tab {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
-  min-height: 44px;
-  padding: 4px;
+  min-height: 40px;
+  padding: 0 12px;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
   background: transparent;
+  text-align: left;
+  transition: background-color 140ms ease, color 140ms ease;
   color: var(--ink-secondary);
   font: inherit;
   font-size: 14px;
@@ -160,8 +175,18 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
   color: var(--brand);
 }
 
+.admin-settings__tab:hover {
+  background: var(--surface-muted);
+}
+
+.admin-settings__tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
 .admin-settings__tab.active {
-  border-bottom-color: var(--brand);
+  border-left-color: var(--brand);
+  background: var(--brand-soft);
   font-weight: 600;
 }
 
@@ -188,6 +213,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
 @media (max-width: 768px) {
   .admin-settings {
+    flex-direction: column;
     gap: 8px;
   }
 }

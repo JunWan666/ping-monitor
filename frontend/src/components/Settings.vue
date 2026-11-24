@@ -169,6 +169,22 @@
               />
             </el-form-item>
             <p class="settings-section-note settings-field--wide">可以用单独的钉钉群或机器人。Webhook 留空时，域名事件仍保存在告警记录。</p>
+            <section class="domain-notification-tests settings-field--wide" aria-label="域名通知模板测试">
+              <div class="domain-notification-tests__heading">
+                <strong>通知效果预览</strong>
+                <p>点击后先保存当前配置，再向钉钉群发送一条带“模板测试”标记的消息；不会创建真实告警记录。</p>
+              </div>
+              <div class="domain-notification-tests__buttons">
+                <el-button
+                  v-for="item in domainTestTypes"
+                  :key="item.value"
+                  :type="item.buttonType"
+                  :loading="testingDomainNotification === item.value"
+                  :disabled="!domainNotification.webhook_url || busy"
+                  @click="saveAndTestDomainNotification(item.value)"
+                >{{ item.label }}</el-button>
+              </div>
+            </section>
           </el-form>
 
           <el-form v-else-if="basicSection === 'data'" :model="config" label-position="top" class="settings-section-form settings-section-form--landscape-row">
@@ -254,12 +270,6 @@
               :disabled="!canTestNotification || busy"
               @click="saveAndTestHostNotification"
             >保存并测试</el-button>
-            <el-button
-              v-if="basicSection === 'domain-alert'"
-              :loading="testingDomainNotification"
-              :disabled="!domainNotification.webhook_url || busy"
-              @click="saveAndTestDomainNotification"
-            >保存并测试</el-button>
           </div>
         </el-card>
       </div>
@@ -319,9 +329,9 @@
         <div class="ping-logs-mobile__pager">
           <el-pagination
             v-model:current-page="currentPage"
-            :page-size="pageSize"
+            v-model:page-size="pageSize"
             :total="totalLogs"
-            layout="prev, pager, next"
+            layout="sizes, prev, pager, next"
             :small="true"
             :pager-count="5"
           />
@@ -357,7 +367,7 @@
         </template>
 
         <div class="ping-logs-table-area viewport-table-area" data-page-rows-box v-loading="loadingPingLogs">
-        <el-table :data="pingLogs" class="ping-logs-table" size="small" empty-text="暂无 Ping 日志">
+        <el-table :data="pingLogs" height="100%" class="ping-logs-table" size="small" empty-text="暂无 Ping 日志">
           <el-table-column label="序号" width="48" align="center"><template #default="{ $index }">{{ (currentPage - 1) * pageSize + $index + 1 }}</template></el-table-column>
           <el-table-column :label="width < 900 ? '监控目标' : '主机'" min-width="110" show-overflow-tooltip>
             <template #default="{ row }">
@@ -413,9 +423,9 @@
         <div class="ping-logs-pager">
           <el-pagination
             v-model:current-page="currentPage"
-            :page-size="pageSize"
+            v-model:page-size="pageSize"
             :total="totalLogs"
-            layout="total, prev, pager, next"
+            :page-sizes="[15, 20, 50, 100]" layout="total, sizes, prev, pager, next"
             :pager-count="5"
             small
             background
@@ -463,7 +473,7 @@ const activeSection = computed(() => basicSections.find(item => item.key === bas
 const saving = ref(false)
 const loadingConfig = ref(false)
 const testingNotification = ref(false)
-const testingDomainNotification = ref(false)
+const testingDomainNotification = ref('')
 const sendingReportType = ref('')
 const busy = computed(() => saving.value || loadingConfig.value || testingNotification.value || testingDomainNotification.value || !!sendingReportType.value)
 const notificationPlatform = ref('none')
@@ -471,7 +481,7 @@ const pingLogs = ref([])
 const hostSearchKeyword = ref('')
 const selectedStatus = ref('')
 const currentPage = ref(1)
-const { pageRoot, pageSize } = usePageRows({ rowHeight: 36, mobileRowHeight: 104 })
+const { pageRoot, pageSize } = usePageRows({ initialPageSize: 15, rowHeight: 36, stretchTableRows: true })
 const totalLogs = ref(0)
 const loadingPingLogs = ref(false)
 let pingLogRequest = 0
@@ -482,6 +492,12 @@ const domainConfig = reactive({
   expiry_days: [60, 30, 15, 7, 1]
 })
 const domainNotification = reactive({ webhook_url: '', webhook_secret: '' })
+const domainTestTypes = [
+  { value: 'domain_warning', label: '测试警告提醒', buttonType: 'warning' },
+  { value: 'domain_critical', label: '测试严重异常', buttonType: 'danger' },
+  { value: 'domain_recovery', label: '测试恢复正常', buttonType: 'success' },
+  { value: 'domain_expiry', label: '测试到期提醒', buttonType: 'primary' }
+]
 
 const config = reactive({
   check_interval: 5,
@@ -603,17 +619,17 @@ const saveConfig = async () => {
   }
 }
 
-const saveAndTestDomainNotification = async () => {
+const saveAndTestDomainNotification = async (alertType) => {
   saving.value = true
-  testingDomainNotification.value = true
+  testingDomainNotification.value = alertType
   try {
     await persistSection('domain-alert')
-    await api.testDomainNotification()
-    ElMessage.success('域名测试通知已发送，请检查对应的钉钉群')
+    const result = await api.testDomainNotification(alertType)
+    ElMessage.success(result.message || '域名模板测试通知已发送，请检查对应的钉钉群')
   } catch (error) {
     ElMessage.error(`域名通知测试失败: ${errorDetail(error)}`)
   } finally {
-    testingDomainNotification.value = false
+    testingDomainNotification.value = ''
     saving.value = false
   }
 }
@@ -850,6 +866,19 @@ onMounted(() => {
   color: var(--el-text-color-regular);
 }
 
+.domain-notification-tests {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+.domain-notification-tests__heading strong { color: var(--ink); font-size: 13px; }
+.domain-notification-tests__heading p { margin: 4px 0 0; color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
+.domain-notification-tests__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.domain-notification-tests__buttons .el-button + .el-button { margin-left: 0; }
+
 .settings-section-actions {
   display: flex;
   flex-wrap: wrap;
@@ -939,7 +968,7 @@ onMounted(() => {
 .ping-logs-pager {
   display: flex;
   flex: 0 0 auto;
-  justify-content: flex-end;
+  justify-content: center;
   padding-top: 8px;
 }
 

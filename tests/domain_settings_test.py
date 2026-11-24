@@ -108,6 +108,23 @@ class DomainSettingsTest(unittest.TestCase):
             service.return_value.send_webhook.return_value = False
             self.assertEqual(self.client.post("/api/domains/notification/test").status_code, 502)
 
+    def test_each_notification_preview_uses_its_requested_event_template(self):
+        self.client.put("/api/domains/notification", json={
+            "webhook_url": DOMAIN_URL, "webhook_secret": "domain-secret",
+        }).raise_for_status()
+        for alert_type in ("domain_warning", "domain_critical", "domain_recovery", "domain_expiry"):
+            with self.subTest(alert_type=alert_type), patch("domain_api.NotificationService") as service:
+                service.return_value.send_webhook.return_value = True
+                response = self.client.post("/api/domains/notification/test", json={"alert_type": alert_type})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["alert_type"], alert_type)
+                send = service.return_value.send_webhook.call_args
+                self.assertEqual(send.kwargs["alert_type"], alert_type)
+                self.assertIn("模板测试", send.kwargs["title"])
+                service.return_value.configure.assert_called_once_with(
+                    webhook_url=DOMAIN_URL, webhook_secret="domain-secret",
+                )
+
     def test_missing_domain_channel_never_falls_back_to_host_robot_or_replays_old_events(self):
         with self.sessions() as db:
             domain = db.query(MonitoredDomain).one()

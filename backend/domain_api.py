@@ -59,6 +59,10 @@ class DomainNotificationSettings(BaseModel):
     webhook_secret: str = Field(default="", max_length=255)
 
 
+class DomainNotificationTest(BaseModel):
+    alert_type: Literal["domain_warning", "domain_critical", "domain_recovery", "domain_expiry"] = "domain_warning"
+
+
 def get_system_config(db):
     return db.query(SystemConfig).first()
 
@@ -114,18 +118,32 @@ def update_notification(body: DomainNotificationSettings, db: Session = Depends(
 
 
 @router.post("/notification/test", dependencies=[Depends(require_admin)])
-def test_notification(db: Session = Depends(get_db)):
+def test_notification(body: DomainNotificationTest | None = None, db: Session = Depends(get_db)):
     config = get_system_config(db)
     if not config or not config.domain_webhook_url:
         raise HTTPException(400, "请先保存域名专用钉钉机器人的 Webhook 地址")
+
+    alert_type = body.alert_type if body else "domain_warning"
+    examples = {
+        "domain_warning": "- 公共 DNS 查询异常：本次未取得足够的可验证样本",
+        "domain_critical": "- 注册局 NS：登记的服务器与预期配置不一致\n- 权威 DNS：连续检测到解析记录异常",
+        "domain_recovery": "- 恢复说明：注册局 NS、权威 DNS 和公共 DNS 均已连续检查正常",
+        "domain_expiry": "- 到期信息：示例域名将在 30 天后到期，请及时确认续费",
+    }
+    labels = {
+        "domain_warning": "警告提醒",
+        "domain_critical": "严重异常",
+        "domain_recovery": "恢复正常",
+        "domain_expiry": "到期提醒",
+    }
     sample = NotificationTemplate.get_domain_alert(
-        "example.com", "domain_warning", "- 通知渠道：域名监控机器人测试", is_test=True,
+        "example.com", alert_type, examples[alert_type], is_test=True,
     )
     notifier = NotificationService()
     notifier.configure(webhook_url=config.domain_webhook_url, webhook_secret=config.domain_webhook_secret)
-    if not notifier.send_webhook(sample["content"], title=sample["title"]):
-        raise HTTPException(502, "测试通知发送失败，请核对域名机器人的 Webhook 和安全设置")
-    return {"message": "域名测试通知已发送"}
+    if not notifier.send_webhook(sample["content"], alert_type=alert_type, title=sample["title"]):
+        raise HTTPException(502, "域名测试通知发送失败，请核对域名机器人的 Webhook 和安全设置")
+    return {"message": f"域名{labels[alert_type]}模板测试通知已发送", "alert_type": alert_type}
 
 
 def domain_name(value):

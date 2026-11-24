@@ -38,7 +38,7 @@
         </el-card>
       </div>
       <div v-if="rows.length > pageSize" class="domain-mobile__pager">
-        <el-pagination v-model:current-page="currentPage" :page-size="pageSize" :total="rows.length" layout="prev, pager, next" :small="true" @current-change="handleCurrentChange" />
+        <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :total="rows.length" :page-sizes="[15, 20, 50]" layout="sizes, prev, pager, next" :small="true" @current-change="handleCurrentChange" />
       </div>
     </section>
 
@@ -103,8 +103,8 @@
         </el-table-column>
       </el-table>
     </div>
-    <div class="domain-desktop__pager">
-      <el-pagination v-model:current-page="currentPage" :page-size="pageSize" :total="rows.length" layout="total, prev, pager, next" :pager-count="5" small @current-change="handleCurrentChange" />
+    <div class="domain-desktop__pager viewport-table-pager">
+      <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :total="rows.length" :page-sizes="[15, 20, 50]" layout="total, sizes, prev, pager, next" :pager-count="5" small @current-change="handleCurrentChange" />
     </div>
   </el-card>
 
@@ -181,7 +181,7 @@ import { useViewport } from '../lib/useViewport'
 import { usePageRows } from '../lib/usePageRows'
 
 const { isMobile, width } = useViewport()
-const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 430 ? 92 : window.innerWidth <= 360 ? 128 : 155 })
+const { pageRoot, pageSize } = usePageRows({ initialPageSize: 15, rowHeight: 36, stretchTableRows: true })
 const rows = ref([])
 const currentPage = ref(1)
 const loading = ref(false)
@@ -345,7 +345,7 @@ onActivated(() => { if (props.focusRequest) openRequestedDomain(); else load() }
 .domain-mobile__pager { display: flex; flex: 0 0 auto; justify-content: center; padding-bottom: 2px; }
 .domain-desktop-card { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .domain-desktop-card :deep(.el-card__body) { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; padding: 8px 12px; }
-.domain-desktop__pager { display: flex; flex: 0 0 auto; justify-content: flex-end; padding-top: 10px; }
+.domain-desktop__pager { display: flex; flex: 0 0 auto; justify-content: center; padding-top: 8px; }
 .domain-mobile__item.is-expanded { flex-basis: auto; }
 .domain-mobile__item .domain-details { margin-top: 8px; }
 .domain-expand-button, .domain-mobile__head { display: flex; align-items: center; border: 0; background: transparent; color: var(--brand); cursor: pointer; }

@@ -74,8 +74,9 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
+          :page-sizes="[15, 20, 50]"
           :total="filteredAllHosts.length"
-          layout="prev, pager, next"
+          layout="sizes, prev, pager, next"
           :small="true"
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
@@ -222,7 +223,7 @@
       </template>
 
       <div ref="hostTableArea" class="viewport-table-area" data-page-rows-box>
-        <el-table :data="filteredHosts" row-key="id" size="small" class="host-list-table" @selection-change="handleSelectionChange">
+        <el-table :data="filteredHosts" row-key="id" height="100%" size="small" class="host-list-table" @selection-change="handleSelectionChange">
           <el-table-column type="selection" :width="compactTable ? 32 : 36" />
           <el-table-column prop="id" label="ID" :width="compactTable ? 42 : 52" align="center" />
           <el-table-column :label="showAddressColumn ? '主机名称' : '监控目标'" :min-width="compactTable ? 110 : 124">
@@ -296,8 +297,9 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
+          :page-sizes="[15, 20, 50, 100]"
           :total="filteredAllHosts.length"
-          layout="total, prev, pager, next"
+          layout="total, sizes, prev, pager, next"
           :pager-count="5"
           :small="true"
           @size-change="handleSizeChange"
@@ -596,7 +598,7 @@ const statusFilter = ref('')
 const enabledFilter = ref('')
 const locationFilter = ref('')
 const currentPage = ref(1)
-const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 430 ? 76 : 108 })
+const { pageRoot, pageSize } = usePageRows({ initialPageSize: 15, rowHeight: 36, stretchTableRows: true })
 const mobileFiltersVisible = ref(false)
 const { isMobile } = useViewport()
 const hostTableArea = ref(null)

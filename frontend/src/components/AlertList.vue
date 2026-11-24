@@ -86,8 +86,9 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
+          :page-sizes="[15, 20, 50, 100]"
           :total="totalAlerts"
-          layout="prev, next"
+          layout="sizes, prev, pager, next"
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
           background
@@ -140,7 +141,7 @@
       </template>
 
       <div class="viewport-table-area" data-page-rows-box>
-      <el-table :data="alerts" size="small" v-loading="loading" empty-text="当前筛选条件下暂无告警记录">
+      <el-table :data="alerts" height="100%" size="small" v-loading="loading" empty-text="当前筛选条件下暂无告警记录">
           <el-table-column label="序号" width="48" align="center"><template #default="{ $index }">{{ (currentPage - 1) * pageSize + $index + 1 }}</template></el-table-column>
         <el-table-column prop="host_name" label="监控对象" min-width="124" show-overflow-tooltip />
         <el-table-column label="告警类型" min-width="102" align="center">
@@ -175,8 +176,9 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
+          :page-sizes="[15, 20, 50, 100]"
           :total="totalAlerts"
-          layout="total, prev, pager, next"
+          layout="total, sizes, prev, pager, next"
           :pager-count="5"
           small
           @size-change="handleSizeChange"
@@ -214,7 +216,7 @@ const deliveryLabels = {
   no_channel: '无通知渠道', superseded: '已取消',
 }
 const currentPage = ref(1)
-const { pageRoot, pageSize } = usePageRows({ rowHeight: 44, mobileRowHeight: () => window.innerHeight <= 430 ? 58 : 138 })
+const { pageRoot, pageSize } = usePageRows({ initialPageSize: 15, rowHeight: 36, stretchTableRows: true })
 const totalAlerts = ref(0)
 const mobileSeverityFilter = ref('all')
 const mobileFilterPanelVisible = ref(false)
