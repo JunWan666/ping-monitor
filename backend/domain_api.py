@@ -63,6 +63,11 @@ class DomainNotificationTest(BaseModel):
     alert_type: Literal["domain_warning", "domain_critical", "domain_recovery", "domain_expiry"] = "domain_warning"
 
 
+class DomainStateUpdate(BaseModel):
+    enabled: bool | None = None
+    notify: bool | None = None
+
+
 def get_system_config(db):
     return db.query(SystemConfig).first()
 
@@ -201,6 +206,21 @@ def commit_domain(db):
 @router.get("", dependencies=[Depends(require_admin)])
 def list_domains(db: Session = Depends(get_db)):
     return db.scalars(select(MonitoredDomain).order_by(MonitoredDomain.name)).all()
+
+
+@router.patch("/{domain_id}/state", dependencies=[Depends(require_admin)])
+def update_domain_state(domain_id: int, body: DomainStateUpdate, db: Session = Depends(get_db)):
+    row = get_domain(db, domain_id)
+    if body.enabled is None and body.notify is None:
+        return row
+    if body.enabled is not None:
+        row.enabled = body.enabled
+    if body.notify is not None:
+        row.notify = body.notify
+    if not row.enabled or not row.notify:
+        stop_delivery(db, row.id)
+    commit_domain(db)
+    return row
 
 
 @router.post("/discover", dependencies=[Depends(require_admin)])

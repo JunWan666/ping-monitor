@@ -83,6 +83,32 @@ class DomainSettingsTest(unittest.TestCase):
             self.assertEqual(self.client.post("/api/domains/notification/test").status_code, 403)
             send.assert_not_called()
 
+    def test_domain_monitor_and_notification_switches_are_independent(self):
+        response = self.client.patch("/api/domains/1/state", json={"notify": False})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["enabled"])
+        self.assertFalse(response.json()["notify"])
+
+        response = self.client.patch("/api/domains/1/state", json={"enabled": False})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["enabled"])
+        self.assertFalse(response.json()["notify"])
+
+        response = self.client.patch("/api/domains/1/state", json={"notify": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["enabled"])
+        self.assertTrue(response.json()["notify"])
+
+        response = self.client.patch("/api/domains/1/state", json={"enabled": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["enabled"])
+        self.assertTrue(response.json()["notify"])
+
+    def test_non_admin_cannot_update_domain_switches(self):
+        self.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(is_admin=False)
+        response = self.client.patch("/api/domains/1/state", json={"enabled": False})
+        self.assertEqual(response.status_code, 403)
+
     def test_invalid_policy_and_webhook_are_rejected_before_saving(self):
         for payload in ({"dns_interval": 0}, {"rdap_interval": 1441}, {"confirmation_count": 11},
                         {"expiry_days": [366]}, {"expiry_days": [-1]}, {"expiry_days": [1.5]}):

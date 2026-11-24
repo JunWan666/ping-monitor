@@ -67,6 +67,7 @@ export default {
   discoverDomainNS: (name) => apiClient.post('/domains/discover', { name }, { timeout: 25000 }),
   createDomain: (data) => apiClient.post('/domains', data),
   updateDomain: (id, data) => apiClient.put(`/domains/${id}`, data),
+  updateDomainState: (id, data) => apiClient.patch(`/domains/${id}/state`, data),
   deleteDomain: (id) => apiClient.delete(`/domains/${id}`),
   createHost: (data) => apiClient.post('/hosts', data),
   updateHost: (id, data) => apiClient.put(`/hosts/${id}`, data),

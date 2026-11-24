@@ -1509,7 +1509,7 @@ async def get_alerts(
 
     total = query.count()
     items = (
-        query.order_by(columns.created_at.desc(), columns.source, columns.id.desc())
+        query.order_by(columns.created_at.desc(), columns.id.desc(), columns.source)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

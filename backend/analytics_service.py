@@ -100,7 +100,7 @@ def get_ping_logs_page(
     total = query.order_by(None).count()
     offset = (page - 1) * page_size
     items = (
-        query.order_by(PingRecord.created_at.desc(), PingRecord.id.desc())
+        query.order_by(PingRecord.id.desc(), PingRecord.created_at.desc())
         .offset(offset)
         .limit(page_size)
         .all()

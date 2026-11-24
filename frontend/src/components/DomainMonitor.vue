@@ -28,11 +28,13 @@
           <div class="domain-mobile__summary">
             <span>预期 NS：{{ row.expected_ns?.length || 0 }} 台</span>
             <span>解析记录：{{ row.records?.length || 0 }} 条</span>
-            <span>通知{{ row.notify ? '开启' : '关闭' }}</span>
+            <span>告警通知 {{ row.notify ? '已开启' : '已关闭' }}</span>
           </div>
-          <div class="domain-mobile__actions">
-            <el-button type="warning" plain size="small" @click="open(row)"><el-icon><Edit /></el-icon>编辑</el-button>
-            <el-button type="danger" plain size="small" @click="remove(row)"><el-icon><Delete /></el-icon>删除</el-button>
+          <div class="domain-mobile__controls">
+            <label class="domain-state-switch"><span>监控</span><el-switch :model-value="row.enabled" :loading="stateUpdating.has(`${row.id}:enabled`)" aria-label="启用域名监控" @change="value => changeState(row, 'enabled', value)" /></label>
+            <label class="domain-state-switch"><span>钉钉通知</span><el-switch :model-value="row.notify" :loading="stateUpdating.has(`${row.id}:notify`)" aria-label="启用域名钉钉通知" @change="value => changeState(row, 'notify', value)" /></label>
+            <el-button type="primary" link size="small" @click="open(row)"><el-icon><Edit /></el-icon>编辑</el-button>
+            <el-button type="danger" link size="small" @click="remove(row)" :disabled="stateUpdating.has(`${row.id}:enabled`) || stateUpdating.has(`${row.id}:notify`)"><el-icon><Delete /></el-icon>删除</el-button>
           </div>
           <DomainMonitorDetails v-if="expandedId === row.id" :row="row" :data-domain-details="row.id" />
         </el-card>
@@ -92,6 +94,12 @@
         </el-table-column>
         <el-table-column v-if="width >= 900" label="最近检查" min-width="148" show-overflow-tooltip>
           <template #default="{ row }">{{ formatDate(row.last_checked_at) }}</template>
+        </el-table-column>
+        <el-table-column label="监控" width="84" align="center">
+          <template #default="{ row }"><el-switch :model-value="row.enabled" :loading="stateUpdating.has(`${row.id}:enabled`)" :aria-label="`启用 ${row.name} 监控`" @change="value => changeState(row, 'enabled', value)" /></template>
+        </el-table-column>
+        <el-table-column label="钉钉通知" width="96" align="center">
+          <template #default="{ row }"><el-switch :model-value="row.notify" :loading="stateUpdating.has(`${row.id}:notify`)" :aria-label="`启用 ${row.name} 钉钉通知`" @change="value => changeState(row, 'notify', value)" /></template>
         </el-table-column>
         <el-table-column label="操作" width="96" align="center">
           <template #default="{ row }">
@@ -186,6 +194,7 @@ const rows = ref([])
 const currentPage = ref(1)
 const loading = ref(false)
 const saving = ref(false)
+const stateUpdating = ref(new Set())
 const discovering = ref(false)
 const dialog = ref(false)
 const editing = ref(null)
@@ -279,6 +288,27 @@ async function discover() {
   }
 }
 
+async function changeState(row, field, value) {
+  const key = `${row.id}:${field}`
+  const pending = new Set(stateUpdating.value)
+  pending.add(key)
+  stateUpdating.value = pending
+  try {
+    const saved = await api.updateDomainState(row.id, { [field]: Boolean(value) })
+    const index = rows.value.findIndex(item => item.id === row.id)
+    if (index >= 0) rows.value[index] = { ...rows.value[index], enabled: saved.enabled, notify: saved.notify }
+    ElMessage.success(field === 'enabled'
+      ? (saved.enabled ? '域名监控已启用' : '域名监控已停用')
+      : (saved.notify ? '钉钉告警通知已启用' : '钉钉告警通知已关闭'))
+  } catch (err) {
+    ElMessage.error(errorText(err, '状态更新失败'))
+  } finally {
+    const next = new Set(stateUpdating.value)
+    next.delete(key)
+    stateUpdating.value = next
+  }
+}
+
 async function save() {
   const { name, ns, records, enabled, notify, reminder_minutes, manual_expiry } = form.value
   const expected_ns = splitValues(ns)
@@ -342,6 +372,9 @@ onActivated(() => { if (props.focusRequest) openRequestedDomain(); else load() }
 .domain-mobile__summary { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: var(--el-text-color-secondary); font-size: 11px; }
 .domain-mobile__actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 8px; }
 .domain-mobile__actions :deep(.el-button + .el-button) { margin-left: 0; }
+.domain-mobile__controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 12px; margin-top: 7px; }
+.domain-state-switch { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-secondary); font-size: 11px; }
+@media (max-width: 768px) { .domain-mobile__controls { justify-content: space-between; gap: 4px 8px; } }
 .domain-mobile__pager { display: flex; flex: 0 0 auto; justify-content: center; padding-bottom: 2px; }
 .domain-desktop-card { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .domain-desktop-card :deep(.el-card__body) { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; padding: 8px 12px; }
