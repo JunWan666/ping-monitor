@@ -4,6 +4,7 @@ import asyncio
 import uuid
 import json
 import logging
+import mimetypes
 import os
 import re
 import socket
@@ -2145,17 +2146,31 @@ async def update_datascreen_config(
 
 frontend_dist = settings.frontend_dist
 
+# Pages without a content hash in their URL must be revalidated on every load; otherwise browsers apply
+# heuristic caching and keep showing the previous release (e.g. the old big screen) after a deploy.
+REVALIDATE = {"Cache-Control": "no-cache"}
+# Python's built-in type table lacks woff2 (the big screen bundles its fonts), so it would go out as text/plain.
+mimetypes.add_type("font/woff2", ".woff2")
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.update(REVALIDATE)
+        return response
+
+
 if frontend_dist.exists():
     assets_dir = frontend_dist / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
     bigscreen_dir = frontend_dist / "bigscreen"
     if bigscreen_dir.exists():
-        app.mount("/bigscreen", StaticFiles(directory=str(bigscreen_dir)), name="bigscreen")
+        app.mount("/bigscreen", RevalidatingStaticFiles(directory=str(bigscreen_dir)), name="bigscreen")
 
     @app.get("/")
     async def serve_frontend_root():
-        return FileResponse(str(frontend_dist / "index.html"))
+        return FileResponse(str(frontend_dist / "index.html"), headers=REVALIDATE)
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
@@ -2164,7 +2179,7 @@ if frontend_dist.exists():
 
         file_path = frontend_dist / full_path
         if file_path.is_file():
-            return FileResponse(str(file_path))
+            return FileResponse(str(file_path), headers=REVALIDATE if file_path.suffix == ".html" else None)
 
         # Keep missing static assets as 404s; only extensionless URLs are SPA routes.
         if Path(full_path).suffix:
@@ -2172,7 +2187,7 @@ if frontend_dist.exists():
 
         index_path = frontend_dist / "index.html"
         if index_path.exists():
-            return FileResponse(str(index_path))
+            return FileResponse(str(index_path), headers=REVALIDATE)
 
         raise HTTPException(status_code=404, detail="前端资源未找到")
 else:
