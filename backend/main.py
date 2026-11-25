@@ -87,7 +87,7 @@ DATABASE_EXPORT_DIR = os.path.join(tempfile.gettempdir(), "ping-monitor-exports"
 database_import_jobs: dict[str, dict[str, Any]] = {}
 database_export_jobs: dict[str, dict[str, Any]] = {}
 
-from database import DomainAlert
+from database import DomainAlert, DomainAlertDelivery
 from domain_api import router as domain_router
 
 app = FastAPI(title="Ping 监控系统", version="2.0.0")
@@ -1470,14 +1470,25 @@ async def get_alerts(
 ):
     page, page_size = max(1, page), min(200, max(1, page_size))
     since = datetime.now() - timedelta(hours=max(1, min(hours, 24 * 365)))
+    sms_delivery_status = select(DomainAlertDelivery.status).where(
+        DomainAlertDelivery.domain_alert_id == DomainAlert.id,
+        DomainAlertDelivery.channel == "sms",
+    ).limit(1).scalar_subquery()
+    sms_delivery_error = select(DomainAlertDelivery.last_error).where(
+        DomainAlertDelivery.domain_alert_id == DomainAlert.id,
+        DomainAlertDelivery.channel == "sms",
+    ).limit(1).scalar_subquery()
     host_alerts = select(
         Alert.id, Alert.host_id, Alert.host_name, Alert.alert_type, Alert.message, Alert.is_sent,
         Alert.created_at, literal("host").label("source"), literal(None).label("delivery_status"),
+        literal(None).label("sms_delivery_status"), literal(None).label("sms_delivery_error"),
     ).where(Alert.created_at >= since)
     domain_alerts = select(
         DomainAlert.id, literal(None).label("host_id"), DomainAlert.domain_name.label("host_name"),
         DomainAlert.alert_type, DomainAlert.message, DomainAlert.is_sent, DomainAlert.created_at,
         literal("domain").label("source"), DomainAlert.delivery_status,
+        sms_delivery_status.label("sms_delivery_status"),
+        sms_delivery_error.label("sms_delivery_error"),
     ).where(DomainAlert.created_at >= since)
     if source == "domain" and not current_user:
         raise HTTPException(401, "请登录查看域名告警")

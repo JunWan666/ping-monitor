@@ -52,6 +52,8 @@ class AppSettings:
         self.redis_url = os.getenv("REDIS_URL", "").strip() or None
         self.enable_cache = _get_bool("ENABLE_CACHE", True)
         self.disable_notifications = _get_bool("DISABLE_NOTIFICATIONS", False)
+        # With notifications disabled, still let an admin's manual "test" buttons send. Automatic alerts stay blocked.
+        self.allow_test_notifications = _get_bool("ALLOW_TEST_NOTIFICATIONS", False)
         self.disable_scheduler = _get_bool("DISABLE_SCHEDULER", False)
         self.disable_host_monitor = _get_bool("DISABLE_HOST_MONITOR", False)
 

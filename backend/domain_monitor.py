@@ -5,19 +5,38 @@ from datetime import datetime, timedelta
 import logging
 from threading import Lock
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app_settings import settings
 from database import (
     DEFAULT_DOMAIN_CONFIRMATION_COUNT, DEFAULT_DOMAIN_DNS_INTERVAL, DEFAULT_DOMAIN_EXPIRY_DAYS,
-    DEFAULT_DOMAIN_RDAP_INTERVAL, DomainAlert, MonitoredDomain, SessionLocal, SystemConfig,
+    DEFAULT_DOMAIN_RDAP_INTERVAL, DomainAlert, DomainAlertDelivery, MonitoredDomain, SessionLocal, SystemConfig,
 )
+from aliyun_sms import SMS_ALERT_TYPES, build_template_param, send_configured_sms, sms_configured
 from domain_probes import dns_checks, lookup_rdap, result, safe
 from notification import NotificationService
 from notification_template import NotificationTemplate
 
 logger = logging.getLogger(__name__)
 LOCK = Lock()
+SMS_MAX_ATTEMPTS = 5
+DOMAIN_INCIDENT_TYPES = ("domain_critical", "domain_warning")
+
+
+def sms_enabled(domain):
+    return bool(domain and domain.enabled and domain.notify_sms)
+
+
+def stop_sms_delivery(db, domain_id, status="disabled", *, alert_types=None):
+    alert_ids = select(DomainAlert.id).where(DomainAlert.domain_id == domain_id)
+    if alert_types:
+        alert_ids = alert_ids.where(DomainAlert.alert_type.in_(alert_types))
+    db.execute(update(DomainAlertDelivery).where(
+        DomainAlertDelivery.channel == "sms",
+        DomainAlertDelivery.domain_alert_id.in_(alert_ids),
+        DomainAlertDelivery.status.in_(("pending", "failed")),
+        DomainAlertDelivery.next_attempt_at.is_not(None),
+    ).values(status=status, next_attempt_at=None))
 
 
 def expiry_reminder_days(config):
@@ -39,12 +58,25 @@ def check_label(key):
     return labels.get(key.split(":")[0], "域名检查")
 
 
-def queue_alert(db, domain, kind, message, now):
-    db.add(DomainAlert(
+def queue_alert(db, domain, kind, message, now, *, config=None):
+    event = DomainAlert(
         domain_id=domain.id, domain_name=domain.name, alert_type=kind, message=message,
         delivery_status="pending" if domain.notify else "disabled",
         next_attempt_at=now if domain.notify else None, created_at=now,
-    ))
+    )
+    db.add(event)
+    db.flush()
+    # SMS is independent of the DingTalk switch and only carries faults (the template is a fault notice).
+    if kind in SMS_ALERT_TYPES and sms_enabled(domain):
+        config = config or db.query(SystemConfig).first()
+        configured = sms_configured(config)
+        db.add(DomainAlertDelivery(
+            domain_alert_id=event.id,
+            channel="sms",
+            status="pending" if configured else "no_channel",
+            next_attempt_at=now if configured else None,
+            created_at=now,
+        ))
 
 
 def expire_check(registration, now, manual_expiry=None, reminder_days=DEFAULT_DOMAIN_EXPIRY_DAYS):
@@ -117,7 +149,7 @@ def record_results(db, domain, observations, now, *, dns_due=True, rdap_due=Fals
             previous_threshold = previous.get(key, {}).get("notified_threshold")
             threshold = observation.get("threshold")
             if threshold and threshold != previous_threshold:
-                queue_alert(db, domain, "domain_expiry", observation["detail"], now)
+                queue_alert(db, domain, "domain_expiry", observation["detail"], now, config=config)
                 previous_threshold = threshold
             if observation["state"] == "ok":
                 previous_threshold = None
@@ -151,22 +183,29 @@ def record_results(db, domain, observations, now, *, dns_due=True, rdap_due=Fals
         )
         kind = "domain_critical" if level == 2 else "domain_warning"
         if level > previous_level or reminder_due:
-            queue_alert(db, domain, kind, message, now)
+            queue_alert(db, domain, kind, message, now, config=config)
             domain.last_incident_at = now
         else:
             latest = db.scalars(select(DomainAlert).where(
                 DomainAlert.domain_id == domain.id,
-                DomainAlert.alert_type.in_(("domain_critical", "domain_warning")),
+                DomainAlert.alert_type.in_(DOMAIN_INCIDENT_TYPES),
                 DomainAlert.created_at == domain.last_incident_at,
             ).order_by(DomainAlert.id.desc())).first()
             if latest and not latest.is_sent:
                 latest.message = message
     elif previous_level:
-        db.execute(DomainAlert.__table__.update().where(
+        active_alerts = select(DomainAlert.id).where(
             DomainAlert.domain_id == domain.id, DomainAlert.next_attempt_at.is_not(None),
-            DomainAlert.alert_type.in_(("domain_critical", "domain_warning")),
+            DomainAlert.alert_type.in_(DOMAIN_INCIDENT_TYPES),
+        )
+        active_alert_ids = db.scalars(active_alerts).all()
+        # SMS is independent of DingTalk: an unsent fault SMS may be queued even when DingTalk is off.
+        # Once the domain has recovered it must not go out late.
+        stop_sms_delivery(db, domain.id, "superseded", alert_types=DOMAIN_INCIDENT_TYPES)
+        db.execute(update(DomainAlert).where(
+            DomainAlert.id.in_(active_alert_ids),
         ).values(delivery_status="superseded", next_attempt_at=None))
-        queue_alert(db, domain, "domain_recovery", "已确认域名探测恢复正常", now)
+        queue_alert(db, domain, "domain_recovery", "已确认域名探测恢复正常", now, config=config)
         domain.last_incident_at = None
 
     domain.incident_level = level
@@ -195,6 +234,7 @@ def deliver_pending():
                 delivery_status="no_channel", next_attempt_at=None,
             ))
             db.commit()
+            deliver_sms_pending(db, config, now)
             return
         notifier = NotificationService()
         notifier.configure(webhook_url=config.domain_webhook_url, webhook_secret=config.domain_webhook_secret)
@@ -233,6 +273,42 @@ def deliver_pending():
             event.delivery_status = "sent" if event.is_sent else "failed"
             event.next_attempt_at = None if event.is_sent else now + timedelta(minutes=min(30, 2 ** min(event.attempts - 1, 5)))
             db.commit()
+        deliver_sms_pending(db, config, now)
+
+
+def deliver_sms_pending(db, config, now):
+    rows = db.scalars(select(DomainAlertDelivery).where(
+        DomainAlertDelivery.channel == "sms",
+        DomainAlertDelivery.status.in_(("pending", "failed")),
+        DomainAlertDelivery.next_attempt_at <= now,
+    ).order_by(DomainAlertDelivery.next_attempt_at, DomainAlertDelivery.id).limit(20)).all()
+    for delivery in rows:
+        event = db.get(DomainAlert, delivery.domain_alert_id)
+        domain = db.get(MonitoredDomain, event.domain_id) if event else None
+        if not event or not sms_enabled(domain):
+            delivery.status = "disabled"
+            delivery.next_attempt_at = None
+            db.commit()
+            continue
+        if not sms_configured(config):
+            delivery.status = "no_channel"
+            delivery.next_attempt_at = None
+            delivery.last_error = "未配置阿里云短信"
+            db.commit()
+            continue
+        outcome = send_configured_sms(
+            config, build_template_param(event.domain_name, event.alert_type, event.message, event.created_at),
+        )
+        delivery.attempts += 1
+        delivery.status = "sent" if outcome.ok else "failed"
+        delivery.sent_at = now if outcome.ok else None
+        delivery.last_error = outcome.error
+        # Only transport/throttling failures are retried; SendSms is not idempotent and config errors need a fix.
+        if outcome.ok or not outcome.retryable or delivery.attempts >= SMS_MAX_ATTEMPTS:
+            delivery.next_attempt_at = None
+        else:
+            delivery.next_attempt_at = now + timedelta(minutes=min(30, 2 ** min(delivery.attempts - 1, 5)))
+        db.commit()
 
 
 def run_domain_monitor():

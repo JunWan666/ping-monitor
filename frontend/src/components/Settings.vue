@@ -147,44 +147,85 @@
             </el-form-item>
           </el-form>
 
-          <el-form v-else-if="basicSection === 'domain-alert'" :model="domainNotification" label-position="top" class="settings-section-form">
-            <el-form-item label="钉钉 Webhook 地址" class="settings-field--mobile-wide">
-              <el-input
-                v-model="domainNotification.webhook_url"
-                type="password"
-                show-password
-                autocomplete="off"
-                placeholder="域名告警机器人 Webhook URL"
-                clearable
-              />
-            </el-form-item>
-            <el-form-item label="加签密钥（选填）" class="settings-field--mobile-wide">
-              <el-input
-                v-model="domainNotification.webhook_secret"
-                type="password"
-                show-password
-                autocomplete="off"
-                placeholder="机器人启用加签时填写，以 SEC 开头"
-                clearable
-              />
-            </el-form-item>
-            <p class="settings-section-note settings-field--wide">可以用单独的钉钉群或机器人。Webhook 留空时，域名事件仍保存在告警记录。</p>
-            <section class="domain-notification-tests settings-field--wide" aria-label="域名通知模板测试">
-              <div class="domain-notification-tests__heading">
-                <strong>通知效果预览</strong>
-                <p>点击后先保存当前配置，再向钉钉群发送一条带“模板测试”标记的消息；不会创建真实告警记录。</p>
+          <el-form v-else-if="basicSection === 'domain-alert'" :model="domainNotification" label-position="top" class="settings-section-form domain-notification-form" @submit.prevent="saveConfig">
+            <section class="domain-notification-panel">
+              <div class="domain-notification-panel__heading">
+                <h4>钉钉群通知</h4>
               </div>
-              <div class="domain-notification-tests__buttons">
-                <el-button
-                  v-for="item in domainTestTypes"
-                  :key="item.value"
-                  :type="item.buttonType"
-                  :loading="testingDomainNotification === item.value"
-                  :disabled="!domainNotification.webhook_url || busy"
-                  @click="saveAndTestDomainNotification(item.value)"
-                >{{ item.label }}</el-button>
-              </div>
+              <el-form-item label="钉钉 Webhook 地址">
+                <el-input v-model="domainNotification.webhook_url" type="password" show-password autocomplete="off" placeholder="粘贴自定义机器人的 Webhook" clearable />
+              </el-form-item>
+              <el-form-item label="加签密钥（选填）">
+                <el-input v-model="domainNotification.webhook_secret" type="password" show-password autocomplete="off" placeholder="启用加签时填写，以 SEC 开头" clearable />
+              </el-form-item>
+              <p class="domain-notification-help">钉钉群设置 → 机器人 → 自定义机器人</p>
             </section>
+
+            <section class="domain-notification-panel">
+              <div class="domain-notification-panel__heading">
+                <h4>阿里云短信</h4>
+                <el-tag class="domain-notification-status" size="small" effect="plain" :type="smsChanged ? 'warning' : smsSaved ? 'success' : 'info'">
+                  {{ smsChanged ? '未保存' : smsSaved ? '已配置' : '未配置' }}
+                </el-tag>
+              </div>
+              <div class="domain-sms-grid">
+                <el-form-item label="AccessKey ID">
+                  <el-input v-model="domainNotification.sms_access_key_id" autocomplete="off" placeholder="RAM 用户的 AccessKey ID" clearable />
+                </el-form-item>
+                <el-form-item label="AccessKey Secret">
+                  <el-input v-model="domainNotification.sms_access_key_secret" type="password" show-password autocomplete="new-password" :placeholder="smsSecretSet ? '已保存，留空则不修改' : 'RAM 用户的 AccessKey Secret'" clearable />
+                </el-form-item>
+                <el-form-item label="签名名称 SignName">
+                  <el-input v-model="domainNotification.sms_sign_name" placeholder="审核通过的签名，不带【】" clearable />
+                </el-form-item>
+                <el-form-item label="模板 Code TemplateCode">
+                  <el-input v-model="domainNotification.sms_template_code" placeholder="如 SMS_123456789" clearable />
+                </el-form-item>
+              </div>
+              <el-form-item label="接收手机号 PhoneNumbers">
+                <div class="domain-sms-phones" @paste.capture="pastePhones">
+                  <el-input-tag
+                    v-model="phoneTags"
+                    clearable
+                    :delimiter="PHONE_DELIMITER"
+                    :max="MAX_PHONES"
+                    tag-type="info"
+                    aria-label="接收手机号"
+                    placeholder="输入手机号后按回车添加"
+                  />
+                  <p class="domain-notification-help">{{ phoneTags.length ? `已添加 ${phoneTags.length} 个号码，点号码上的 × 可移除。` : '输入一个手机号按回车，可继续添加多个；国际号码请带国家区号。' }}</p>
+                </div>
+              </el-form-item>
+              <p class="domain-notification-help">模板需包含 ${name}、${time}、${status}、${msg} 四个变量。只在警告、严重异常和到期提醒时发送，恢复通知仍走钉钉；建议使用只授权 dysms:SendSms 的 RAM 用户。全部清空后保存即关闭短信。</p>
+            </section>
+
+            <div class="domain-notification-actions settings-field--wide">
+              <div class="domain-notification-actions__save">
+                <el-button type="primary" native-type="submit" :loading="saving" :disabled="busy || !domainNotificationLoaded">保存域名通知</el-button>
+                <el-button :disabled="busy" @click="loadConfig()">重置</el-button>
+              </div>
+              <div class="domain-notification-actions__tests">
+                <el-tooltip :content="dingTalkTestHint" placement="top">
+                  <span class="domain-notification-test">
+                    <el-dropdown trigger="click" :disabled="!canTestDingTalk" @command="saveAndTestDomainNotification">
+                      <el-button :loading="!!testingDomainNotification" :disabled="!canTestDingTalk">
+                        测试钉钉通知<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                      </el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                          <el-dropdown-item v-for="item in domainTestTypes" :key="item.value" :command="item.value">{{ item.label }}</el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </span>
+                </el-tooltip>
+                <el-tooltip :content="smsTestHint" placement="top">
+                  <span class="domain-notification-test">
+                    <el-button :loading="testingSmsNotification" :disabled="!canTestSms" @click="testSmsDomainNotification">测试短信通知</el-button>
+                  </span>
+                </el-tooltip>
+              </div>
+            </div>
           </el-form>
 
           <el-form v-else-if="basicSection === 'data'" :model="config" label-position="top" class="settings-section-form settings-section-form--landscape-row">
@@ -261,7 +302,7 @@
             </template>
           </el-form>
 
-          <div class="settings-section-actions admin-settings__actions">
+          <div v-if="basicSection !== 'domain-alert'" class="settings-section-actions admin-settings__actions">
             <el-button type="primary" :loading="saving" :disabled="busy" @click="saveConfig">保存本栏</el-button>
             <el-button :disabled="busy" @click="loadConfig()">重置本栏</el-button>
             <el-button
@@ -438,8 +479,9 @@
 
 <script setup>
 import { ref, reactive, onMounted, watch, computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Monitor, Connection, Bell, Message, FolderOpened, TrendCharts } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Monitor, Connection, Bell, Message, FolderOpened, TrendCharts, ArrowDown } from '@element-plus/icons-vue'
 import api from '../api'
 import { useViewport } from '../lib/useViewport'
 import { usePageRows } from '../lib/usePageRows'
@@ -456,13 +498,18 @@ const basicSections = [
   { key: 'monitor', label: '主机监控', description: 'Ping 检测频率、发包参数和位置更新。', icon: Monitor },
   { key: 'domain', label: '域名监控', description: 'DNS、注册局和域名到期提醒策略。', icon: Connection },
   { key: 'alert', label: '主机通知', description: '主机异常告警使用的通知渠道。', icon: Bell },
-  { key: 'domain-alert', label: '域名通知', description: '域名异常、恢复和到期提醒使用的独立机器人。', icon: Message },
+  { key: 'domain-alert', label: '域名通知', description: '配置钉钉群通知和阿里云短信。', icon: Message },
   { key: 'data', label: '数据维护', description: '原始记录保留、聚合和仪表盘趋势数据。', icon: FolderOpened },
   { key: 'report', label: '报表通知', description: '日报、周报和月报的专用机器人。', icon: TrendCharts }
 ]
 const isAdmin = ref(false)
 const visibleSections = computed(() => basicSections.filter(item => isAdmin.value || !item.key.startsWith('domain')))
-const basicSection = ref('monitor')
+const route = useRoute()
+const router = useRouter()
+const basicSection = computed({
+  get: () => visibleSections.value.find(item => item.key === route.query.section)?.key || 'monitor',
+  set: (key) => router.push({ name: 'AdminSettings', query: { ...route.query, section: key === 'monitor' ? undefined : key } }),
+})
 const reportSection = ref('robot')
 const reportSchedules = [
   { type: 'daily', label: '日报 · 每天', enabled: 'daily_report_enabled', time: 'daily_report_time' },
@@ -474,8 +521,9 @@ const saving = ref(false)
 const loadingConfig = ref(false)
 const testingNotification = ref(false)
 const testingDomainNotification = ref('')
+const testingSmsNotification = ref(false)
 const sendingReportType = ref('')
-const busy = computed(() => saving.value || loadingConfig.value || testingNotification.value || testingDomainNotification.value || !!sendingReportType.value)
+const busy = computed(() => saving.value || loadingConfig.value || testingNotification.value || testingDomainNotification.value || testingSmsNotification.value || !!sendingReportType.value)
 const notificationPlatform = ref('none')
 const pingLogs = ref([])
 const hostSearchKeyword = ref('')
@@ -491,12 +539,73 @@ const domainConfig = reactive({
   confirmation_count: 2,
   expiry_days: [60, 30, 15, 7, 1]
 })
-const domainNotification = reactive({ webhook_url: '', webhook_secret: '' })
+const smsFields = ['sms_access_key_id', 'sms_sign_name', 'sms_template_code', 'sms_phone_numbers']
+const domainNotification = reactive({
+  webhook_url: '', webhook_secret: '',
+  sms_access_key_id: '', sms_access_key_secret: '', sms_sign_name: '', sms_template_code: '', sms_phone_numbers: ''
+})
+const domainNotificationLoaded = ref(false)
+// The AccessKey Secret is write-only: the API only says whether one is saved.
+const smsSecretSet = ref(false)
+const savedSms = ref(Object.fromEntries(smsFields.map(key => [key, ''])))
+const phoneList = (value) => String(value || '').split(/[\s,，;；、]+/).filter(Boolean)
+const smsChanged = computed(() => !!domainNotification.sms_access_key_secret.trim() || smsFields.some(key => key === 'sms_phone_numbers'
+  ? phoneList(domainNotification[key]).join(',') !== phoneList(savedSms.value[key]).join(',')
+  : domainNotification[key].trim() !== savedSms.value[key]))
+const smsSaved = computed(() => smsSecretSet.value && smsFields.every(key => savedSms.value[key]))
+const smsReadyToTest = computed(() => smsSaved.value && !smsChanged.value)
+// Phone numbers are edited as tags but stored as one newline-joined string, the format the API takes.
+const MAX_PHONES = 1000
+const PHONE_PATTERN = /^\+?\d{5,20}$/
+const PHONE_DELIMITER = /[,，;；、]+/
+const cleanPhone = (value) => String(value || '').replace(/[\s-]/g, '')
+const phoneTags = computed({
+  get: () => phoneList(domainNotification.sms_phone_numbers),
+  set: (list) => {
+    const next = []
+    const invalid = []
+    let repeated = false   // saved tags are already unique, so any repeat involves a newly added one
+    for (const raw of list || []) {
+      const phone = cleanPhone(raw)
+      if (!phone) continue
+      if (next.includes(phone)) repeated = true
+      else if (PHONE_PATTERN.test(phone)) next.push(phone)
+      else invalid.push(String(raw).trim())
+    }
+    if (invalid.length) ElMessage.warning(`手机号格式不对：${invalid.join('、')}`)
+    else if (repeated) ElMessage.info('这个手机号已经添加过了')
+    if (next.length > MAX_PHONES) ElMessage.warning(`接收手机号最多 ${MAX_PHONES} 个`)
+    domainNotification.sms_phone_numbers = next.slice(0, MAX_PHONES).join('\n')
+  }
+})
+// A text input drops line breaks on paste, so a pasted list is split here instead.
+const pastePhones = (event) => {
+  const items = (event.clipboardData?.getData('text') || '').split(/[\r\n,，;；、]+/).map(cleanPhone).filter(Boolean)
+  if (items.length < 2) return
+  event.preventDefault()
+  phoneTags.value = [...phoneTags.value, ...items]
+}
+const canTestDingTalk = computed(() => domainNotificationLoaded.value && !busy.value && !!domainNotification.webhook_url.trim())
+const dingTalkTestHint = computed(() => domainNotification.webhook_url.trim()
+  ? '选择一种模板发到钉钉群；会先保存钉钉地址和加签密钥'
+  : '先填写钉钉 Webhook 地址')
+const canTestSms = computed(() => smsReadyToTest.value && !busy.value)
+const smsTestHint = computed(() => {
+  if (!smsSaved.value) return '先填写并保存完整的阿里云短信配置'
+  if (smsChanged.value) return '短信配置有未保存的修改，先保存再测试'
+  return `向已保存的 ${phoneList(savedSms.value.sms_phone_numbers).length} 个手机号各发一条真实短信，产生短信费用`
+})
+const applyDomainNotification = (data) => {
+  const { sms_access_key_secret_set: secretSet, ...fields } = data
+  Object.assign(domainNotification, fields, { sms_access_key_secret: '' })
+  smsSecretSet.value = !!secretSet
+  savedSms.value = Object.fromEntries(smsFields.map(key => [key, data[key] || '']))
+}
 const domainTestTypes = [
-  { value: 'domain_warning', label: '测试警告提醒', buttonType: 'warning' },
-  { value: 'domain_critical', label: '测试严重异常', buttonType: 'danger' },
-  { value: 'domain_recovery', label: '测试恢复正常', buttonType: 'success' },
-  { value: 'domain_expiry', label: '测试到期提醒', buttonType: 'primary' }
+  { value: 'domain_warning', label: '警告提醒' },
+  { value: 'domain_critical', label: '严重异常' },
+  { value: 'domain_recovery', label: '恢复正常' },
+  { value: 'domain_expiry', label: '到期提醒' }
 ]
 
 const config = reactive({
@@ -546,6 +655,8 @@ const sectionFields = {
 const errorDetail = (error) => {
   const detail = error.response?.data?.detail
   if (Array.isArray(detail)) return detail.map(item => `${item.loc?.slice(1).join('.')}: ${item.msg}`).join('；')
+  // No detail on a 5xx usually means the backend itself was unreachable (e.g. restarting behind the dev proxy).
+  if (!detail && error.response?.status >= 500) return `后端暂时没有响应（HTTP ${error.response.status}），可能正在重启，请稍后再试`
   return detail || error.message || '网络错误'
 }
 
@@ -568,7 +679,11 @@ const loadConfig = async (all = false) => {
       tasks.push(api.getDomainSettings().then(data => Object.assign(domainConfig, data)))
     }
     if (isAdmin.value && (all === true || section === 'domain-alert')) {
-      tasks.push(api.getDomainNotification().then(data => Object.assign(domainNotification, data)))
+      domainNotificationLoaded.value = false
+      tasks.push(api.getDomainNotification().then(data => {
+        applyDomainNotification(data)
+        domainNotificationLoaded.value = true
+      }))
     }
     const results = await Promise.allSettled(tasks)
     const failed = results.find(result => result.status === 'rejected')
@@ -589,8 +704,10 @@ const persistSection = async (section) => {
     const data = await api.updateDomainSettings({ ...domainConfig, expiry_days: days })
     Object.assign(domainConfig, data)
   } else if (section === 'domain-alert') {
-    const data = await api.updateDomainNotification({ ...domainNotification })
-    Object.assign(domainNotification, data)
+    const payload = { ...domainNotification }
+    if (!payload.sms_access_key_secret.trim()) delete payload.sms_access_key_secret   // keep the saved secret
+    const data = await api.updateDomainNotification(payload)
+    applyDomainNotification(data)
   } else {
     const payload = Object.fromEntries(sectionFields[section].map(key => [key, config[key]]))
     if (section === 'alert') {
@@ -608,6 +725,7 @@ const persistSection = async (section) => {
 
 const saveConfig = async () => {
   const section = basicSection.value
+  if (busy.value || (section === 'domain-alert' && !domainNotificationLoaded.value)) return
   saving.value = true
   try {
     await persistSection(section)
@@ -620,10 +738,17 @@ const saveConfig = async () => {
 }
 
 const saveAndTestDomainNotification = async (alertType) => {
+  if (!canTestDingTalk.value) return
   saving.value = true
   testingDomainNotification.value = alertType
   try {
-    await persistSection('domain-alert')
+    // Save only the DingTalk fields: unfinished SMS edits must not block a DingTalk test, and stay in the form unsaved.
+    const data = await api.updateDomainNotification({
+      webhook_url: domainNotification.webhook_url,
+      webhook_secret: domainNotification.webhook_secret
+    })
+    domainNotification.webhook_url = data.webhook_url || ''
+    domainNotification.webhook_secret = data.webhook_secret || ''
     const result = await api.testDomainNotification(alertType)
     ElMessage.success(result.message || '域名模板测试通知已发送，请检查对应的钉钉群')
   } catch (error) {
@@ -631,6 +756,30 @@ const saveAndTestDomainNotification = async (alertType) => {
   } finally {
     testingDomainNotification.value = ''
     saving.value = false
+  }
+}
+
+const testSmsDomainNotification = async () => {
+  if (!smsReadyToTest.value || busy.value) return
+  const count = phoneList(savedSms.value.sms_phone_numbers).length
+  try {
+    await ElMessageBox.confirm(
+      `将向已保存的 ${count} 个手机号各发送一条真实短信，会产生短信费用。`,
+      '发送测试短信',
+      { type: 'warning', confirmButtonText: '发送', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  testingSmsNotification.value = true
+  try {
+    const result = await api.testSmsDomainNotification()
+    ElMessage.success(result.message || '阿里云已受理测试短信')
+  } catch (error) {
+    ElMessage.error('测试短信发送失败: ' + errorDetail(error))
+  } finally {
+    testingSmsNotification.value = false
   }
 }
 
@@ -866,18 +1015,32 @@ onMounted(() => {
   color: var(--el-text-color-regular);
 }
 
-.domain-notification-tests {
+.settings-section-form.domain-notification-form { overflow-y: auto; gap: 16px; padding: 0 2px 8px; }
+.domain-notification-panel {
   display: grid;
-  gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-muted);
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
 }
-.domain-notification-tests__heading strong { color: var(--ink); font-size: 13px; }
-.domain-notification-tests__heading p { margin: 4px 0 0; color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
-.domain-notification-tests__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-.domain-notification-tests__buttons .el-button + .el-button { margin-left: 0; }
+.domain-notification-panel h4 { margin: 0; font-size: 14px; }
+.domain-notification-panel__heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 24px; }
+.domain-notification-help { margin: 0; color: var(--el-text-color-regular); font-size: 12px; line-height: 1.5; }
+.domain-notification-status { justify-self: start; }
+.domain-notification-actions { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.domain-notification-actions__save, .domain-notification-actions__tests { display: flex; flex-wrap: wrap; gap: 8px; }
+.domain-notification-actions .el-button + .el-button { margin-left: 0; }
+/* A disabled button swallows hover, so the wrapper carries the tooltip that says why. */
+.domain-notification-test { display: inline-flex; }
+.domain-notification-test .el-button.is-disabled { pointer-events: none; }
+.domain-sms-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.domain-sms-phones { display: grid; gap: 6px; width: 100%; }
+@media (max-width: 768px) {
+  .domain-notification-panel { grid-column: 1 / -1; padding: 12px; }
+  .domain-sms-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 .settings-section-actions {
   display: flex;

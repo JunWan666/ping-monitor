@@ -72,7 +72,10 @@
                 <div class="alert-mobile__name"><span class="list-number">{{ (currentPage - 1) * pageSize + index + 1 }}</span> {{ row.host_name }}</div>
                 <div class="alert-mobile__message">{{ row.source === 'domain' ? row.message : cleanMarkdown(row.message) }}</div>
                 <div class="alert-mobile__time">{{ new Date(row.created_at).toLocaleString() }}</div>
-                <div v-if="row.source === 'domain'" class="alert-mobile__time">{{ deliveryLabels[row.delivery_status] || '已发送' }}</div>
+                <div v-if="row.source === 'domain'" class="alert-mobile__delivery">
+                  <span>钉钉：{{ deliveryLabels[row.delivery_status] || '未知' }}</span>
+                  <span>短信：{{ deliveryLabels[row.sms_delivery_status] || '未开启' }}</span>
+                </div>
               </div>
             </div>
             <el-tag :type="severityTypes[getAlertSeverity(row)]" effect="plain" size="small">
@@ -157,11 +160,18 @@
             {{ row.source === 'domain' ? row.message : cleanMarkdown(row.message) }}
           </template>
         </el-table-column>
-        <el-table-column label="发送状态" width="96" align="center">
+        <el-table-column label="通知投递" min-width="148" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.is_sent" type="success">已发送</el-tag>
-            <el-tag v-else-if="row.delivery_status" :type="row.delivery_status === 'failed' ? 'danger' : 'info'">{{ deliveryLabels[row.delivery_status] || '未发送' }}</el-tag>
-            <el-tag v-else type="info">未发送</el-tag>
+            <div class="alert-delivery-status">
+              <el-tag v-if="row.source === 'domain'" :type="deliveryTagType(row.delivery_status)">钉钉 {{ deliveryLabels[row.delivery_status] || '未知' }}</el-tag>
+              <el-tag v-else-if="row.is_sent" type="success">已发送</el-tag>
+              <el-tag v-else-if="row.delivery_status" :type="deliveryTagType(row.delivery_status)">{{ deliveryLabels[row.delivery_status] || '未发送' }}</el-tag>
+              <el-tag v-else type="info">未发送</el-tag>
+              <el-tooltip v-if="row.source === 'domain' && row.sms_delivery_status" :disabled="!row.sms_delivery_error" :content="`短信：${row.sms_delivery_error || ''}`">
+                <el-tag :type="deliveryTagType(row.sms_delivery_status)">短信 {{ deliveryLabels[row.sms_delivery_status] || row.sms_delivery_status }}</el-tag>
+              </el-tooltip>
+              <el-tag v-else-if="row.source === 'domain'" type="info">短信 未开启</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="告警时间" :width="width < 1000 ? 124 : 156" show-overflow-tooltip>
@@ -212,9 +222,10 @@ const domainTypes = {
   domain_recovery: ['域名恢复', 'success', 'recovered'],
 }
 const deliveryLabels = {
-  pending: '待发送', failed: '失败，待重试', disabled: '已关闭',
+  sent: '已接收', pending: '待发送', failed: '发送失败', disabled: '已关闭',
   no_channel: '无通知渠道', superseded: '已取消',
 }
+const deliveryTagType = (status) => status === 'sent' ? 'success' : status === 'failed' ? 'danger' : status === 'disabled' || status === 'superseded' ? 'info' : 'warning'
 const currentPage = ref(1)
 const { pageRoot, pageSize } = usePageRows({ initialPageSize: 15, rowHeight: 36, stretchTableRows: true })
 const totalAlerts = ref(0)
@@ -567,6 +578,8 @@ onMounted(() => {
   font-size: 12px;
   color: #6b7280;
 }
+.alert-mobile__delivery { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; color: var(--el-text-color-secondary); font-size: 11px; }
+.alert-delivery-status { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 
 .alert-mobile__message {
   margin-top: 5px;

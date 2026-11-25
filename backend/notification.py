@@ -53,8 +53,8 @@ class NotificationService:
             logger.error("Server酱通知发送异常: %s", exc)
             return False
 
-    def send_webhook(self, message: str, alert_type: str = "info", title: str | None = None) -> bool:
-        if settings.disable_notifications:
+    def send_webhook(self, message: str, alert_type: str = "info", title: str | None = None, *, manual_test: bool = False) -> bool:
+        if settings.disable_notifications and not (manual_test and settings.allow_test_notifications):
             logger.info("Notifications disabled by DISABLE_NOTIFICATIONS, skip webhook send")
             return False
         if not self.webhook_url:

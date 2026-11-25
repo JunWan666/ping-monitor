@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+import asyncio
 import sys
 import unittest
 from unittest.mock import patch
@@ -14,8 +15,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from aliyun_sms import SmsResult
 from auth import get_current_user
-from database import Base, DomainAlert, MonitoredDomain, SystemConfig, get_db
+from database import Base, DomainAlert, DomainAlertDelivery, MonitoredDomain, SystemConfig, get_db
 import database_migrations
 from domain_api import router
 import domain_monitor
@@ -24,6 +26,13 @@ from domain_probes import result
 HOST_URL = "https://oapi.dingtalk.com/robot/send?access_token=host-test-only"
 DOMAIN_URL = "https://oapi.dingtalk.com/robot/send?access_token=domain-test-only"
 REPORT_URL = "https://oapi.dingtalk.com/robot/send?access_token=report-test-only"
+SMS_SETTINGS = {
+    "sms_access_key_id": "LTAIunittestonly",
+    "sms_access_key_secret": "unit-test-secret",
+    "sms_sign_name": "测试签名",
+    "sms_template_code": "SMS_100000001",
+    "sms_phone_numbers": "13800000000\n13900000000",
+}
 
 
 class DomainSettingsTest(unittest.TestCase):
@@ -81,7 +90,117 @@ class DomainSettingsTest(unittest.TestCase):
                 self.assertEqual(self.client.get(f"/api/domains/{path}").status_code, 403)
                 self.assertEqual(self.client.put(f"/api/domains/{path}", json={}).status_code, 403)
             self.assertEqual(self.client.post("/api/domains/notification/test").status_code, 403)
+            self.assertEqual(self.client.get("/api/domains/notification/status").status_code, 403)
+            self.assertEqual(self.client.post("/api/domains/notification/sms/test").status_code, 403)
             send.assert_not_called()
+
+    def test_legacy_notification_and_domain_edits_do_not_erase_new_channels(self):
+        endpoint = "/api/domains/notification"
+        self.client.put(endpoint, json={"webhook_url": DOMAIN_URL, "webhook_secret": "domain-secret"}).raise_for_status()
+        response = self.client.put(endpoint, json=SMS_SETTINGS)
+        self.assertEqual(response.json()["webhook_url"], DOMAIN_URL)
+        self.assertEqual(response.json()["webhook_secret"], "domain-secret")
+        # An older client that only knows DingTalk must not erase SMS.
+        response = self.client.put(endpoint, json={"webhook_url": DOMAIN_URL, "webhook_secret": "new-secret"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sms_template_code"], "SMS_100000001")
+        self.assertTrue(response.json()["sms_access_key_secret_set"])
+        domain = self.client.get("/api/domains").json()[0]
+        domain_path = f"/api/domains/{domain['id']}"
+        self.client.patch(f"{domain_path}/state", json={"notify_sms": True}).raise_for_status()
+        edited = self.client.put(domain_path, json={
+            "name": domain["name"], "expected_ns": domain["expected_ns"], "notify": False,
+        })
+        edited.raise_for_status()
+        self.assertTrue(edited.json()["notify_sms"])
+        self.assertFalse(edited.json()["notify"])
+        self.assertTrue(self.client.patch(f"{domain_path}/state", json={"notify_sms": None}).json()["notify_sms"])
+
+    def test_sms_settings_keep_the_secret_write_only_and_report_status(self):
+        response = self.client.put("/api/domains/notification", json={
+            "webhook_url": DOMAIN_URL, "webhook_secret": "domain-secret", **SMS_SETTINGS,
+        })
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertNotIn("sms_access_key_secret", body)
+        self.assertNotIn("unit-test-secret", response.text)
+        self.assertNotIn("unit-test-secret", self.client.get("/api/domains/notification").text)
+        self.assertTrue(body["sms_access_key_secret_set"])
+        self.assertEqual(body["sms_phone_numbers"], "13800000000\n13900000000")
+        self.assertEqual(self.client.get("/api/domains/notification/status").json(), {
+            "dingtalk_configured": True, "sms_configured": True,
+        })
+        with self.sessions() as db:
+            config = db.query(SystemConfig).one()
+            self.assertEqual(config.sms_access_key_secret, "unit-test-secret")
+            self.assertEqual(config.sms_phone_numbers, "13800000000,13900000000")
+            self.assertEqual((config.domain_webhook_url, config.domain_webhook_secret), (DOMAIN_URL, "domain-secret"))
+
+        # Saving without a secret keeps the stored one.
+        self.client.put("/api/domains/notification", json={
+            **SMS_SETTINGS, "sms_access_key_secret": "", "sms_sign_name": "新签名",
+        }).raise_for_status()
+        with self.sessions() as db:
+            config = db.query(SystemConfig).one()
+            self.assertEqual((config.sms_access_key_secret, config.sms_sign_name), ("unit-test-secret", "新签名"))
+
+        # Clearing every SMS field turns SMS off and removes the credential.
+        cleared = self.client.put("/api/domains/notification", json={key: "" for key in SMS_SETTINGS})
+        self.assertEqual(cleared.status_code, 200)
+        self.assertFalse(cleared.json()["sms_access_key_secret_set"])
+        with self.sessions() as db:
+            config = db.query(SystemConfig).one()
+            self.assertIsNone(config.sms_access_key_id)
+            self.assertIsNone(config.sms_access_key_secret)
+        self.assertFalse(self.client.get("/api/domains/notification/status").json()["sms_configured"])
+
+    def test_incomplete_or_invalid_sms_settings_are_rejected(self):
+        for change in (
+            {"sms_template_code": ""}, {"sms_phone_numbers": ""}, {"sms_access_key_secret": ""},
+            {"sms_template_code": "12345"}, {"sms_sign_name": "【测试】"},
+            {"sms_phone_numbers": "13800000000,abc"}, {"sms_access_key_id": "bad id!"},
+        ):
+            with self.subTest(change=change):
+                self.assertEqual(self.client.put("/api/domains/notification", json={**SMS_SETTINGS, **change}).status_code, 422)
+        with self.sessions() as db:
+            self.assertIsNone(db.query(SystemConfig).one().sms_access_key_id)
+
+    def add_queued_sms(self, status="pending"):
+        with self.sessions() as db:
+            domain = db.query(MonitoredDomain).one()
+            domain.notify_sms = True
+            event = DomainAlert(
+                domain_id=domain.id, domain_name=domain.name, alert_type="domain_critical",
+                message="test", delivery_status="no_channel", created_at=datetime.now(),
+            )
+            db.add(event)
+            db.flush()
+            delivery = DomainAlertDelivery(
+                domain_alert_id=event.id, channel="sms",
+                status=status, next_attempt_at=datetime.now(), created_at=datetime.now(),
+            )
+            db.add(delivery)
+            db.commit()
+            return delivery.id
+
+    def test_clearing_sms_configuration_stops_pending_delivery_without_replay(self):
+        self.client.put("/api/domains/notification", json=SMS_SETTINGS).raise_for_status()
+        delivery_id = self.add_queued_sms()
+        self.client.put("/api/domains/notification", json={key: "" for key in SMS_SETTINGS}).raise_for_status()
+        with self.sessions() as db:
+            delivery = db.get(DomainAlertDelivery, delivery_id)
+            self.assertEqual(delivery.status, "no_channel")
+            self.assertIsNone(delivery.next_attempt_at)
+
+    def test_changing_recipients_keeps_queued_sms_for_the_new_numbers(self):
+        self.client.put("/api/domains/notification", json=SMS_SETTINGS).raise_for_status()
+        delivery_id = self.add_queued_sms("failed")
+        self.client.put("/api/domains/notification", json={"sms_phone_numbers": "13700000000"}).raise_for_status()
+        with self.sessions() as db:
+            delivery = db.get(DomainAlertDelivery, delivery_id)
+            self.assertEqual(delivery.status, "failed")
+            self.assertIsNotNone(delivery.next_attempt_at)
+            self.assertEqual(db.query(SystemConfig).one().sms_phone_numbers, "13700000000")
 
     def test_domain_monitor_and_notification_switches_are_independent(self):
         response = self.client.patch("/api/domains/1/state", json={"notify": False})
@@ -108,6 +227,147 @@ class DomainSettingsTest(unittest.TestCase):
         self.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(is_admin=False)
         response = self.client.patch("/api/domains/1/state", json={"enabled": False})
         self.assertEqual(response.status_code, 403)
+
+    def test_bulk_state_update_is_atomic_and_updates_requested_domains_only(self):
+        with self.sessions() as db:
+            second = MonitoredDomain(name="example.net", expected_ns=["ns.example.net"], records=[])
+            db.add(second)
+            db.commit()
+            second_id = second.id
+
+        response = self.client.patch("/api/domains/bulk-state", json={
+            "ids": [1, second_id], "enabled": False, "notify_sms": True,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 2)
+        self.assertTrue(all(not row["enabled"] and row["notify_sms"] for row in response.json()["items"]))
+
+        response = self.client.patch("/api/domains/bulk-state", json={
+            "ids": [1, 999], "notify": False,
+        })
+        self.assertEqual(response.status_code, 404)
+        with self.sessions() as db:
+            self.assertTrue(db.get(MonitoredDomain, 1).notify)
+            self.assertTrue(db.get(MonitoredDomain, second_id).notify)
+
+    def test_sms_test_uses_the_saved_settings_and_reports_failures(self):
+        self.assertEqual(self.client.post("/api/domains/notification/sms/test").status_code, 400)
+        self.client.put("/api/domains/notification", json=SMS_SETTINGS).raise_for_status()
+        with patch("domain_api.send_configured_sms", return_value=SmsResult(True, biz_id="900")) as send:
+            response = self.client.post("/api/domains/notification/sms/test")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("2 个号码", response.json()["message"])
+        config, params = send.call_args.args
+        self.assertEqual(config.sms_template_code, "SMS_100000001")
+        self.assertEqual(set(params), {"name", "time", "status", "msg"})
+        self.assertEqual(params["status"], "测试")
+        with patch("domain_api.send_configured_sms", return_value=SmsResult(False, "isv.SMS_SIGNATURE_ILLEGAL: 签名不合法")):
+            response = self.client.post("/api/domains/notification/sms/test")
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("isv.SMS_SIGNATURE_ILLEGAL", response.json()["detail"])
+
+    def test_sms_test_respects_disabled_external_notification_environment(self):
+        self.client.put("/api/domains/notification", json=SMS_SETTINGS).raise_for_status()
+        with patch("domain_api.settings.disable_notifications", True), \
+                patch("domain_api.settings.allow_test_notifications", False), \
+                patch("domain_api.send_configured_sms") as send:
+            response = self.client.post("/api/domains/notification/sms/test")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("ALLOW_TEST_NOTIFICATIONS", response.json()["detail"])
+        send.assert_not_called()
+
+    def test_manual_tests_can_be_allowed_while_automatic_notifications_stay_off(self):
+        self.client.put("/api/domains/notification", json={**SMS_SETTINGS, "webhook_url": DOMAIN_URL}).raise_for_status()
+        self.client.patch("/api/domains/1/state", json={"notify_sms": True}).raise_for_status()
+        with self.sessions() as db:
+            domain = db.query(MonitoredDomain).one()
+            domain_monitor.queue_alert(db, domain, "domain_critical", "- 权威 DNS：异常", datetime.now())
+            db.commit()
+        with patch.object(domain_monitor, "SessionLocal", self.sessions), \
+                patch("domain_api.settings.disable_notifications", True), \
+                patch("domain_api.settings.allow_test_notifications", True), \
+                patch("domain_api.send_configured_sms", return_value=SmsResult(True, biz_id="901")) as test_sms, \
+                patch("domain_monitor.send_configured_sms") as alert_sms, \
+                patch("notification.requests.post") as post:
+            post.return_value.status_code = 200
+            post.return_value.json.return_value = {"errcode": 0}
+            sms = self.client.post("/api/domains/notification/sms/test")
+            dingtalk = self.client.post("/api/domains/notification/test", json={"alert_type": "domain_warning"})
+            domain_monitor.deliver_pending()   # the automatic path still obeys DISABLE_NOTIFICATIONS
+        self.assertEqual((sms.status_code, dingtalk.status_code), (200, 200))
+        test_sms.assert_called_once()
+        self.assertEqual(post.call_count, 1)
+        alert_sms.assert_not_called()
+        with self.sessions() as db:
+            self.assertEqual(db.query(DomainAlert).one().delivery_status, "pending")
+            self.assertEqual(db.query(DomainAlertDelivery).filter_by(channel="sms").one().status, "pending")
+
+    def test_dingtalk_test_reports_disabled_environment_clearly(self):
+        self.client.put("/api/domains/notification", json={"webhook_url": DOMAIN_URL}).raise_for_status()
+        with patch("domain_api.settings.disable_notifications", True), \
+                patch("domain_api.settings.allow_test_notifications", False), \
+                patch("notification.requests.post") as post:
+            response = self.client.post("/api/domains/notification/test", json={"alert_type": "domain_warning"})
+        self.assertEqual(response.status_code, 503)
+        post.assert_not_called()
+
+    def test_alert_list_exposes_sms_delivery_separately_from_dingtalk(self):
+        with self.sessions() as db:
+            domain = db.query(MonitoredDomain).one()
+            event = DomainAlert(
+                domain_id=domain.id, domain_name=domain.name, alert_type="domain_critical",
+                message="confirmed failure", delivery_status="sent", is_sent=True,
+                created_at=datetime.now(),
+            )
+            db.add(event)
+            db.flush()
+            db.add(DomainAlertDelivery(
+                domain_alert_id=event.id, channel="sms",
+                status="failed", attempts=2, last_error="isv.MOBILE_NUMBER_ILLEGAL: 号码格式错误", created_at=datetime.now(),
+            ))
+            db.commit()
+
+            from main import get_alerts
+            for source in ("domain", None):
+                with self.subTest(source=source):
+                    result = asyncio.run(get_alerts(
+                        db=db, hours=24, page=1, page_size=20, source=source,
+                        current_user=SimpleNamespace(is_admin=True),
+                    ))
+                    item = result["items"][0]
+                    self.assertEqual(item["delivery_status"], "sent")
+                    self.assertEqual(item["sms_delivery_status"], "failed")
+                    self.assertEqual(item["sms_delivery_error"], "isv.MOBILE_NUMBER_ILLEGAL: 号码格式错误")
+
+    def test_dingtalk_switch_does_not_stop_sms_until_sms_is_off(self):
+        self.client.put("/api/domains/notification", json=SMS_SETTINGS).raise_for_status()
+        with self.sessions() as db:
+            config = db.query(SystemConfig).one()
+            domain = db.query(MonitoredDomain).one()
+            domain.notify_sms = True
+            event = DomainAlert(
+                domain_id=domain.id, domain_name=domain.name, alert_type="domain_critical",
+                message="test", delivery_status="pending", created_at=datetime.now(),
+            )
+            db.add(event)
+            db.flush()
+            delivery = DomainAlertDelivery(
+                domain_alert_id=event.id, channel="sms",
+                status="pending", next_attempt_at=datetime.now(), created_at=datetime.now(),
+            )
+            db.add(delivery)
+            db.commit()
+            delivery_id = delivery.id
+
+        self.client.patch("/api/domains/1/state", json={"notify": False}).raise_for_status()
+        with self.sessions() as db:
+            self.assertEqual(db.get(DomainAlertDelivery, delivery_id).status, "pending")
+
+        self.client.patch("/api/domains/1/state", json={"notify_sms": False}).raise_for_status()
+        with self.sessions() as db:
+            delivery = db.get(DomainAlertDelivery, delivery_id)
+            self.assertEqual(delivery.status, "disabled")
+            self.assertIsNone(delivery.next_attempt_at)
 
     def test_invalid_policy_and_webhook_are_rejected_before_saving(self):
         for payload in ({"dns_interval": 0}, {"rdap_interval": 1441}, {"confirmation_count": 11},

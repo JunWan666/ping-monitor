@@ -132,6 +132,12 @@ class SystemConfig(Base):
     domain_expiry_days = Column(String(64), default=','.join(map(str, DEFAULT_DOMAIN_EXPIRY_DAYS)), nullable=False)
     domain_webhook_url = Column(String(1000), nullable=True)
     domain_webhook_secret = Column(String(255), nullable=True)
+    # Alibaba Cloud SMS for domain alerts (设置 → 域名通知). The secret is write-only through the API.
+    sms_access_key_id = Column(String(128), nullable=True)
+    sms_access_key_secret = Column(String(255), nullable=True)
+    sms_sign_name = Column(String(64), nullable=True)
+    sms_template_code = Column(String(64), nullable=True)
+    sms_phone_numbers = Column(Text, nullable=True)
     report_webhook_url = Column(String(1000), nullable=True)
     report_webhook_secret = Column(String(255), nullable=True)
     daily_report_enabled = Column(Boolean, default=False, nullable=False)
@@ -152,6 +158,7 @@ class MonitoredDomain(Base):
     expected_ns = Column(JSON, default=list, nullable=False)
     records = Column(JSON, default=list, nullable=False)
     notify = Column(Boolean, default=True, nullable=False)
+    notify_sms = Column(Boolean, default=False, nullable=False)
     reminder_minutes = Column(Integer, default=30, nullable=False)
     checks = Column(JSON, default=dict, nullable=False)
     manual_expiry = Column(Date, nullable=True)
@@ -176,6 +183,24 @@ class DomainAlert(Base):
     attempts = Column(Integer, default=0, nullable=False)
     next_attempt_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
+
+
+class DomainAlertDelivery(Base):
+    __tablename__ = "domain_alert_deliveries"
+    __table_args__ = (
+        UniqueConstraint("domain_alert_id", "channel", name="uq_domain_delivery_alert_channel"),
+        Index("ix_domain_alert_deliveries_status_next", "status", "next_attempt_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    domain_alert_id = Column(Integer, index=True, nullable=False)
+    channel = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    next_attempt_at = Column(DateTime, nullable=True, index=True)
+    sent_at = Column(DateTime, nullable=True)
+    last_error = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
 
 
 class User(Base):

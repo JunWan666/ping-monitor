@@ -31,7 +31,7 @@
           />
           <RouterView v-else v-slot="{ Component }">
             <KeepAlive :max="6">
-              <component :is="Component" :key="route.fullPath" />
+              <component :is="Component" :key="route.name === 'AdminSettings' ? route.name : route.fullPath" />
             </KeepAlive>
           </RouterView>
         </main>
@@ -143,7 +143,7 @@
           </el-card>
           <RouterView v-else v-slot="{ Component }">
             <KeepAlive :max="6">
-              <component :is="Component" :key="route.fullPath" />
+              <component :is="Component" :key="route.name === 'AdminSettings' ? route.name : route.fullPath" />
             </KeepAlive>
           </RouterView>
         </el-main>
