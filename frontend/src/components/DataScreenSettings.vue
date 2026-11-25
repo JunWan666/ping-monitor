@@ -13,34 +13,38 @@
       </template>
       <el-form :model="config" label-position="top" class="datascreen-form">
         <template v-if="section === 'basic'">
-          <el-form-item label="大屏名称">
-            <el-input v-model="config.brand_name" maxlength="60" show-word-limit placeholder="输入大屏名称" />
-          </el-form-item>
-          <el-form-item label="主题颜色">
-            <el-select v-model="config.theme_color"><el-option v-for="theme in themes" :key="theme.value" v-bind="theme" /></el-select>
+          <el-form-item label="品牌名称">
+            <el-input v-model="config.brand_name" maxlength="60" show-word-limit placeholder="如 Acme" />
+            <p>显示在大屏左上角，也用于浏览器标题；留空时显示 ping。</p>
           </el-form-item>
           <el-form-item label="数据刷新间隔">
             <div class="datascreen-control"><el-input-number v-model="config.refresh_interval" :min="1" :max="60" :precision="0" /><span>秒</span></div>
+            <p>节点状态的轮询频率；告警流固定每 30 秒刷新。</p>
           </el-form-item>
           <el-form-item label="公开访问大屏">
             <div class="datascreen-control"><el-switch v-model="config.public_enabled" /><span>{{ config.public_enabled ? '游客可访问首页' : '仅后台预览可用' }}</span></div>
           </el-form-item>
         </template>
-        <el-form-item v-else-if="section === 'map'" label="高德地图 Key" class="datascreen-form__wide">
-          <el-input v-model="config.amap_key" placeholder="选填" clearable />
-          <p>使用高德底图时，请申请 Web 端 JS API Key，并在高德后台设置访问域名白名单。</p>
-          <el-link type="primary" :underline="false" @click="openAmapConsole">打开高德控制台</el-link>
-        </el-form-item>
-        <template v-else-if="section === '3d'">
-          <el-form-item label="启用 3D 效果"><el-switch v-model="config.enable_3d" /></el-form-item>
-          <el-form-item label="地图视角" class="datascreen-form__wide">
-            <div class="datascreen-control"><el-slider v-model="config.map_view_angle" :min="0" :max="90" :step="5" :disabled="!config.enable_3d" /><span>{{ config.map_view_angle }}°</span></div>
+        <template v-else-if="section === 'map'">
+          <el-form-item label="立体视角">
+            <div class="datascreen-control"><el-switch v-model="config.enable_3d" /><span>{{ config.enable_3d ? '倾斜地图 + 城市光柱（柱高 = 节点数）' : '平面地图，只显示节点光环' }}</span></div>
           </el-form-item>
-        </template>
-        <template v-else-if="section === 'animation'">
-          <el-form-item label="启用动画效果"><el-switch v-model="config.enable_animation" /></el-form-item>
-          <el-form-item label="背景粒子数量">
-            <div class="datascreen-control"><el-slider v-model="config.particle_count" :min="0" :max="1000" :step="50" :disabled="!config.enable_animation" /><span>{{ config.particle_count }}</span></div>
+          <el-form-item label="倾斜角度">
+            <div class="datascreen-control"><el-slider v-model="config.map_view_angle" :min="0" :max="MAX_TILT" :step="5" :disabled="!config.enable_3d" /><span>{{ config.map_view_angle }}°</span></div>
+            <p>0° 为正俯视，默认 40°。</p>
+          </el-form-item>
+          <el-form-item label="探测连线">
+            <div class="datascreen-control"><el-switch v-model="config.show_flow_lines" /><span>控制中心到各城市的连线与往返光点</span></div>
+          </el-form-item>
+          <el-form-item label="光点速度">
+            <div class="datascreen-control">
+              <el-slider v-model="config.flow_speed" :min="FLOW_SPEED.min" :max="FLOW_SPEED.max" :step="10" :format-tooltip="speedLabel" :disabled="!config.show_flow_lines || !config.enable_animation" />
+              <span>{{ speedLabel(config.flow_speed) }}</span>
+            </div>
+            <p>往左越慢，往右越快；1.0× 为标准（城市平均 RTT × 80 倍慢放），0.5× 慢一倍。</p>
+          </el-form-item>
+          <el-form-item label="动画效果">
+            <div class="datascreen-control"><el-switch v-model="config.enable_animation" /><span>{{ config.enable_animation ? '光柱扫描、彗星、告警脉冲等动效' : '静态显示，适合低性能设备' }}</span></div>
           </el-form-item>
         </template>
       </el-form>
@@ -59,17 +63,23 @@ import { View } from '@element-plus/icons-vue'
 import api from '../api'
 import { useViewport } from '../lib/useViewport'
 
-const AMAP_CONSOLE_URL = 'https://console.amap.com/dev/key/app'
-const openAmapConsole = () => window.open(AMAP_CONSOLE_URL, '_blank', 'noopener')
+// The screen clamps the tilt to 60°; steeper angles flatten the map into a sliver.
+const MAX_TILT = 60
+// Comet speed in percent of the standard pace; the API accepts 20–200.
+const FLOW_SPEED = { min: 20, max: 200 }
+const speedLabel = (value) => `${(Number(value) / 100).toFixed(1)}×${Number(value) === 100 ? ' 标准' : ''}`
 
+// theme_color, particle_count and amap_key belonged to the previous screen. They are not shown,
+// but are loaded and sent back unchanged so saving here never resets stored values.
 const defaultConfig = {
   brand_name: '',
   refresh_interval: 5,
   enable_3d: true,
   enable_animation: true,
-  map_view_angle: 45,
+  map_view_angle: 40,
   particle_count: 100,
   show_flow_lines: true,
+  flow_speed: 100,
   theme_color: 'blue',
   public_enabled: true,
   amap_key: ''
@@ -81,30 +91,19 @@ const section = ref('basic')
 const { isMobile } = useViewport()
 const loading = ref(false)
 const sections = [
-  { key: 'basic', label: '基础设置', description: '设置大屏名称、主题和访问范围。' },
-  { key: 'map', label: '地图底图', description: '默认使用中国矢量地图。配置 Key 后，大屏可手动切换高德。' },
-  { key: '3d', label: '3D 效果', description: '设置地图视角。' },
-  { key: 'animation', label: '动画效果', description: '调整数字滚动、图表过渡和背景粒子。' },
+  { key: 'basic', label: '基础设置', description: '设置品牌名称、刷新频率和访问范围。' },
+  { key: 'map', label: '地图与动效', description: '调整节点地图的视角、连线和动画。' },
   { key: 'preview', label: '后台预览', description: '在新标签页查看当前已保存的效果。' }
 ]
 const activeSection = computed(() => sections.find(item => item.key === section.value))
-const themes = [
-  { value: 'blue', label: '科技蓝' }, { value: 'green', label: '翠绿' }, { value: 'purple', label: '紫色' },
-  { value: 'red', label: '红色' }, { value: 'orange', label: '橙色' }
-]
 
-const normalizeConfig = (payload = {}) => ({
-  brand_name: payload.brand_name ?? defaultConfig.brand_name,
-  refresh_interval: payload.refresh_interval ?? defaultConfig.refresh_interval,
-  enable_3d: payload.enable_3d ?? defaultConfig.enable_3d,
-  enable_animation: payload.enable_animation ?? defaultConfig.enable_animation,
-  map_view_angle: payload.map_view_angle ?? defaultConfig.map_view_angle,
-  particle_count: payload.particle_count ?? defaultConfig.particle_count,
-  show_flow_lines: payload.show_flow_lines ?? defaultConfig.show_flow_lines,
-  theme_color: payload.theme_color ?? defaultConfig.theme_color,
-  public_enabled: payload.public_enabled ?? defaultConfig.public_enabled,
-  amap_key: payload.amap_key ?? defaultConfig.amap_key
-})
+const normalizeConfig = (payload = {}) => {
+  const next = {}
+  for (const key of Object.keys(defaultConfig)) next[key] = payload[key] ?? defaultConfig[key]
+  next.map_view_angle = Math.min(MAX_TILT, Math.max(0, Number(next.map_view_angle) || 0))
+  next.flow_speed = Math.min(FLOW_SPEED.max, Math.max(FLOW_SPEED.min, Number(next.flow_speed) || defaultConfig.flow_speed))
+  return next
+}
 
 const loadConfig = async () => {
   loading.value = true
@@ -150,19 +149,19 @@ onMounted(() => {
 .datascreen-settings__card :deep(.el-card__body) > .el-form { flex: 1 1 0; min-height: 0; }
 .datascreen-settings h3 { font-size: 17px; line-height: 1.3; }
 .datascreen-settings p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
-.datascreen-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 26px; }
+.datascreen-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 26px; align-content: start; }
 .datascreen-form :deep(.el-form-item) { min-width: 0; margin: 0; }
 .datascreen-form :deep(.el-form-item__label) { margin-bottom: 4px; font-weight: 600; line-height: 1.4; }
-.datascreen-form__wide { grid-column: 1 / -1; }
-.datascreen-form__wide :deep(.el-form-item__content) { display: block; }
+.datascreen-form :deep(.el-form-item__content) { display: block; }
 .datascreen-control { display: flex; align-items: center; width: 100%; gap: 10px; font-size: 12px; }
-.datascreen-control > span { flex-shrink: 0; }
+.datascreen-control > span { flex-shrink: 0; color: var(--el-text-color-regular); }
 .datascreen-control :deep(.el-input-number) { width: min(112px, 80%); }
 .datascreen-control :deep(.el-slider) { flex: 1; margin-inline: 8px; }
 .datascreen-settings__actions { margin-top: 18px; padding-top: 14px; }
 @media (max-width: 768px) { .datascreen-settings__card { flex: 1 1 0; }
   .datascreen-settings__card :deep(.el-card__header), .datascreen-settings__card :deep(.el-card__body) { padding: 10px 12px; }
-  .datascreen-form { gap: 10px; }
+  .datascreen-form { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .datascreen-control > span { flex-shrink: 1; }
   .datascreen-settings__actions { margin-top: 12px; padding-top: 8px; }
 }
 @media (max-width: 768px) and (max-height: 430px) and (orientation: landscape) {

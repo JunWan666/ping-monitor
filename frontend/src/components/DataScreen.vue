@@ -4,7 +4,7 @@
       ref="frameRef"
       class="ds-iframe"
       :src="frameSrc"
-      title="PING 节点实时监控中心"
+      title="节点实时态势大屏"
       allow="fullscreen"
       @load="onFrameLoad"
     ></iframe>
@@ -48,7 +48,7 @@ const onFrameLoad = () => {
   min-height: 0;
   overflow: hidden;
   border-radius: var(--radius-md, 10px);
-  background: #03060e;
+  background: #0a0a0a;
 }
 
 .ds-iframe {

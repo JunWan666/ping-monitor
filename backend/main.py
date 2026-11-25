@@ -595,6 +595,7 @@ def build_datascreen_payload(db: Session, screen_config: DataScreenConfig) -> di
         "map_view_angle": screen_config.map_view_angle,
         "particle_count": screen_config.particle_count,
         "show_flow_lines": screen_config.show_flow_lines,
+        "flow_speed": screen_config.flow_speed or FLOW_SPEED_DEFAULT,
         "theme_color": screen_config.theme_color,
         "public_enabled": screen_config.public_enabled,
         "amap_key": screen_config.amap_key or "",
@@ -2041,9 +2042,14 @@ class DataScreenConfigUpdate(BaseModel):
     map_view_angle: Optional[int] = None
     particle_count: Optional[int] = None
     show_flow_lines: Optional[bool] = None
+    flow_speed: Optional[int] = None
     theme_color: Optional[str] = None
     public_enabled: Optional[bool] = None
     amap_key: Optional[str] = None
+
+
+FLOW_SPEED_DEFAULT = 100
+FLOW_SPEED_RANGE = (20, 200)
 
 
 class DataScreenConfigResponse(BaseModel):
@@ -2055,6 +2061,7 @@ class DataScreenConfigResponse(BaseModel):
     map_view_angle: int
     particle_count: int
     show_flow_lines: bool
+    flow_speed: int = FLOW_SPEED_DEFAULT
     theme_color: str
     public_enabled: bool
     amap_key: str = ""
@@ -2106,6 +2113,12 @@ async def update_datascreen_config(
 
     if config_update.show_flow_lines is not None:
         config.show_flow_lines = config_update.show_flow_lines
+
+    if config_update.flow_speed is not None:
+        low, high = FLOW_SPEED_RANGE
+        if not low <= config_update.flow_speed <= high:
+            raise HTTPException(status_code=400, detail=f"光点速度必须在 {low}%-{high}% 之间")
+        config.flow_speed = config_update.flow_speed
 
     if config_update.theme_color is not None:
         if config_update.theme_color not in ["blue", "green", "purple", "red", "orange"]:

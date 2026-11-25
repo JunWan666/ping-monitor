@@ -260,6 +260,8 @@ class DataScreenConfig(Base):
     map_view_angle = Column(Integer, default=45, nullable=False)
     particle_count = Column(Integer, default=100, nullable=False)
     show_flow_lines = Column(Boolean, default=True, nullable=False)
+    # 探测连线上往返光点的速度，百分比：100 = 标准（城市平均 RTT × 80 倍慢放），50 = 慢一倍
+    flow_speed = Column(Integer, default=100, nullable=False)
     theme_color = Column(String(20), default="blue", nullable=False)
     public_enabled = Column(Boolean, default=True, nullable=False)
     # 高德 JS API Key：开源仓库不携带任何第三方密钥，由部署者在后台自行填写；
