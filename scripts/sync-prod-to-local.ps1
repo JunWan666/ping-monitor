@@ -66,6 +66,16 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-LocalMysqlQuery {
+    param([string]$Sql)
+
+    $output = & docker exec -e "MYSQL_PWD=$LocalMysqlRootPassword" $LocalMysqlContainer mysql -uroot -N -B $LocalDatabase -e $Sql
+    if ($LASTEXITCODE -ne 0) {
+        throw "Local MySQL query failed: $Sql"
+    }
+    return @($output | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+}
+
 Require-Command ssh
 Require-Command scp
 Require-Command docker
@@ -151,18 +161,40 @@ try {
         "gunzip -c /tmp/$dumpName | mysql -uroot $LocalDatabase"
     )
 
-    Write-Host "Disabling notification settings inside local database ..."
-    $sanitizeSql = "UPDATE system_config SET serverchan_key = NULL, webhook_url = NULL, webhook_secret = NULL, report_webhook_url = NULL, report_webhook_secret = NULL, daily_report_enabled = 0, weekly_report_enabled = 0, monthly_report_enabled = 0, notification_mode = 'status_change';"
-    Invoke-Checked -FilePath "docker" -ArgumentList @(
-        "exec",
-        "-e", "MYSQL_PWD=$LocalMysqlRootPassword",
-        $LocalMysqlContainer,
-        "mysql",
-        "-uroot",
-        $LocalDatabase,
-        "-e",
-        $sanitizeSql
+    Write-Host "Clearing notification targets and credentials inside local database ..."
+    # Every system_config column that lets the app push outside this machine.
+    $secretColumns = @(
+        "serverchan_key",
+        "webhook_url", "webhook_secret",                      # host alerts (DingTalk)
+        "domain_webhook_url", "domain_webhook_secret",        # domain alerts (DingTalk)
+        "report_webhook_url", "report_webhook_secret",        # reports (DingTalk)
+        "sms_access_key_id", "sms_access_key_secret",         # domain alerts (Aliyun SMS)
+        "sms_sign_name", "sms_template_code", "sms_phone_numbers"
     )
+    $reportSwitches = @("daily_report_enabled", "weekly_report_enabled", "monthly_report_enabled")
+
+    # An older production schema may not have the domain/SMS columns yet; only touch the ones that exist.
+    # Columns the app adds later on startup are created empty.
+    $wanted = ($secretColumns + $reportSwitches + @("notification_mode") | ForEach-Object { "'$_'" }) -join ", "
+    $existing = Invoke-LocalMysqlQuery "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'system_config' AND COLUMN_NAME IN ($wanted);"
+    $presentSecrets = @($secretColumns | Where-Object { $existing -contains $_ })
+    if ($presentSecrets.Count -eq 0) {
+        throw "system_config has none of the expected notification columns; local app was not started"
+    }
+
+    $assignments = @($presentSecrets | ForEach-Object { "$_ = NULL" })
+    $assignments += @($reportSwitches | Where-Object { $existing -contains $_ } | ForEach-Object { "$_ = 0" })
+    if ($existing -contains "notification_mode") {
+        $assignments += "notification_mode = 'status_change'"
+    }
+    Invoke-LocalMysqlQuery "UPDATE system_config SET $($assignments -join ', ');" | Out-Null
+
+    $leftCheck = ($presentSecrets | ForEach-Object { "COALESCE($_, '') <> ''" }) -join " OR "
+    $left = Invoke-LocalMysqlQuery "SELECT COUNT(*) FROM system_config WHERE $leftCheck;"
+    if ($left.Count -ne 1 -or $left[0] -ne "0") {
+        throw "Notification credentials are still present in local system_config; local app was not started"
+    }
+    Write-Host "Cleared: $($presentSecrets -join ', ')"
 
     Write-Host "Flushing local Redis cache if available ..."
     & docker exec $LocalRedisContainer redis-cli FLUSHDB *> $null
