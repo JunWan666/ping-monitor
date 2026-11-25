@@ -4,16 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pulse · 节点实时态势</title>
-<link rel="preload" href="fonts/ubuntu-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="fonts/ubuntu-mono-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/bigscreen/fonts/ubuntu-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/bigscreen/fonts/ubuntu-mono-400.woff2" as="font" type="font/woff2" crossorigin>
 <style>
 /* Ubuntu / Ubuntu Mono, Latin subset, bundled under fonts/ (Ubuntu Font Licence 1.0, see fonts/UFL.txt).
-   No request leaves the deployment; CJK text keeps using the system fonts in --sans. */
-@font-face{font-family:Ubuntu;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ubuntu-400.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
-@font-face{font-family:Ubuntu;font-style:normal;font-weight:500;font-display:swap;src:url(fonts/ubuntu-500.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
-@font-face{font-family:Ubuntu;font-style:normal;font-weight:700;font-display:swap;src:url(fonts/ubuntu-700.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
-@font-face{font-family:"Ubuntu Mono";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ubuntu-mono-400.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
-@font-face{font-family:"Ubuntu Mono";font-style:normal;font-weight:700;font-display:swap;src:url(fonts/ubuntu-mono-700.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+   No request leaves the deployment; CJK text keeps using the system fonts in --sans.
+   Absolute paths: a reverse proxy may serve this page at "/" (e.g. proxy_pass .../bigscreen/index.html),
+   where a relative "fonts/..." would resolve to "/fonts/..." and miss. */
+@font-face{font-family:Ubuntu;font-style:normal;font-weight:400;font-display:swap;src:url(/bigscreen/fonts/ubuntu-400.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Ubuntu;font-style:normal;font-weight:500;font-display:swap;src:url(/bigscreen/fonts/ubuntu-500.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Ubuntu;font-style:normal;font-weight:700;font-display:swap;src:url(/bigscreen/fonts/ubuntu-700.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Ubuntu Mono";font-style:normal;font-weight:400;font-display:swap;src:url(/bigscreen/fonts/ubuntu-mono-400.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Ubuntu Mono";font-style:normal;font-weight:700;font-display:swap;src:url(/bigscreen/fonts/ubuntu-mono-700.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 :root{
   --page:#0a0a0a; --panel:#131313; --panel-2:#1a1a1a; --panel-3:#222221;
   --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.13);
