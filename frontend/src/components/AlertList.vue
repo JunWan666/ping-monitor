@@ -45,6 +45,7 @@
           <el-select v-model="alertTypeFilter" placeholder="告警类型" clearable @change="handleFilterChange">
             <el-option label="丢包告警" value="packet_loss" />
             <el-option label="主机不可达" value="unreachable" />
+            <el-option label="主机恢复" value="recovery" />
             <el-option v-for="(item, key) in domainTypes" :key="key" :label="item[0]" :value="key" />
           </el-select>
           <el-select v-model="sentStatusFilter" placeholder="发送状态" clearable @change="handleFilterChange">
@@ -130,6 +131,7 @@
             <el-select v-model="alertTypeFilter" placeholder="告警类型" clearable style="width: 140px" @change="handleFilterChange">
               <el-option label="丢包告警" value="packet_loss" />
               <el-option label="主机不可达" value="unreachable" />
+              <el-option label="主机恢复" value="recovery" />
               <el-option v-for="(item, key) in domainTypes" :key="key" :label="item[0]" :value="key" />
             </el-select>
             <el-select v-model="sentStatusFilter" placeholder="发送状态" clearable style="width: 130px" @change="handleFilterChange">
@@ -151,6 +153,7 @@
           <template #default="{ row }">
             <el-tag v-if="row.alert_type === 'packet_loss'" type="warning">丢包告警</el-tag>
             <el-tag v-else-if="row.alert_type === 'unreachable'" type="danger">主机不可达</el-tag>
+            <el-tag v-else-if="row.alert_type === 'recovery'" type="success">主机恢复</el-tag>
             <el-tag v-else-if="domainTypes[row.alert_type]" :type="domainTypes[row.alert_type][1]">{{ domainTypes[row.alert_type][0] }}</el-tag>
             <el-tag v-else type="info">{{ row.alert_type }}</el-tag>
           </template>
